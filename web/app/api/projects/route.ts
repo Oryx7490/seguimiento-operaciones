@@ -39,7 +39,7 @@ export async function GET(req: NextRequest) {
                     (SELECT count(*) FROM project_phases ph2 WHERE ph2.project_id = p.id) AS phase_count,
                     (SELECT min(ph2.planned_start_date) FROM project_phases ph2 WHERE ph2.project_id = p.id) AS min_phase_start,
                     (SELECT max(ph2.planned_end_date)   FROM project_phases ph2 WHERE ph2.project_id = p.id) AS max_phase_end,
-                    (SELECT bool_and(ph2.status = 'completed') FROM project_phases ph2 WHERE ph2.project_id = p.id) AS all_phases_completed
+                    (SELECT bool_and(ph2.status IN ('completed', 'not_applicable')) FROM project_phases ph2 WHERE ph2.project_id = p.id) AS all_phases_completed
              FROM projects p
              LEFT JOIN clients c ON c.id = p.client_id
              LEFT JOIN locations l ON l.id = p.location_id

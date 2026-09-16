@@ -96,7 +96,7 @@ export interface ProjectPhase {
   planned_end_date: string | null;
   actual_start_date: string | null;
   actual_end_date: string | null;
-  status: "not_started" | "in_progress" | "completed" | "blocked";
+  status: "not_started" | "in_progress" | "completed" | "blocked" | "not_applicable";
   blocked_reason: string | null;
   next_action: string | null;
   next_action_date: string | null;

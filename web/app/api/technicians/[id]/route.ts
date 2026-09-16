@@ -20,19 +20,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   const sets: string[] = [];
-  const values: unknown[] = [];
+  const values: unknown[] = [id];
   const push = (sql: string, val: unknown) => {
     sets.push(sql);
     values.push(val);
   };
   if (typeof body.display_name === "string" && body.display_name.trim()) {
-    push("display_name = $2", body.display_name.trim());
+    push(`display_name = $${values.length + 1}`, body.display_name.trim());
   }
-  if (typeof body.phone === "string") push("phone = $2", body.phone.trim() || null);
+  if (typeof body.phone === "string") push(`phone = $${values.length + 1}`, body.phone.trim() || null);
   if (Array.isArray(body.specialties)) {
-    push("specialties = $2", body.specialties.map((s) => String(s).trim()).filter(Boolean));
+    push(`specialties = $${values.length + 1}`, body.specialties.map((s) => String(s).trim()).filter(Boolean));
   }
-  if (typeof body.active === "boolean") push("active = $2", body.active);
+  if (typeof body.active === "boolean") push(`active = $${values.length + 1}`, body.active);
 
   const client = await pool.connect();
   try {
@@ -42,7 +42,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (sets.length > 0) {
       const res = await client.query(
         `UPDATE technicians SET ${sets.join(", ")} WHERE id = $1 RETURNING id, user_id, display_name, phone, specialties, active`,
-        [id, ...values]
+        values
       );
       if (res.rows.length === 0) {
         await client.query("ROLLBACK");

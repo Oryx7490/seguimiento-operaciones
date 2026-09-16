@@ -85,6 +85,7 @@ export function phaseStatusLabel(status: string): string {
     in_progress: "En progreso",
     completed: "Completado",
     blocked: "Bloqueado",
+    not_applicable: "No aplica",
   };
   return map[status] ?? status;
 }

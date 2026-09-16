@@ -21,9 +21,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   const sets: string[] = [];
-  const values: unknown[] = [];
+  const values: unknown[] = [id];
   const push = (col: string, val: unknown) => {
-    sets.push(`${col} = $2`);
+    sets.push(`${col} = $${values.length + 1}`);
     values.push(val);
   };
   if (typeof body.client_id === "string") push("client_id", body.client_id || null);
@@ -39,7 +39,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const { rows } = await pool.query(
       `UPDATE locations SET ${sets.join(", ")} WHERE id = $1
        RETURNING id, client_id, name, address, city, site_contact, active`,
-      [id, ...values]
+      values
     );
     if (rows.length === 0) return jsonError("ubicación no encontrada", 404);
     return jsonOk({ location: rows[0] });

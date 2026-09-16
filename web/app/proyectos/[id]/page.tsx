@@ -38,7 +38,7 @@ const PROJECT_TRANSITIONS: Record<string, string[]> = {
 
 const HEALTH_OPTIONS = ["on_time", "at_risk", "blocked", "no_update"];
 
-const PHASE_STATUS_OPTIONS = ["not_started", "in_progress", "completed", "blocked"];
+const PHASE_STATUS_OPTIONS = ["not_started", "in_progress", "completed", "blocked", "not_applicable"];
 
 export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -123,7 +123,7 @@ export default function ProjectDetailPage() {
               </thead>
               <tbody className="divide-y divide-zinc-100">
                 {detail.phases.map((ph) => (
-                  <tr key={ph.id} className="hover:bg-zinc-50">
+                  <tr key={ph.id} className={ph.status === "not_applicable" ? "opacity-50" : "hover:bg-zinc-50"}>
                     <td className="px-3 py-2 font-medium text-zinc-800">{ph.name}</td>
                     <td className="px-3 py-2"><StatusBadge status={ph.status} kind="phase" /></td>
                     <td className="px-3 py-2 text-zinc-500">{formatDate(ph.planned_start_date)}</td>

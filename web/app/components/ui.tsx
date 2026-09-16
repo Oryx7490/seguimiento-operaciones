@@ -43,6 +43,15 @@ const PHASE_BADGE: Record<string, string> = {
   in_progress: "bg-blue-100 text-blue-700",
   completed: "bg-emerald-100 text-emerald-700",
   blocked: "bg-rose-100 text-rose-700",
+  not_applicable: "bg-zinc-100 text-zinc-500",
+};
+
+const PHASE_LABEL: Record<string, string> = {
+  not_started: "No iniciado",
+  in_progress: "En progreso",
+  completed: "Completado",
+  blocked: "Bloqueado",
+  not_applicable: "No aplica",
 };
 
 export function StatusBadge({
@@ -64,7 +73,7 @@ export function StatusBadge({
     <span
       className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold leading-tight ${map[status] ?? "bg-zinc-100 text-zinc-600"}`}
     >
-      {status.replace(/_/g, " ")}
+      {kind === "phase" ? (PHASE_LABEL[status] ?? status) : status.replace(/_/g, " ")}
     </span>
   );
 }

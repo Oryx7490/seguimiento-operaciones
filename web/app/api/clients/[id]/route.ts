@@ -20,9 +20,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   const sets: string[] = [];
-  const values: unknown[] = [];
+  const values: unknown[] = [id];
   const push = (col: string, val: unknown) => {
-    sets.push(`${col} = $2`);
+    sets.push(`${col} = $${values.length + 1}`);
     values.push(val);
   };
   if (typeof body.name === "string" && body.name.trim()) push("name", body.name.trim());
@@ -37,7 +37,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const { rows } = await pool.query(
       `UPDATE clients SET ${sets.join(", ")} WHERE id = $1
        RETURNING id, name, contact_name, contact_email, contact_phone, active`,
-      [id, ...values]
+      values
     );
     if (rows.length === 0) return jsonError("cliente no encontrado", 404);
     return jsonOk({ client: rows[0] });
