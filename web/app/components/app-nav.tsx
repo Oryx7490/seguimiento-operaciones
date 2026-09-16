@@ -9,6 +9,7 @@ const NAV = [
   { href: "/tecnico", label: "Mi agenda móvil" },
   { href: "/proyectos", label: "Proyectos" },
   { href: "/tickets", label: "Tickets" },
+  { href: "/ayuda", label: "Ayuda" },
   { href: "/admin", label: "Configuración" },
 ] as const;
 
