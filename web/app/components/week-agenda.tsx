@@ -253,9 +253,6 @@ function ActivityCard({ activity, onClick }: { activity: Activity; onClick: () =
   const code = activity.kind === "project" ? activity.projects[0]?.project_code
     : activity.kind === "ticket" ? activity.ticket_code
     : activity.internal_activity_type_name?.slice(0, 10);
-  const label = activity.kind === "project" ? activity.projects[0]?.project_name
-    : activity.kind === "ticket" ? activity.ticket_title
-    : activity.internal_activity_type_name;
   const hours = activity.worked_hours > 0
     ? `${activity.worked_hours}h / ${activity.planned_hours}h plan`
     : `${activity.planned_hours}h plan`;
@@ -267,7 +264,7 @@ function ActivityCard({ activity, onClick }: { activity: Activity; onClick: () =
         <span className={`max-w-[80%] truncate rounded px-1 text-[10px] font-semibold ${kind.chip}`}>{code}</span>
         <span className={`h-2 w-2 shrink-0 rounded-full ${meta.dot}`} title={meta.label} />
       </div>
-      <p className="truncate text-[11px] font-medium leading-tight text-zinc-800">{label}</p>
+      <p className="truncate text-[11px] font-medium leading-tight text-zinc-800">{activity.description}</p>
       <p className="truncate text-[10px] text-zinc-500">{activity.client_name ?? "—"}</p>
       <div className="flex items-center justify-between text-[10px] text-zinc-600">
         <span>{hours}</span>

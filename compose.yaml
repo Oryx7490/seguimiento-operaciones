@@ -55,6 +55,7 @@ services:
     build:
       context: ./web
     environment:
+      NODE_ENV: production
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       S3_ACCESS_KEY: ${S3_ACCESS_KEY}
       S3_SECRET_KEY: ${S3_SECRET_KEY}
@@ -64,6 +65,9 @@ services:
       SESSION_SECRET: ${SESSION_SECRET}
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8080}
       DEFAULT_TIMEZONE: ${DEFAULT_TIMEZONE:-America/Mexico_City}
+    # Producción (next start). next dev+Turbopack (16.3.5) no hidrata componentes
+    # cliente y next build falla con NODE_ENV != production; por eso build+start.
+    command: ["sh", "-lc", "npm run build && exec npm start"]
     ports:
       - "127.0.0.1:8080:3000"
       - "${TAILSCALE_IP:-127.0.0.1}:8080:3000"
