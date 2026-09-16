@@ -16,6 +16,8 @@ import {
   TextInput,
 } from "@/app/components/ui";
 import CommentSection from "@/app/components/comment-section";
+import AttachmentsSection from "@/app/components/attachments-section";
+import ProjectClosure from "@/app/components/project-closure";
 import type {
   ProjectDetail,
   ProjectPhase,
@@ -187,6 +189,18 @@ export default function ProjectDetailPage() {
           </ul>
         )}
       </section>
+
+      {/* Cierre */}
+      <ProjectClosure
+        projectId={id}
+        status={detail.project.status}
+        closure={detail.closure as never}
+        attachments={detail.attachments}
+        onChanged={reload}
+      />
+
+      {/* Adjuntos */}
+      <AttachmentsSection projectId={id} initial={detail.attachments} onChanged={reload} />
 
       {/* Comments */}
       <CommentSection kind="project" entityId={id} comments={detail.comments} onSaved={reload} />

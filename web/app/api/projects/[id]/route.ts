@@ -116,6 +116,22 @@ interface PhasePatch {
   }>;
 }
 
+interface ClosurePatch {
+  closure?: {
+    installation_done?: boolean;
+    mandatory_activities_completed?: boolean;
+    hours_justified?: boolean;
+    delivery_sheet_attachment_id?: string | null;
+    receiver_name?: string | null;
+    reception_date?: string | null;
+    finiquito_attachment_id?: string | null;
+    fiscal_complement_attachment_id?: string | null;
+    digital_signature_attachment_id?: string | null;
+    final_note?: string | null;
+  };
+  close_project?: boolean;
+}
+
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!parseId(id)) return jsonError("id inválido");
@@ -137,7 +153,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     next_action_date?: string | null;
     reason?: string;
     actor_id?: string;
-  } & PhasePatch;
+  } & PhasePatch & ClosurePatch;
   try {
     body = await req.json();
   } catch {
@@ -245,6 +261,79 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             [id, ph.name.trim(), ph.catalog_phase_id || null, ph.sort_order ?? 0, ph.owner_id || null, ph.planned_start_date || null, ph.planned_end_date || null]
           );
         }
+      }
+    }
+
+    if (body.closure) {
+      const cols: string[] = [];
+      const vals: unknown[] = [];
+      const cpush = (col: string, val: unknown) => {
+        cols.push(col);
+        vals.push(val);
+      };
+      const c = body.closure;
+      if (typeof c.installation_done === "boolean") cpush("installation_done", c.installation_done);
+      if (typeof c.mandatory_activities_completed === "boolean") cpush("mandatory_activities_completed", c.mandatory_activities_completed);
+      if (typeof c.hours_justified === "boolean") cpush("hours_justified", c.hours_justified);
+      if (c.delivery_sheet_attachment_id !== undefined) cpush("delivery_sheet_attachment_id", c.delivery_sheet_attachment_id || null);
+      if (c.receiver_name !== undefined) cpush("receiver_name", c.receiver_name?.trim() || null);
+      if (c.reception_date !== undefined) cpush("reception_date", c.reception_date || null);
+      if (c.finiquito_attachment_id !== undefined) cpush("finiquito_attachment_id", c.finiquito_attachment_id || null);
+      if (c.fiscal_complement_attachment_id !== undefined) cpush("fiscal_complement_attachment_id", c.fiscal_complement_attachment_id || null);
+      if (c.digital_signature_attachment_id !== undefined) cpush("digital_signature_attachment_id", c.digital_signature_attachment_id || null);
+      if (c.final_note !== undefined) cpush("final_note", c.final_note?.trim() || null);
+      if (cols.length > 0) {
+        await client.query(
+          `INSERT INTO project_closures (project_id, ${cols.join(", ")})
+           VALUES ($1, ${cols.map((_, i) => `$${i + 2}`).join(", ")})
+           ON CONFLICT (project_id) DO UPDATE SET ${cols.map((col) => `${col} = EXCLUDED.${col}`).join(", ")}`,
+          [id, ...vals]
+        );
+      }
+    }
+
+    if (body.close_project) {
+      const { rows: closureRows } = await client.query(
+        `SELECT * FROM project_closures WHERE project_id = $1`,
+        [id]
+      );
+      const c = closureRows[0];
+      const missing: string[] = [];
+      if (!c) {
+        missing.push(
+          "Instalación realizada",
+          "Actividades obligatorias completadas",
+          "Horas justificadas",
+          "Hoja de entrega firmada adjunta",
+          "Nombre de quien recibe",
+          "Fecha de recepción"
+        );
+      } else {
+        if (!c.installation_done) missing.push("Instalación realizada");
+        if (!c.mandatory_activities_completed) missing.push("Actividades obligatorias completadas");
+        if (!c.hours_justified) missing.push("Horas justificadas");
+        if (!c.delivery_sheet_attachment_id) missing.push("Hoja de entrega firmada adjunta");
+        if (!c.receiver_name) missing.push("Nombre de quien recibe");
+        if (!c.reception_date) missing.push("Fecha de recepción");
+      }
+      if (missing.length > 0) {
+        await client.query("ROLLBACK");
+        return jsonError(`El proyecto no se cierra: falta ${missing.join("; ")}`);
+      }
+      await client.query(
+        `UPDATE projects SET status = 'closed', version = version + 1 WHERE id = $1`,
+        [id]
+      );
+      await client.query(
+        `UPDATE project_closures SET closed_by = $2, closed_at = now() WHERE project_id = $1`,
+        [id, actorId]
+      );
+      if (actorId) {
+        await client.query(
+          `INSERT INTO status_history (entity_type, entity_id, from_status, to_status, changed_by, reason)
+           VALUES ('project', $1, $2, 'closed', $3, 'Cierre de proyecto')`,
+          [id, fromStatus, actorId]
+        );
       }
     }
 

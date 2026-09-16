@@ -16,6 +16,7 @@ import {
   TextInput,
 } from "@/app/components/ui";
 import CommentSection from "@/app/components/comment-section";
+import AttachmentsSection from "@/app/components/attachments-section";
 import type { Technician, TechniciansResponse, TicketDetail } from "@/app/lib/types";
 
 const TICKET_STATUS_FLOW = [
@@ -147,6 +148,9 @@ export default function TicketDetailPage() {
           </ul>
         )}
       </section>
+
+      {/* Adjuntos */}
+      <AttachmentsSection ticketId={id} initial={detail.attachments} onChanged={reload} />
 
       {/* Comments */}
       <CommentSection kind="ticket" entityId={id} comments={detail.comments} onSaved={reload} />

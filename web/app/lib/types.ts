@@ -147,6 +147,8 @@ export interface Attachment {
   uploaded_by: string;
   uploaded_by_name: string;
   created_at: string;
+  attachment_type?: string;
+  size_bytes?: number | null;
 }
 
 export interface Ticket {
