@@ -1,0 +1,26 @@
+# Secretos y entorno
+.env
+.env.local
+*.pem
+
+# Node
+node_modules/
+.next/
+out/
+dist/
+coverage/
+
+# Respaldos locales
+db/backup/*.dump
+db/backup/*.tar.gz
+db/backup/restore-test/
+
+# Editor / SO
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Logs
+*.log
+npm-debug.log*
