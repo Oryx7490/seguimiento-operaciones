@@ -99,7 +99,7 @@ export default function GanttView() {
   const startRef = mondayRef();
 
   return (
-    <div className="min-h-screen bg-zinc-100 text-zinc-900">
+    <div className="bg-zinc-100 text-zinc-900">
       <header className="border-b border-zinc-200 bg-white px-4 py-3">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>

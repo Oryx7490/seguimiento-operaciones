@@ -92,7 +92,6 @@ export async function POST(req: NextRequest) {
 
   if (!title) return jsonError("title es obligatorio");
   if (!description) return jsonError("description es obligatorio");
-  if (!reportedBy) return jsonError("reported_by es obligatorio");
   if (type === "external" && !body.client_id) return jsonError("client es obligatorio para tickets externos");
 
   const actorId = await getActorId(body);

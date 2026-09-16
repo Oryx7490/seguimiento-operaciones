@@ -2,6 +2,19 @@ import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
 import { jsonOk, jsonError, parseId } from "@/app/lib/api";
 
+const PROJECT_STATUS = [
+  "new",
+  "planning",
+  "waiting_authorization",
+  "waiting_materials",
+  "assembly",
+  "ready_install",
+  "installation",
+  "pending_docs",
+  "closed",
+  "cancelled",
+];
+
 const HEALTH_STATUS = ["on_time", "at_risk", "blocked", "no_update"];
 
 async function getActorId(body?: { actor_id?: string }): Promise<string | null> {
@@ -49,7 +62,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         [id]
       ),
       pool.query(
-        `SELECT cm.id, cm.body, cm.created_at, cm.updated_at, u.name AS author_name
+        `SELECT cm.id, cm.author_id, cm.body, cm.created_at, cm.updated_at, u.name AS author_name
          FROM comments cm JOIN users u ON u.id = cm.author_id
          WHERE cm.project_id = $1 ORDER BY cm.created_at`,
         [id]
@@ -176,7 +189,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     const fromStatus = current.rows[0].status;
 
     if (typeof body.status === "string") {
-      if (!["new", "planning", "waiting_authorization", "waiting_materials", "assembly", "ready_install", "installation", "pending_docs", "closed", "cancelled"].includes(body.status)) {
+      if (!PROJECT_STATUS.includes(body.status)) {
         await client.query("ROLLBACK");
         return jsonError("status inválido");
       }
@@ -217,7 +230,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           if (ph.planned_end_date !== undefined) setPush("planned_end_date", ph.planned_end_date || null);
           if (ph.actual_start_date !== undefined) setPush("actual_start_date", ph.actual_start_date || null);
           if (ph.actual_end_date !== undefined) setPush("actual_end_date", ph.actual_end_date || null);
-          if (ph.status !== undefined) setPush("status", ph.status);
+          if (ph.status) setPush("status", ph.status);
           if (sets.length > 0) {
             await client.query(
               `UPDATE project_phases SET ${sets.join(", ")} WHERE id = $1 AND project_id = $2`,

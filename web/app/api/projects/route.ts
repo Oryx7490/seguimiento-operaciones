@@ -15,8 +15,6 @@ const PROJECT_STATUS = [
   "cancelled",
 ];
 
-const HEALTH_STATUS = ["on_time", "at_risk", "blocked", "no_update"];
-
 async function getActorId(body?: { actor_id?: string }): Promise<string | null> {
   if (body?.actor_id) {
     const { rows } = await pool.query(`SELECT id FROM users WHERE id = $1`, [body.actor_id]);

@@ -56,7 +56,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         [id]
       ),
       pool.query(
-        `SELECT cm.id, cm.body, cm.created_at, cm.updated_at, u.name AS author_name
+        `SELECT cm.id, cm.author_id, cm.body, cm.created_at, cm.updated_at, u.name AS author_name
          FROM comments cm JOIN users u ON u.id = cm.author_id
          WHERE cm.ticket_id = $1 ORDER BY cm.created_at`,
         [id]

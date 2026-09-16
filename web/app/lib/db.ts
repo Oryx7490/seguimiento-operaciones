@@ -1,8 +1,7 @@
 import { Pool } from "pg";
 
 declare global {
-  // eslint-disable-next-line no-var
-  var __dbPool: Pool | undefined;
+  var __dbPool: import("pg").Pool | undefined;
 }
 
 const connectionString =
