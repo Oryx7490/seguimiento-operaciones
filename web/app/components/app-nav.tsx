@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 
 const NAV = [
   { href: "/", label: "Agenda" },
   { href: "/gantt", label: "Gantt" },
   { href: "/pendientes", label: "Pendientes" },
+  { href: "/notificaciones", label: "Notificaciones" },
   { href: "/tecnico", label: "Mi agenda móvil" },
   { href: "/proyectos", label: "Proyectos" },
   { href: "/tickets", label: "Tickets" },
@@ -24,6 +26,25 @@ const ADMIN_SUB = [
 
 export default function AppNav() {
   const path = usePathname();
+  const [unread, setUnread] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      fetch("/api/notifications")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (!cancelled && d) setUnread(d.unread ?? 0);
+        })
+        .catch(() => {});
+    };
+    load();
+    const timer = setInterval(load, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, []);
 
   return (
     <div className="flex h-full min-h-screen w-52 shrink-0 flex-col border-r border-zinc-200 bg-white">
@@ -42,13 +63,18 @@ export default function AppNav() {
               <li key={href}>
                 <Link
                   href={href}
-                  className={`block rounded-md px-2.5 py-1.5 text-sm transition ${
+                  className={`flex items-center justify-between gap-2 rounded-md px-2.5 py-1.5 text-sm transition ${
                     active
                       ? "bg-zinc-900 font-medium text-white"
                       : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
                   }`}
                 >
-                  {label}
+                  <span>{label}</span>
+                  {href === "/notificaciones" && unread > 0 && (
+                    <span className="rounded-full bg-blue-500 px-1.5 text-[10px] font-bold leading-4 text-white">
+                      {unread}
+                    </span>
+                  )}
                 </Link>
               </li>
             );

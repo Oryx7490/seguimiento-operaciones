@@ -65,6 +65,15 @@ services:
       SESSION_SECRET: ${SESSION_SECRET}
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8080}
       DEFAULT_TIMEZONE: ${DEFAULT_TIMEZONE:-America/Mexico_City}
+      WORKER_TOKEN: ${WORKER_TOKEN:-}
+      SMTP_HOST: ${SMTP_HOST:-mailpit}
+      SMTP_PORT: ${SMTP_PORT:-1025}
+      SMTP_SECURE: ${SMTP_SECURE:-false}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-Seguimiento Ops <seguimiento@localhost>}
+      WHATSAPP_TOKEN: ${WHATSAPP_TOKEN:-}
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
     # Producción (next start). next dev+Turbopack (16.3.5) no hidrata componentes
     # cliente y next build falla con NODE_ENV != production; por eso build+start.
     command: ["sh", "-lc", "npm run build && exec npm start"]
@@ -93,6 +102,8 @@ services:
       MINIO_ENDPOINT: minio:9000
       S3_FORCE_PATH_STYLE: "true"
       DEFAULT_TIMEZONE: ${DEFAULT_TIMEZONE:-America/Mexico_City}
+      WORKER_TOKEN: ${WORKER_TOKEN}
+      WEB_INTERNAL_URL: http://web:3000
     volumes:
       - ./worker:/app
       - worker_node_modules:/app/node_modules
@@ -101,6 +112,18 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+      web:
+        condition: service_started
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit:latest
+    environment:
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+    ports:
+      - "127.0.0.1:8025:8025"
+      - "${TAILSCALE_IP:-127.0.0.1}:8025:8025"
     restart: unless-stopped
 
 volumes:

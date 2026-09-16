@@ -1,7 +1,15 @@
 import { NextResponse } from "next/server";
+import pool from "@/app/lib/db";
 
 export function jsonOk<T>(data: T, status = 200) {
   return NextResponse.json(data, { status });
+}
+
+export async function getCurrentUserId(): Promise<string | null> {
+  const { rows } = await pool.query(
+    `SELECT id FROM users WHERE role IN ('admin', 'coordinator') ORDER BY created_at LIMIT 1`
+  );
+  return rows.length > 0 ? rows[0].id : null;
 }
 
 export function jsonError(message: string, status = 400, details?: unknown) {
