@@ -8,7 +8,7 @@ interface Phase {
   name: string;
   start: number; // día 0..N dentro del rango visible
   days: number;
-  kind: "planning" | "assembly" | "install" | "close";
+  kind: "planning" | "purchase" | "manufacture" | "ship_sea" | "ship_air" | "ship_courier" | "customs" | "assembly" | "install" | "close";
   blocked?: boolean;
 }
 
@@ -23,6 +23,12 @@ const DAYS = 14;
 
 const PHASE_STYLE: Record<Phase["kind"], { label: string; bar: string }> = {
   planning: { label: "Planeación", bar: "bg-sky-300 text-sky-900" },
+  purchase: { label: "Compra", bar: "bg-orange-300 text-orange-900" },
+  manufacture: { label: "Fabricación", bar: "bg-blue-300 text-blue-900" },
+  ship_sea: { label: "Envío por barco", bar: "bg-cyan-300 text-cyan-900" },
+  ship_air: { label: "Envío cargo aéreo", bar: "bg-violet-300 text-violet-900" },
+  ship_courier: { label: "Envío por paquetería", bar: "bg-fuchsia-300 text-fuchsia-900" },
+  customs: { label: "Importación (aduana)", bar: "bg-lime-300 text-lime-900" },
   assembly: { label: "Armado", bar: "bg-amber-300 text-amber-900" },
   install: { label: "Instalación", bar: "bg-emerald-300 text-emerald-900" },
   close: { label: "Cierre", bar: "bg-zinc-300 text-zinc-800" },
@@ -88,6 +94,33 @@ const PROJECTS: ProjectRow[] = [
       { name: "Armado", start: 2, days: 4, kind: "assembly" },
       { name: "Instalación", start: 6, days: 4, kind: "install" },
       { name: "Cierre", start: 10, days: 2, kind: "close" },
+    ],
+  },
+  {
+    code: "PR-025",
+    name: "Pantalla Plaza Las Américas",
+    health: "at_risk",
+    phases: [
+      { name: "Planeación", start: 0, days: 1, kind: "planning" },
+      { name: "Compra", start: 1, days: 2, kind: "purchase" },
+      { name: "Fabricación", start: 3, days: 4, kind: "manufacture", blocked: true },
+      { name: "Envío por barco", start: 7, days: 4, kind: "ship_sea" },
+      { name: "Importación (aduana)", start: 11, days: 2, kind: "customs" },
+      { name: "Instalación", start: 13, days: 1, kind: "install" },
+    ],
+  },
+  {
+    code: "PR-026",
+    name: "Módulo de reparación CDMX",
+    health: "on_time",
+    phases: [
+      { name: "Compra", start: 0, days: 1, kind: "purchase" },
+      { name: "Fabricación", start: 1, days: 3, kind: "manufacture" },
+      { name: "Envío cargo aéreo", start: 4, days: 2, kind: "ship_air" },
+      { name: "Importación (aduana)", start: 6, days: 1, kind: "customs" },
+      { name: "Armado", start: 7, days: 3, kind: "assembly" },
+      { name: "Instalación", start: 10, days: 2, kind: "install" },
+      { name: "Cierre", start: 12, days: 2, kind: "close" },
     ],
   },
 ];
@@ -200,9 +233,10 @@ export default function GanttView() {
         </div>
 
         <p className="mt-3 text-xs text-zinc-500">
-          Prototipo: las barras representan fases de proyecto (Planeación → Armado → Instalación →
-          Cierre). Cambios aquí actualizarían las fechas del proyecto y se reflejarían en la agenda
-          semanal.
+          Prototipo: cada barra es una fase. Las etapas de compra, fabricación, envío (barco,
+          aéreo o paquetería) e importación (aduana) pueden tomar varias semanas y visibles en
+          el Gantt para anticipar avisos. Los cambios aquí actualizarían las fechas del proyecto
+          y se reflejarían en la agenda semanal.
         </p>
       </main>
     </div>
@@ -220,6 +254,12 @@ function mondayRef(): Date {
 function phaseBg(ph: Phase): Record<string, string | number> {
   const color = {
     planning: "#7dd3fc",
+    purchase: "#fdba74",
+    manufacture: "#93c5fd",
+    ship_sea: "#67e8f9",
+    ship_air: "#c4b5fd",
+    ship_courier: "#f0abfc",
+    customs: "#bef264",
     assembly: "#fcd34d",
     install: "#6ee7b7",
     close: "#d4d4d8",

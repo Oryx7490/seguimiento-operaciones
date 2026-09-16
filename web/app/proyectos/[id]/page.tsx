@@ -359,6 +359,8 @@ function AddPhase({ detail, onSaved }: { detail: ProjectDetail; onSaved: () => v
 function EditPhase({ detail, phase, onSaved }: { detail: ProjectDetail; phase: ProjectPhase; onSaved: () => void }) {
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<string>(phase.status);
+  const [startDate, setStartDate] = useState<string>(phase.planned_start_date ?? "");
+  const [endDate, setEndDate] = useState<string>(phase.planned_end_date ?? "");
   const [reason, setReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -376,6 +378,8 @@ function EditPhase({ detail, phase, onSaved }: { detail: ProjectDetail; phase: P
         ...(ph.id === phase.id
           ? {
               status,
+              planned_start_date: startDate || null,
+              planned_end_date: endDate || null,
               blocked_reason: status === "blocked" ? reason : null,
               next_action: status === "blocked" ? reason : null,
             }
@@ -396,7 +400,7 @@ function EditPhase({ detail, phase, onSaved }: { detail: ProjectDetail; phase: P
 
   return (
     <>
-      <SecondaryButton onClick={() => { setStatus(phase.status); setOpen(true); }} className="px-2 py-1 text-xs">
+      <SecondaryButton onClick={() => { setStatus(phase.status); setStartDate(phase.planned_start_date ?? ""); setEndDate(phase.planned_end_date ?? ""); setOpen(true); }} className="px-2 py-1 text-xs">
         Actualizar
       </SecondaryButton>
       {open && (
@@ -412,6 +416,15 @@ function EditPhase({ detail, phase, onSaved }: { detail: ProjectDetail; phase: P
             <Field label="Estado de la fase">
               <Select value={status} onChange={setStatus} options={PHASE_STATUS_OPTIONS.map((s) => ({ value: s, label: phaseStatusLabel(s) }))} />
             </Field>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="Inicio planificado">
+                <TextInput value={startDate} onChange={setStartDate} type="date" />
+              </Field>
+              <Field label="Fin planificado">
+                <TextInput value={endDate} onChange={setEndDate} type="date" />
+              </Field>
+            </div>
+            <p className="text-[11px] text-zinc-400">Las fases pueden traslaparse: define fechas propias por fase aunque otra aún siga activa.</p>
             {status === "blocked" && (
               <Field label="Motivo de bloqueo / próxima acción">
                 <TextInput value={reason} onChange={setReason} placeholder="Describe el bloqueo" />
