@@ -181,8 +181,53 @@ export interface Ticket {
   updated_at: string;
 }
 
+export interface ActivityTechnician {
+  technician_id: string;
+  technician_name: string;
+}
+
+export interface ActivityProject {
+  activity_id: string;
+  project_id: string;
+  project_code: string;
+  project_name: string;
+  client_id: string | null;
+  client_name: string | null;
+}
+
+export interface Activity {
+  id: string;
+  date: string;
+  description: string;
+  status: "planned" | "in_progress" | "completed" | "cancelled";
+  planned_hours: number;
+  worked_hours: number;
+  kind: "project" | "ticket" | "internal";
+  ticket_id: string | null;
+  ticket_code: string | null;
+  ticket_title: string | null;
+  internal_activity_type_id: string | null;
+  internal_activity_type_name: string | null;
+  projects: ActivityProject[];
+  technicians: ActivityTechnician[];
+  client_name: string | null;
+}
+
+export interface ActivitiesResponse {
+  activities: Activity[];
+}
+
+export interface TimeEntry {
+  id: string;
+  activity_id: string;
+  technician_id: string;
+  date: string;
+  duration_hours: number;
+  notes: string | null;
+}
+
 export interface TicketDetail {
-  ticket: Ticket;
+  ticket: Ticket & { opened_at: string };
   assignments: Assignment[];
   comments: Comment[];
   history: StatusHistoryEntry[];
