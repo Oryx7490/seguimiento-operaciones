@@ -9,6 +9,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:?Define POSTGRES_DB en .env}
       POSTGRES_USER: ${POSTGRES_USER:?Define POSTGRES_USER en .env}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD en .env}
+      TZ: ${DEFAULT_TIMEZONE:-America/Mexico_City}
+      PGTZ: ${DEFAULT_TIMEZONE:-America/Mexico_City}
     ports:
       - "127.0.0.1:5433:5432"
     volumes:
@@ -64,6 +66,7 @@ services:
       S3_FORCE_PATH_STYLE: "true"
       SESSION_SECRET: ${SESSION_SECRET}
       APP_BASE_URL: ${APP_BASE_URL:-http://localhost:8080}
+      TZ: ${DEFAULT_TIMEZONE:-America/Mexico_City}
       DEFAULT_TIMEZONE: ${DEFAULT_TIMEZONE:-America/Mexico_City}
       WORKER_TOKEN: ${WORKER_TOKEN:-}
       SMTP_HOST: ${SMTP_HOST:-mailpit}
@@ -101,6 +104,7 @@ services:
       S3_BUCKET: ${S3_BUCKET}
       MINIO_ENDPOINT: minio:9000
       S3_FORCE_PATH_STYLE: "true"
+      TZ: ${DEFAULT_TIMEZONE:-America/Mexico_City}
       DEFAULT_TIMEZONE: ${DEFAULT_TIMEZONE:-America/Mexico_City}
       WORKER_TOKEN: ${WORKER_TOKEN}
       WEB_INTERNAL_URL: http://web:3000

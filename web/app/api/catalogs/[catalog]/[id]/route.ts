@@ -25,16 +25,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ ca
     return jsonError("Cuerpo JSON inválido");
   }
 
+  const allowed = new Set(conf.cols.split(",").map((c) => c.trim()));
   const sets: string[] = [];
   const values: unknown[] = [];
-  const push = (sql: string, val: unknown) => {
-    sets.push(sql);
+  const push = (col: string, val: unknown) => {
     values.push(val);
+    sets.push(`${col} = $${values.length + 1}`);
   };
-  if (typeof body.name === "string" && body.name.trim()) push("name = $2", body.name.trim());
-  if (typeof body.sort_order === "number") push("sort_order = $2", body.sort_order);
-  if (typeof body.requires_approval === "boolean") push("requires_approval = $2", body.requires_approval);
-  if (typeof body.active === "boolean") push("active = $2", body.active);
+  if (allowed.has("name") && typeof body.name === "string" && body.name.trim()) push("name", body.name.trim());
+  if (allowed.has("sort_order") && typeof body.sort_order === "number") push("sort_order", body.sort_order);
+  if (allowed.has("requires_approval") && typeof body.requires_approval === "boolean") push("requires_approval", body.requires_approval);
+  if (allowed.has("active") && typeof body.active === "boolean") push("active", body.active);
 
   if (sets.length === 0) return jsonOk({ item: null });
 

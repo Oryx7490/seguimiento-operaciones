@@ -56,6 +56,8 @@ interface ActividadVencida {
   planned_hours: string;
   ticket_code: string | null;
   ticket_title: string | null;
+  project_codes: string[] | null;
+  project_names: string[] | null;
   technicians: string[] | null;
 }
 
@@ -243,6 +245,12 @@ export default function PendientesView() {
                   <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
                     <MoveTag label="Día">{formatDate(a.date)}</MoveTag>
                     <MoveTag label="Horas planeadas">{a.planned_hours}</MoveTag>
+                    {a.project_codes && a.project_codes.length > 0 && (
+                      <MoveTag label="Proyecto">
+                        {a.project_codes.join(", ")}
+                        {a.project_names && a.project_names.length > 0 ? ` · ${a.project_names.join(", ")}` : ""}
+                      </MoveTag>
+                    )}
                     {a.ticket_code && <MoveTag label="Ticket">{a.ticket_code}</MoveTag>}
                     {a.technicians && a.technicians.length > 0 && (
                       <MoveTag label="Técnicos">{a.technicians.join(", ")}</MoveTag>

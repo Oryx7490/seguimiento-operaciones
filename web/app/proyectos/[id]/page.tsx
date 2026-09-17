@@ -13,6 +13,7 @@ import {
   Select,
   Spinner,
   StatusBadge,
+  Textarea,
   TextInput,
 } from "@/app/components/ui";
 import CommentSection from "@/app/components/comment-section";
@@ -269,24 +270,48 @@ function StatusChanger({ detail, onSaved }: { detail: ProjectDetail; onSaved: ()
 function HealthChanger({ detail, onSaved }: { detail: ProjectDetail; onSaved: () => void }) {
   const [open, setOpen] = useState(false);
   const [health, setHealth] = useState<string>(detail.project.health_status);
+  const [reason, setReason] = useState(detail.project.blocked_reason ?? "");
+  const [nextAction, setNextAction] = useState(detail.project.next_action ?? "");
   const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  function openModal() {
+    setHealth(detail.project.health_status);
+    setReason(detail.project.blocked_reason ?? "");
+    setNextAction(detail.project.next_action ?? "");
+    setErr(null);
+    setOpen(true);
+  }
 
   async function submit() {
+    setErr(null);
+    if (health === "blocked" && (!reason.trim() || !nextAction.trim())) {
+      setErr("Indica el motivo del bloqueo y la próxima acción.");
+      return;
+    }
     setSaving(true);
     try {
+      const payload: Record<string, unknown> = { health_status: health };
+      if (health === "blocked") {
+        payload.blocked_reason = reason.trim();
+        payload.next_action = nextAction.trim();
+      }
       await fetchJson(`/api/projects/${detail.project.id}`, {
         method: "PATCH",
-        body: JSON.stringify({ health_status: health }),
+        body: JSON.stringify(payload),
       });
       setOpen(false);
       onSaved();
-    } catch {}
-    setSaving(false);
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
     <>
-      <SecondaryButton onClick={() => { setHealth(detail.project.health_status); setOpen(true); }}>Cambiar salud</SecondaryButton>
+      <SecondaryButton onClick={openModal}>Cambiar salud</SecondaryButton>
       {open && (
         <Modal open={true} onClose={() => setOpen(false)} title="Actualizar salud"
           footer={
@@ -299,6 +324,17 @@ function HealthChanger({ detail, onSaved }: { detail: ProjectDetail; onSaved: ()
           <Field label="Estado de salud">
             <Select value={health} onChange={setHealth} options={HEALTH_OPTIONS.map((h) => ({ value: h, label: healthStatusLabel(h) }))} />
           </Field>
+          {health === "blocked" && (
+            <div className="mt-4 space-y-4">
+              <Field label="Motivo del bloqueo">
+                <Textarea value={reason} onChange={setReason} rows={2} placeholder="¿Por qué está bloqueado?" />
+              </Field>
+              <Field label="Próxima acción">
+                <TextInput value={nextAction} onChange={setNextAction} placeholder="Siguiente paso concreto" />
+              </Field>
+            </div>
+          )}
+          {err && <p className="mt-3 text-xs text-red-600">{err}</p>}
         </Modal>
       )}
     </>

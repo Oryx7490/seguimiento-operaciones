@@ -106,12 +106,16 @@ export async function GET() {
   const actividadesVencidas = await pool.query(`
     SELECT a.id, a.date, a.description, a.planned_hours,
            t.code AS ticket_code, t.title AS ticket_title,
-           array_agg(tech.display_name) FILTER (WHERE tech.display_name IS NOT NULL) AS technicians
+           array_agg(DISTINCT p.code) FILTER (WHERE p.code IS NOT NULL) AS project_codes,
+           array_agg(DISTINCT p.name) FILTER (WHERE p.name IS NOT NULL) AS project_names,
+           array_agg(DISTINCT tech.display_name) FILTER (WHERE tech.display_name IS NOT NULL) AS technicians
       FROM activities a
       LEFT JOIN tickets t ON t.id = a.ticket_id
+      LEFT JOIN activity_projects ap ON ap.activity_id = a.id
+      LEFT JOIN projects p ON p.id = ap.project_id
       LEFT JOIN activity_technicians at ON at.activity_id = a.id
       LEFT JOIN technicians tech ON tech.id = at.technician_id
-     WHERE a.status = 'planned' AND a.date < current_date
+     WHERE a.status IN ('planned', 'in_progress') AND a.date < current_date
      GROUP BY a.id, t.code, t.title
      ORDER BY a.date ASC
   `);

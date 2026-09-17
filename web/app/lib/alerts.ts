@@ -131,7 +131,7 @@ async function activityOverdue(settings: Record<string, unknown>, common: Common
     `SELECT a.id, to_char(a.date, 'YYYY-MM-DD') AS date,
             COALESCE(NULLIF(btrim(a.description), ''), 'Actividad') AS title
        FROM activities a
-      WHERE a.status = 'planned' AND a.date < current_date`
+      WHERE a.status IN ('planned', 'in_progress') AND a.date < current_date`
   );
   let n = 0;
   for (const r of rows) {

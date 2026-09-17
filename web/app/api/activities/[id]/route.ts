@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
-import { jsonOk, jsonError, parseId } from "@/app/lib/api";
+import { getCurrentUserId, jsonOk, jsonError, parseId } from "@/app/lib/api";
 
 const ACTIVITY_STATUS = ["planned", "in_progress", "completed", "cancelled"];
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -48,31 +48,78 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
   if (setters.length === 0) return jsonError("No hay campos para actualizar");
 
+  const actorId = await getCurrentUserId();
+  const client = await pool.connect();
   try {
-    const { rows } = await pool.query(
+    await client.query("BEGIN");
+    const previous = await client.query<{ status: string }>(
+      `SELECT status FROM activities WHERE id = $1 FOR UPDATE`,
+      [id]
+    );
+    if (previous.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return jsonError("actividad no encontrada", 404);
+    }
+    const fromStatus = previous.rows[0].status;
+
+    const { rows } = await client.query(
       `UPDATE activities SET ${setters.join(", ")} WHERE id = $1
        RETURNING id, date::text AS date, description, status, planned_hours`,
       values
     );
-    if (rows.length === 0) return jsonError("actividad no encontrada", 404);
+
+    if (body.status !== undefined && actorId && body.status !== fromStatus) {
+      await client.query(
+        `INSERT INTO status_history (entity_type, entity_id, from_status, to_status, changed_by, reason)
+         VALUES ('activity', $1, $2, $3, $4, $5)`,
+        [id, fromStatus, body.status, actorId, "Cambio de estado"]
+      );
+    }
+
+    await client.query("COMMIT");
     return jsonOk({ activity: rows[0] });
   } catch (err) {
+    await client.query("ROLLBACK");
     return jsonError("No se pudo actualizar la actividad", 500, String(err));
+  } finally {
+    client.release();
   }
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!parseId(id)) return jsonError("id inválido");
+  const actorId = await getCurrentUserId();
+  const client = await pool.connect();
   try {
-    const { rows } = await pool.query(
-      `UPDATE activities SET status = 'cancelled' WHERE id = $1 AND status <> 'cancelled'
-       RETURNING id, status`,
+    await client.query("BEGIN");
+    const previous = await client.query<{ status: string }>(
+      `SELECT status FROM activities WHERE id = $1 FOR UPDATE`,
       [id]
     );
-    if (rows.length === 0) return jsonError("actividad no encontrada", 404);
-    return jsonOk({ cancelled: rows[0].id });
+    if (previous.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return jsonError("actividad no encontrada", 404);
+    }
+    const fromStatus = previous.rows[0].status;
+    if (fromStatus === "cancelled") {
+      await client.query("ROLLBACK");
+      return jsonError("actividad no encontrada", 404);
+    }
+    await client.query(`UPDATE activities SET status = 'cancelled' WHERE id = $1`, [id]);
+    if (actorId) {
+      await client.query(
+        `INSERT INTO status_history (entity_type, entity_id, from_status, to_status, changed_by, reason)
+         VALUES ('activity', $1, $2, 'cancelled', $3, $4)`,
+        [id, fromStatus, actorId, "Cancelación de actividad"]
+      );
+    }
+    await client.query("COMMIT");
+    return jsonOk({ cancelled: id });
   } catch (err) {
+    await client.query("ROLLBACK");
     return jsonError("No se pudo cancelar la actividad", 500, String(err));
+  } finally {
+    client.release();
   }
 }

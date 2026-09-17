@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useResource, fetchJson } from "@/app/lib/client";
 import {
@@ -17,9 +17,19 @@ import {
   SecondaryButton,
   Select,
   Spinner,
+  Textarea,
   TextInput,
 } from "@/app/components/ui";
-import type { Activity, ActivitiesResponse, Technician } from "@/app/lib/types";
+import type {
+  Activity,
+  ActivitiesResponse,
+  CatalogItem,
+  CatalogsResponse,
+  Client,
+  ClientsResponse,
+  Technician,
+  Ticket,
+} from "@/app/lib/types";
 
 const KIND_META: Record<Activity["kind"], { label: string; chip: string }> = {
   project: { label: "Proyecto", chip: "bg-sky-100 text-sky-700" },
@@ -57,6 +67,7 @@ export default function TechnicianView({
   const [monday, setMonday] = useState(() => mondayOfWeek(new Date()));
   const [techId, setTechId] = useState(initialTechId);
   const [selected, setSelected] = useState<Activity | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
 
   const days = weekDays(monday);
   const effectiveTechId = techId || technicians[0]?.id || "";
@@ -155,6 +166,13 @@ export default function TechnicianView({
             <p className="text-sm font-semibold text-emerald-700">{workedTotal} h</p>
           </div>
         </div>
+
+        <button
+          onClick={() => setReportOpen(true)}
+          className="mt-2 w-full rounded-md bg-sky-600 px-3 py-2 text-sm font-medium text-white hover:bg-sky-700"
+        >
+          + Reportar ticket
+        </button>
       </header>
 
       <main className="px-4 py-4">
@@ -215,7 +233,169 @@ export default function TechnicianView({
           onSaved={() => act.reload()}
         />
       )}
+
+      {reportOpen && (
+        <ReportTicketModal
+          technicianName={currentTech?.display_name ?? "Técnico"}
+          onClose={() => setReportOpen(false)}
+          onCreated={() => act.reload()}
+        />
+      )}
     </div>
+  );
+}
+
+function ReportTicketModal({
+  technicianName,
+  onClose,
+  onCreated,
+}: {
+  technicianName: string;
+  onClose: () => void;
+  onCreated: () => void;
+}) {
+  const [clients, setClients] = useState<Client[]>([]);
+  const [priorities, setPriorities] = useState<CatalogItem[]>([]);
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+  const [clientId, setClientId] = useState("");
+  const [priorityId, setPriorityId] = useState("");
+  const [photo, setPhoto] = useState<File | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [created, setCreated] = useState<Ticket | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      fetchJson<ClientsResponse>("/api/clients"),
+      fetchJson<CatalogsResponse>("/api/catalogs"),
+    ])
+      .then(([c, cat]) => {
+        if (cancelled) return;
+        setClients(c.clients);
+        setPriorities(cat.priorities);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function uploadPhoto(ticketId: string, file: File) {
+    const form = new FormData();
+    form.append("file", file);
+    form.append("ticket_id", ticketId);
+    form.append("attachment_type", "photo");
+    const res = await fetch("/api/attachments", { method: "POST", body: form });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      const msg =
+        typeof data === "object" && data !== null && "error" in data
+          ? String((data as { error: unknown }).error)
+          : res.statusText;
+      throw new Error(msg || `HTTP ${res.status}`);
+    }
+  }
+
+  async function submit() {
+    if (!title.trim() || !description.trim()) {
+      setErr("Título y descripción son obligatorios.");
+      return;
+    }
+    if (!clientId) {
+      setErr("Selecciona el cliente.");
+      return;
+    }
+    setSaving(true);
+    setErr(null);
+    try {
+      const { ticket } = await fetchJson<{ ticket: Ticket }>("/api/tickets", {
+        method: "POST",
+        body: JSON.stringify({
+          title: title.trim(),
+          description: description.trim(),
+          ticket_type: "external",
+          client_id: clientId,
+          priority_id: priorityId || undefined,
+          reported_by: technicianName,
+        }),
+      });
+      if (photo) await uploadPhoto(ticket.id, photo);
+      setCreated(ticket);
+      onCreated();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (created) {
+    return (
+      <Modal
+        open={true}
+        onClose={onClose}
+        title="Ticket reportado"
+        footer={<PrimaryButton onClick={onClose}>Cerrar</PrimaryButton>}
+      >
+        <p className="text-sm text-zinc-700">
+          Se creó el ticket <span className="font-semibold">{created.code}</span>
+          {photo ? " con su evidencia adjunta." : "."}
+        </p>
+      </Modal>
+    );
+  }
+
+  return (
+    <Modal
+      open={true}
+      onClose={onClose}
+      title="Reportar ticket"
+      footer={
+        <>
+          <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
+          <PrimaryButton onClick={submit} disabled={saving}>
+            {saving ? "Enviando…" : "Crear ticket"}
+          </PrimaryButton>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <Field label="Título">
+          <TextInput value={title} onChange={setTitle} placeholder="Resumen breve del problema" />
+        </Field>
+        <Field label="Descripción">
+          <Textarea value={description} onChange={setDescription} rows={3} placeholder="¿Qué ocurrió y dónde?" />
+        </Field>
+        <Field label="Cliente">
+          <Select
+            value={clientId}
+            onChange={setClientId}
+            placeholder="Seleccionar cliente…"
+            options={clients.map((c) => ({ value: c.id, label: c.name }))}
+          />
+        </Field>
+        <Field label="Prioridad">
+          <Select
+            value={priorityId}
+            onChange={setPriorityId}
+            placeholder="— Sin prioridad —"
+            options={priorities.map((p) => ({ value: p.id, label: p.name }))}
+          />
+        </Field>
+        <Field label="Foto de evidencia (opcional)">
+          <input
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={(e) => setPhoto(e.target.files?.[0] ?? null)}
+            className="block w-full text-sm text-zinc-600 file:mr-3 file:rounded-md file:border-0 file:bg-zinc-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-zinc-700"
+          />
+        </Field>
+        {err && <p className="text-xs text-red-600">{err}</p>}
+      </div>
+    </Modal>
   );
 }
 

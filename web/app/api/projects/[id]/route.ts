@@ -188,6 +188,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
   if (typeof body.health_status === "string") {
     if (!HEALTH_STATUS.includes(body.health_status)) return jsonError("health_status inválido");
+    if (body.health_status === "blocked") {
+      const reason = typeof body.blocked_reason === "string" ? body.blocked_reason.trim() : "";
+      const nextAction = typeof body.next_action === "string" ? body.next_action.trim() : "";
+      if (!reason || !nextAction) {
+        return jsonError("Para marcar el proyecto como bloqueado indica motivo y próxima acción");
+      }
+    }
     push("health_status", body.health_status);
   }
 

@@ -2,10 +2,10 @@ import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
 import { jsonOk, jsonError } from "@/app/lib/api";
 
-const CATALOGS: Record<string, { table: string; sort?: string; extra?: (string)[] }> = {
-  priorities: { table: "priorities", sort: "sort_order" },
-  phases: { table: "phase_catalog", sort: "sort_order" },
-  "internal-activity-types": { table: "internal_activity_types", sort: "sort_order" },
+const CATALOGS: Record<string, { table: string; sort?: string; hasSortOrder?: boolean; extra?: (string)[] }> = {
+  priorities: { table: "priorities", sort: "sort_order", hasSortOrder: true },
+  phases: { table: "phase_catalog", sort: "sort_order", hasSortOrder: true },
+  "internal-activity-types": { table: "internal_activity_types", sort: "sort_order", hasSortOrder: true },
   channels: { table: "ticket_channels", sort: "name" },
 };
 
@@ -46,6 +46,14 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ cat
         `INSERT INTO internal_activity_types (name, requires_approval, sort_order)
          VALUES ($1, $2, $3) RETURNING id, name, requires_approval, sort_order, active`,
         [name, body.requires_approval ?? false, sortOrder]
+      );
+      return jsonOk({ item: rows[0] }, 201);
+    }
+    if (!conf.hasSortOrder) {
+      const { rows } = await pool.query(
+        `INSERT INTO ${conf.table} (name) VALUES ($1)
+         RETURNING id, name, active`,
+        [name]
       );
       return jsonOk({ item: rows[0] }, 201);
     }
