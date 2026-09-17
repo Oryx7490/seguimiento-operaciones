@@ -80,10 +80,11 @@ const HEALTH_META: Record<string, { label: string; cls: string }> = {
   no_update: { label: "Sin novedad", cls: "bg-zinc-100 text-zinc-600" },
 };
 
-type ScaleKey = "month" | "week";
+type ScaleKey = "month" | "biweek" | "week";
 const SCALES: Record<ScaleKey, { label: string; days: number; px: number }> = {
   month: { label: "Mes", days: 30, px: 38 },
-  week: { label: "Zoom (2 semanas)", days: 14, px: 64 },
+  biweek: { label: "2 semanas", days: 14, px: 64 },
+  week: { label: "1 semana", days: 7, px: 88 },
 };
 
 const WEEKDAYS = ["D", "L", "M", "M", "J", "V", "S"];

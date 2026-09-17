@@ -1,7 +1,7 @@
 export interface User {
   id: string;
   name: string;
-  email: string;
+  email: string | null;
   role: "admin" | "coordinator" | "technician";
   timezone: string;
   active: boolean;
@@ -13,12 +13,81 @@ export interface Technician {
   id: string;
   display_name: string;
   phone: string | null;
+  nss: string | null;
+  curp: string | null;
+  address: string | null;
+  emergency_contact_name: string | null;
+  emergency_contact_phone: string | null;
+  admin_notes: string | null;
   specialties: string[];
+  pending_specialties: number;
   technician_active: boolean;
   user_id: string;
-  email: string;
+  email: string | null;
+  username: string | null;
   user_active: boolean;
   timezone: string;
+}
+
+export interface Specialty {
+  id: string;
+  name: string;
+  active: boolean;
+  technician_count: number;
+  created_at: string;
+}
+
+export interface SpecialtyProposal {
+  technician_id: string;
+  display_name: string;
+  specialty_id: string;
+  name: string;
+  requested_at: string;
+}
+
+export interface TechnicianSpecialtyAssignment {
+  specialty_id: string;
+  name: string;
+  status: "approved" | "pending";
+  active?: boolean;
+  requested_at: string;
+}
+
+export interface TechnicianDocument {
+  id: string;
+  doc_type: string;
+  file_name: string;
+  mime_type: string | null;
+  size_bytes: number | null;
+  notes: string | null;
+  created_at: string;
+  uploaded_by_name: string | null;
+}
+
+export interface TechnicianDetail {
+  id: string;
+  display_name: string;
+  phone: string | null;
+  nss: string | null;
+  curp: string | null;
+  address: string | null;
+  emergency_contact_name: string | null;
+  emergency_contact_phone: string | null;
+  admin_notes: string | null;
+  technician_active: boolean;
+  user_id: string;
+  user_name: string;
+  email: string | null;
+  username: string | null;
+  user_active: boolean;
+  timezone: string;
+  created_at: string;
+}
+
+export interface TechnicianDetailResponse {
+  technician: TechnicianDetail;
+  specialties: TechnicianSpecialtyAssignment[];
+  documents: TechnicianDocument[];
 }
 
 export interface Client {
@@ -275,4 +344,131 @@ export interface CatalogsResponse {
   phases: CatalogItem[];
   internal_activity_types: (CatalogItem & { requires_approval: boolean })[];
   ticket_channels: CatalogItem[];
+}
+
+export type NonWorkingDayKind = "official" | "discretionary";
+
+export interface NonWorkingDay {
+  id: string;
+  day: string;
+  name: string;
+  kind: NonWorkingDayKind;
+  active: boolean;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface NonWorkingDaysResponse {
+  days: NonWorkingDay[];
+}
+
+export interface AnnualSummaryMonth {
+  month: number;
+  full_days: number;
+  half_days: number;
+  hours: number;
+}
+
+export interface AnnualSummaryTechnician {
+  id: string;
+  display_name: string;
+  full_days: number;
+  half_days: number;
+  worked_days: number;
+  total_hours: number;
+  worked_hours: number;
+  planned_hours: number;
+  months: AnnualSummaryMonth[];
+}
+
+export interface AnnualSummaryResponse {
+  year: number;
+  threshold_hours: number;
+  non_working_days: { total: number; official: number; discretionary: number };
+  technicians: AnnualSummaryTechnician[];
+}
+
+export interface AttendanceEntry {
+  id: string;
+  technician_id: string | null;
+  display_name: string | null;
+  person_name: string;
+  date: string;
+  check_in: string | null;
+  check_out: string | null;
+  hours: number | null;
+  overtime: number;
+  notes: string | null;
+}
+
+export interface AttendanceResponse {
+  entries: AttendanceEntry[];
+}
+
+export interface OvertimeProjectRef {
+  id: string;
+  code: string;
+  name: string;
+}
+
+export interface OvertimeDayActivity {
+  activity_id: string;
+  description: string | null;
+  planned_hours: number;
+  projects: OvertimeProjectRef[];
+  percent: number;
+  overridden: boolean;
+  allocated_hours: number;
+}
+
+export interface OvertimeDay {
+  date: string;
+  check_in: string | null;
+  check_out: string | null;
+  hours: number;
+  overtime: number;
+  activities: OvertimeDayActivity[];
+  allocated_hours: number;
+  unallocated_hours: number;
+}
+
+export interface OvertimeTechnician {
+  id: string;
+  display_name: string;
+  person_days: number;
+  total_hours: number;
+  total_overtime: number;
+  total_allocated: number;
+  total_unallocated: number;
+  days: OvertimeDay[];
+}
+
+export interface OvertimeProjectSummary {
+  project_id: string;
+  code: string;
+  name: string;
+  planned_hours: number;
+  allocated_overtime: number;
+  person_days: number;
+}
+
+export interface OvertimeReportResponse {
+  from: string;
+  to: string;
+  settings: { daily_hours: number; weekly_hours: number };
+  technicians: OvertimeTechnician[];
+  projects: OvertimeProjectSummary[];
+}
+
+export interface TechnicianAlias {
+  id: string;
+  alias: string;
+  technician_id: string;
+  display_name: string;
+  created_at: string;
+}
+
+export interface TechnicianAliasesResponse {
+  aliases: TechnicianAlias[];
 }

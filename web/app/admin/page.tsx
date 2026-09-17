@@ -71,6 +71,8 @@ export default function AdminDashboard() {
             { href: "/admin/catalogos#phases", label: "Fases", desc: "Fases libres de proyecto" },
             { href: "/admin/catalogos#internal-activity-types", label: "Actividades internas", desc: "Tipos de hora interna" },
             { href: "/admin/catalogos#channels", label: "Canales", desc: "Medios de reporte de tickets" },
+            { href: "/admin/especialidades", label: "Especialidades", desc: "Habilidades y propuestas de técnicos" },
+            { href: "/admin/calendario", label: "Calendario laboral", desc: "Días no laborables y resumen anual" },
           ].map((c) => (
             <Link
               key={c.href}
@@ -81,6 +83,18 @@ export default function AdminDashboard() {
               <p className="mt-1 text-xs text-zinc-500">{c.desc}</p>
             </Link>
           ))}
+        </div>
+      </div>
+      <div className="mt-8">
+        <h2 className="mb-3 text-sm font-semibold text-zinc-700">Operación</h2>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Link
+            href="/admin/horas-extra"
+            className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-zinc-300 hover:shadow"
+          >
+            <p className="text-sm font-medium text-zinc-800">Horas extra y conciliación</p>
+            <p className="mt-1 text-xs text-zinc-500">Asistencia, reparto por proyecto y quincenas</p>
+          </Link>
         </div>
       </div>
       <div className="mt-8">

@@ -78,9 +78,42 @@ Sugerencia cron (diario 00:15 + copia a segundo dispositivo):
 | coordinator | Tablero completo, asignar/programar, cambiar estados, cerrar/reabrir, cierre con firma digital. |
 | admin       | Usuarios, roles, catálogos, canales, auditoría, respaldos.  |
 
-## Fase actual
+## Estado por fases
 
-- ✅ repositorio, Docker Compose, PostgreSQL, migraciones, storage S3, respaldo/restauración,
-  seed de catálogos, esqueleto web + worker.
-- ⏳ Fase 1 restante: inicio de sesión (auth local + preparación Google OAuth).
-- ⏳ Fases 2-4: operación básica, agenda semanal/horas, seguimiento y Gantt.
+- ✅ **Fase 0 — Infraestructura:** Docker Compose (web, worker, PostgreSQL 17, MinIO), migraciones
+  versionadas, storage S3, respaldo/restauración y seed de catálogos.
+- ✅ **Fase 2 — Operación básica:** usuarios/roles/técnicos, clientes y ubicaciones, proyectos y
+  fases (con etapas logísticas y "No aplica"), tickets, asignaciones, comentarios e historial.
+  Alta de técnicos sin correo mediante `username` (migración `008`).
+- ✅ **Fase 3 — Agenda y horas:** agenda semanal (lunes–domingo) con conmutador **Semana / Día**
+  («Hoy» abre la vista del día: una columna horizontal por técnico con sus actividades apiladas y
+  resumen de horas plan/real), múltiples actividades por técnico/día, varios técnicos por actividad,
+  horas planeadas y reales, filtros y vista móvil del técnico.
+- ✅ **Fase 4 — Seguimiento:** bandeja de pendientes (`/pendientes`), bloqueos con motivo y próxima
+  acción, vencimientos, Gantt real con filtros por etapa y cierre con hoja firmada obligatoria.
+- ✅ **Fase 5 — Alertas:** notificaciones internas, correo SMTP, plantillas por canal, registro de
+  envíos y adaptador de WhatsApp saliente (apagado). Falta solo el webhook de recepción.
+- ✅ **Fase 7 — API para agentes CLI:** tokens con hash, endpoints `/api/agent/*` y administración
+  de tokens en Configuración → Agentes CLI.
+- ✅ **Fase 7.5 — Perfiles y expediente de técnicos:** catálogo de habilidades con propuestas del
+  técnico y aprobación del admin, expediente (NSS, CURP, dirección, emergencia, notas) y documentos
+  confidenciales en MinIO. El Técnico autogestiona contacto y habilidades desde «Mi perfil».
+- ✅ **Fase 8 — Calendario laboral:** días no laborables (oficiales LFT + discrecionales) y resumen
+  anual por técnico; además la escala del Gantt ofrece Mes / 2 semanas / 1 semana.
+- ✅ **Fase 10 — Horas extra externas:** importación de asistencia (persona, fecha, entrada/salida;
+  hoy CSV/TSV, Excel al recibir archivo de ejemplo), conciliación por quincena natural, empareje por
+  nombre con equivalencias y reparto editable de horas extra por actividad.
+- ⏳ **Fase 9 — Mapa de ubicaciones (Google Maps):** pendiente de `GOOGLE_MAPS_API_KEY`.
+- ⏳ **Fase 1 — inicio de sesión:** omitido por ahora; despliegue en red local con actor único y
+  captura de usuario en el cliente (ver sección 12 del diseño).
+- ⏳ **Fase 6 — Piloto:** prueba en campo, ajustes y autorización de salida.
+
+## Cambios de esquema recientes
+
+Aplicadas `001`–`011`. Las últimas agregan:
+
+- `008` — `username` y correo opcional en usuarios (técnicos sin email).
+- `009` — perfiles/expediente de técnicos, `specialties`, `technician_specialties` y documentos.
+- `010` — calendario laboral (`non_working_days`) y umbral `half_day_hours`.
+- `011` — asistencia y conciliación de horas extra (`attendance_batches`, `attendance_entries`,
+  `technician_aliases`, `overtime_allocations`) y umbrales `overtime_daily_hours`/`overtime_weekly_hours`.

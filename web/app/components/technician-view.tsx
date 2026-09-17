@@ -97,12 +97,20 @@ export default function TechnicianView({
             <h1 className="text-base font-semibold leading-tight">Mi agenda</h1>
             <p className="text-xs text-zinc-500">{currentTech?.display_name ?? "Técnico"}</p>
           </div>
-          <Link
-            href="/"
-            className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-xs text-zinc-600 hover:bg-zinc-50"
-          >
-            Vista de operaciones →
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              href={`/tecnico/perfil?t=${effectiveTechId}`}
+              className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-xs text-zinc-600 hover:bg-zinc-50"
+            >
+              Mi perfil
+            </Link>
+            <Link
+              href="/"
+              className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-xs text-zinc-600 hover:bg-zinc-50"
+            >
+              Vista de operaciones →
+            </Link>
+          </div>
         </div>
 
         <div className="mt-2">

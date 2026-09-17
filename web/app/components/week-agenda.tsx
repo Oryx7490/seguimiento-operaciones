@@ -22,6 +22,17 @@ import type {
   TicketsResponse,
 } from "@/app/lib/types";
 
+const ACTIVE_PROJECT_STATUS = new Set([
+  "new",
+  "planning",
+  "waiting_authorization",
+  "waiting_materials",
+  "assembly",
+  "ready_install",
+  "installation",
+  "pending_docs",
+]);
+
 const KIND_META: Record<Activity["kind"], { label: string; chip: string }> = {
   project: { label: "Proyecto", chip: "bg-sky-100 text-sky-700" },
   ticket: { label: "Ticket", chip: "bg-violet-100 text-violet-700" },
@@ -44,6 +55,8 @@ function isoDate(d: Date): string {
 
 export default function WeekAgenda() {
   const [monday, setMonday] = useState(() => mondayOfWeek(new Date()));
+  const [view, setView] = useState<"week" | "day">("week");
+  const [day, setDay] = useState<string>(() => isoDate(new Date()));
   const [kind, setKind] = useState<string>("");
   const [techId, setTechId] = useState<string>("");
   const [status, setStatus] = useState<string>("");
@@ -54,8 +67,8 @@ export default function WeekAgenda() {
   const days = weekDays(monday);
 
   const params = new URLSearchParams();
-  params.set("from", isoDate(days[0]));
-  params.set("to", isoDate(days[6]));
+  params.set("from", view === "day" ? day : isoDate(days[0]));
+  params.set("to", view === "day" ? day : isoDate(days[6]));
   if (kind) params.set("kind", kind);
   if (techId) params.set("technician", techId);
   if (status) params.set("status", status);
@@ -73,9 +86,21 @@ export default function WeekAgenda() {
   const loading = !act.data && !act.error;
 
   function shift(delta: number) {
+    if (view === "day") {
+      const d = new Date(`${day}T00:00:00`);
+      d.setDate(d.getDate() + delta);
+      setDay(isoDate(d));
+      return;
+    }
     const next = new Date(monday);
     next.setDate(next.getDate() + delta * 7);
     setMonday(next);
+  }
+
+  function goToday() {
+    setView("day");
+    setDay(isoDate(new Date()));
+    setMonday(mondayOfWeek(new Date()));
   }
 
   const overdueCount = activities.filter((a) => a.date < isoDate(new Date()) && (a.status === "planned" || a.status === "in_progress")).length;
@@ -85,6 +110,8 @@ export default function WeekAgenda() {
   const workedTotal = activities.reduce((s, a) => s + Number(a.worked_hours), 0);
 
   const weekLabel = `Semana del ${formatShortDate(days[0])} – ${formatShortDate(days[6])} de ${new Intl.DateTimeFormat("es-MX", { month: "long", year: "numeric" }).format(days[0])}`;
+  const dayLabel = new Intl.DateTimeFormat("es-MX", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date(`${day}T00:00:00`));
+  const rangeLabel = view === "day" ? (day === isoDate(new Date()) ? `Hoy · ${dayLabel}` : dayLabel) : weekLabel;
 
   return (
     <div className="bg-zinc-100 text-zinc-900">
@@ -92,7 +119,7 @@ export default function WeekAgenda() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-lg font-semibold leading-tight">Operaciones técnicas</h1>
-            <p className="text-sm text-zinc-500">{weekLabel}</p>
+            <p className="text-sm text-zinc-500">{rangeLabel}</p>
           </div>
           <nav className="flex items-center gap-2">
             <Link href="/gantt" className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50">
@@ -102,43 +129,54 @@ export default function WeekAgenda() {
         </div>
 
         <div className="mt-3 flex flex-wrap items-center gap-2">
-          <button onClick={() => shift(-1)} className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50">← Semana anterior</button>
-          <button onClick={() => setMonday(mondayOfWeek(new Date()))} className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50">Hoy</button>
-          <button onClick={() => shift(1)} className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50">Semana siguiente →</button>
+          <button onClick={() => shift(-1)} className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50">← {view === "day" ? "Día anterior" : "Semana anterior"}</button>
+          <button onClick={goToday} className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50">Hoy</button>
+          <button onClick={() => shift(1)} className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50">{view === "day" ? "Día siguiente" : "Semana siguiente"} →</button>
+          <div className="flex overflow-hidden rounded-md border border-zinc-300 text-sm">
+            {([["week", "Semana"], ["day", "Día"]] as const).map(([v, label]) => (
+              <button key={v} onClick={() => setView(v)} className={`px-3 py-1.5 ${view === v ? "bg-zinc-900 text-white" : "bg-white text-zinc-600 hover:bg-zinc-50"}`}>
+                {label}
+              </button>
+            ))}
+          </div>
 
-          <div className="ml-auto flex flex-wrap items-center gap-2">
-            <div className="flex overflow-hidden rounded-md border border-zinc-300 text-sm">
-              {([["", "Todo"], ["project", "Proyectos"], ["ticket", "Tickets"], ["internal", "Internas"]] as const).map(([v, label]) => (
-                <button key={v} onClick={() => setKind(v)} className={`px-3 py-1.5 ${kind === v ? "bg-zinc-900 text-white" : "bg-white text-zinc-600 hover:bg-zinc-50"}`}>
-                  {label}
-                </button>
-              ))}
-            </div>
+          <div className="ml-auto flex overflow-hidden rounded-md border border-zinc-300 text-sm">
+            {([["", "Todo"], ["project", "Proyectos"], ["ticket", "Tickets"], ["internal", "Internas"]] as const).map(([v, label]) => (
+              <button key={v} onClick={() => setKind(v)} className={`px-3 py-1.5 ${kind === v ? "bg-zinc-900 text-white" : "bg-white text-zinc-600 hover:bg-zinc-50"}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="mt-2 flex items-center gap-2">
+          <div className="min-w-0 flex-1">
             <Select
               value={techId}
               onChange={setTechId}
-              placeholder="Todos los técnicos"
+              placeholder="Técnicos"
               options={technicians.map((t) => ({ value: t.id, label: t.display_name }))}
-              className="w-44"
             />
+          </div>
+          <div className="min-w-0 flex-1">
             <Select
               value={status}
               onChange={setStatus}
-              placeholder="Todos los estados"
+              placeholder="Estado"
               options={[
                 { value: "planned", label: "Planeada" },
                 { value: "in_progress", label: "En proceso" },
                 { value: "completed", label: "Completada" },
                 { value: "cancelled", label: "Cancelada" },
               ]}
-              className="w-40"
             />
+          </div>
+          <div className="min-w-0 flex-1">
             <Select
               value={clientId}
               onChange={setClientId}
-              placeholder="Todos los clientes"
+              placeholder="Clientes"
               options={clients.data?.clients.map((c) => ({ value: c.id, label: c.name })) ?? []}
-              className="w-44"
             />
           </div>
         </div>
@@ -157,55 +195,100 @@ export default function WeekAgenda() {
       <main className="p-4">
         {act.error && <div className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{act.error}</div>}
 
-        <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm">
-          <div className="min-w-[980px]">
-            <div className="grid grid-cols-[150px_repeat(7,1fr)] border-b border-zinc-200 bg-zinc-50">
-              <div className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-zinc-500">Técnico</div>
-              {days.map((d, i) => (
-                <div key={i} className={`px-1 py-2 text-center ${isToday(d) ? "bg-sky-50" : ""}`}>
-                  <p className={`text-xs font-semibold ${isToday(d) ? "text-sky-700" : "text-zinc-700"}`}>{WEEKDAY_SHORT[i]}</p>
-                  <p className={`text-xs ${isToday(d) ? "text-sky-600" : "text-zinc-400"}`}>{formatShortDate(d)}</p>
-                </div>
-              ))}
-            </div>
+        {view === "week" ? (
+          <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm">
+            <div className="min-w-[980px]">
+              <div className="grid grid-cols-[150px_repeat(7,1fr)] border-b border-zinc-200 bg-zinc-50">
+                <div className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-zinc-500">Técnico</div>
+                {days.map((d, i) => (
+                  <div key={i} className={`px-1 py-2 text-center ${isToday(d) ? "bg-sky-50" : ""}`}>
+                    <p className={`text-xs font-semibold ${isToday(d) ? "text-sky-700" : "text-zinc-700"}`}>{WEEKDAY_SHORT[i]}</p>
+                    <p className={`text-xs ${isToday(d) ? "text-sky-600" : "text-zinc-400"}`}>{formatShortDate(d)}</p>
+                  </div>
+                ))}
+              </div>
 
+              {loading ? (
+                <div className="p-8"><Spinner /></div>
+              ) : technicians.length === 0 ? (
+                <p className="p-6 text-sm text-zinc-400">No hay técnicos activos. Crea técnicos desde Configuración.</p>
+              ) : (
+                technicians.map((tech) => (
+                  <div key={tech.id} className="grid grid-cols-[150px_repeat(7,1fr)] border-b border-zinc-100 last:border-b-0">
+                    <div className="flex items-center gap-2 border-r border-zinc-100 px-2 py-2">
+                      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-[10px] font-semibold text-white">
+                        {initials(tech.display_name)}
+                      </span>
+                      <span className="truncate text-xs font-medium text-zinc-700">{tech.display_name}</span>
+                    </div>
+                    {days.map((d, i) => {
+                      const iso = isoDate(d);
+                      const cellActs = activities.filter((a) => a.date === iso && a.technicians.some((t) => t.technician_id === tech.id));
+                      return (
+                        <div key={i} className={`min-h-[96px] border-r border-zinc-100 p-1 last:border-r-0 ${isToday(d) ? "bg-sky-50/60" : ""}`}>
+                          <div className="flex flex-col gap-1">
+                            {cellActs.map((a) => (
+                              <ActivityCard key={a.id} activity={a} onClick={() => setSelected(a)} />
+                            ))}
+                            <button
+                              onClick={() => setCreating({ date: iso, techIds: [tech.id] })}
+                              className="flex h-5 items-center justify-center rounded border border-dashed border-zinc-300 text-[11px] text-zinc-400 hover:border-zinc-400 hover:text-zinc-600"
+                            >
+                              + Actividad
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm">
             {loading ? (
               <div className="p-8"><Spinner /></div>
             ) : technicians.length === 0 ? (
               <p className="p-6 text-sm text-zinc-400">No hay técnicos activos. Crea técnicos desde Configuración.</p>
             ) : (
-              technicians.map((tech) => (
-                <div key={tech.id} className="grid grid-cols-[150px_repeat(7,1fr)] border-b border-zinc-100 last:border-b-0">
-                  <div className="flex items-center gap-2 border-r border-zinc-100 px-2 py-2">
-                    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-[10px] font-semibold text-white">
-                      {initials(tech.display_name)}
-                    </span>
-                    <span className="truncate text-xs font-medium text-zinc-700">{tech.display_name}</span>
-                  </div>
-                  {days.map((d, i) => {
-                    const iso = isoDate(d);
-                    const cellActs = activities.filter((a) => a.date === iso && a.technicians.some((t) => t.technician_id === tech.id));
-                    return (
-                      <div key={i} className={`min-h-[96px] border-r border-zinc-100 p-1 last:border-r-0 ${isToday(d) ? "bg-sky-50/60" : ""}`}>
-                        <div className="flex flex-col gap-1">
-                          {cellActs.map((a) => (
-                            <ActivityCard key={a.id} activity={a} onClick={() => setSelected(a)} />
-                          ))}
-                          <button
-                            onClick={() => setCreating({ date: iso, techIds: [tech.id] })}
-                            className="flex h-5 items-center justify-center rounded border border-dashed border-zinc-300 text-[11px] text-zinc-400 hover:border-zinc-400 hover:text-zinc-600"
-                          >
-                            + Actividad
-                          </button>
+              <div className="flex min-w-max items-stretch">
+                {technicians.map((tech) => {
+                  const techActs = activities.filter((a) => a.date === day && a.technicians.some((t) => t.technician_id === tech.id));
+                  const planned = techActs.reduce((s, a) => s + Number(a.planned_hours), 0);
+                  const worked = techActs.reduce((s, a) => s + Number(a.worked_hours), 0);
+                  return (
+                    <div key={tech.id} className="flex w-80 shrink-0 flex-col border-r border-zinc-100 last:border-r-0">
+                      <div className="flex items-center gap-2 border-b border-zinc-200 bg-zinc-50 px-3 py-2">
+                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-[11px] font-semibold text-white">
+                          {initials(tech.display_name)}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-zinc-800">{tech.display_name}</p>
+                          <p className="text-[11px] text-zinc-500">{techActs.length} actividad{techActs.length === 1 ? "" : "es"} · {planned}h plan / {worked}h real</p>
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
-              ))
+                      <div className="flex min-h-[180px] flex-1 flex-col gap-1.5 p-2">
+                        {techActs.map((a) => (
+                          <ActivityCard key={a.id} activity={a} onClick={() => setSelected(a)} />
+                        ))}
+                        {techActs.length === 0 && (
+                          <p className="px-1 py-2 text-center text-[11px] text-zinc-400">Sin actividades planeadas</p>
+                        )}
+                        <button
+                          onClick={() => setCreating({ date: day, techIds: [tech.id] })}
+                          className="mt-auto flex h-6 items-center justify-center rounded border border-dashed border-zinc-300 text-[11px] text-zinc-400 hover:border-zinc-400 hover:text-zinc-600"
+                        >
+                          + Actividad
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
-        </div>
+        )}
 
         <p className="mt-3 text-xs text-zinc-500">
           Haz clic en una tarjeta para ver detalle, registrar horas o cancelarla. Cada técnico puede tener
@@ -265,6 +348,9 @@ function ActivityCard({ activity, onClick }: { activity: Activity; onClick: () =
         <span className={`h-2 w-2 shrink-0 rounded-full ${meta.dot}`} title={meta.label} />
       </div>
       <p className="truncate text-[11px] font-medium leading-tight text-zinc-800">{activity.description}</p>
+      {activity.kind === "project" && activity.projects[0] && (
+        <p className="truncate text-[10px] font-medium text-zinc-700">{activity.projects[0].project_name}</p>
+      )}
       <p className="truncate text-[10px] text-zinc-500">{activity.client_name ?? "—"}</p>
       <div className="flex items-center justify-between text-[10px] text-zinc-600">
         <span>{hours}</span>
@@ -424,6 +510,7 @@ function NewActivityModal({ date, initialTechIds, technicians, onClose, onSaved 
   const [internalTypes, setInternalTypes] = useState<{ id: string; name: string }[]>([]);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [showAllProjects, setShowAllProjects] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -517,8 +604,24 @@ function NewActivityModal({ date, initialTechIds, technicians, onClose, onSaved 
           ]} />
         </Field>
         {kind === "project" && (
-          <Field label="Proyecto">
-            <Select value={projectId} onChange={setProjectId} placeholder="Selecciona un proyecto…" options={projects.map((p) => ({ value: p.id, label: `${p.code} · ${p.name}` }))} />
+          <Field label="Proyecto (en curso)">
+            <Select
+              value={projectId}
+              onChange={setProjectId}
+              placeholder="Selecciona un proyecto…"
+              options={projects
+                .filter((p) => showAllProjects || ACTIVE_PROJECT_STATUS.has(p.status))
+                .map((p) => ({ value: p.id, label: `${p.code} · ${p.name}` }))}
+            />
+            <label className="mt-1.5 flex items-center gap-2 text-xs text-zinc-500">
+              <input
+                type="checkbox"
+                checked={showAllProjects}
+                onChange={(e) => setShowAllProjects(e.target.checked)}
+                className="h-3.5 w-3.5 rounded border-zinc-300"
+              />
+              Mostrar también proyectos cerrados
+            </label>
           </Field>
         )}
         {kind === "ticket" && (

@@ -22,6 +22,9 @@ const ADMIN_SUB = [
   { href: "/admin/clientes", label: "Clientes" },
   { href: "/admin/ubicaciones", label: "Ubicaciones" },
   { href: "/admin/catalogos", label: "Catálogos" },
+  { href: "/admin/especialidades", label: "Especialidades" },
+  { href: "/admin/calendario", label: "Calendario" },
+  { href: "/admin/horas-extra", label: "Horas extra" },
   { href: "/admin/notificaciones", label: "Notificaciones" },
   { href: "/admin/agentes", label: "Agentes CLI" },
 ] as const;

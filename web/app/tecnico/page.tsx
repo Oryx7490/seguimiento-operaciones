@@ -12,8 +12,8 @@ export default async function TecnicoPage({
   const { t } = await searchParams;
   const raw = typeof t === "string" ? t : "";
   const { rows } = await pool.query(
-    `SELECT t.id, t.display_name, t.phone, t.specialties, t.active AS technician_active,
-            u.id AS user_id, u.email, u.active AS user_active, u.timezone
+    `SELECT t.id, t.display_name, t.phone, t.active AS technician_active,
+            u.id AS user_id, u.email, u.username, u.active AS user_active, u.timezone
      FROM technicians t
      JOIN users u ON u.id = t.user_id
      WHERE t.active = true

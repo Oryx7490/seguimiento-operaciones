@@ -267,7 +267,7 @@ function AddAssignment({ ticketId, onSaved }: { ticketId: string; onSaved: () =>
               value={techId}
               onChange={setTechId}
               placeholder="Seleccionar técnico…"
-              options={techs.map((t) => ({ value: t.id, label: `${t.display_name} (${t.email})` }))}
+              options={techs.map((t) => ({ value: t.id, label: `${t.display_name} (${t.email ?? (t.username ? "@" + t.username : "sin correo")})` }))}
             />
           </Field>
           {err && <p className="text-xs text-red-600">{err}</p>}

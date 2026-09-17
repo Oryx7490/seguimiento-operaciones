@@ -57,7 +57,7 @@ export async function getTemplates(code: string): Promise<Map<Channel, TemplateR
 
 export interface RecipientChannel {
   user_id: string;
-  email: string;
+  email: string | null;
   phone: string | null;
   role: string;
 }
@@ -124,6 +124,8 @@ export async function emitAlert(opts: EmitOptions): Promise<EmitResult> {
 
   for (const recipient of opts.recipients) {
     for (const channel of opts.channels) {
+      if (channel === "email" && !recipient.email) continue;
+      if (channel === "whatsapp" && !recipient.phone) continue;
       const tpl = templates.get(channel);
       if (!tpl) continue;
       const body = renderTemplate(tpl.body, vars);
@@ -194,7 +196,7 @@ interface PendingNotification {
   body: string | null;
   payload: Record<string, unknown> | null;
   attempts: number;
-  email: string;
+  email: string | null;
   phone: string | null;
 }
 
@@ -270,6 +272,7 @@ export async function processPendingDeliveries(limit = 20): Promise<{ sent: numb
     try {
       if (n.channel === "email") {
         if (!email) throw new Error("SMTP no configurado");
+        if (!n.email) throw new Error("El destinatario no tiene correo");
         provider = "smtp";
         const r = await sendEmail(email, n.email, n.title ?? "Alerta de seguimiento", n.body ?? "");
         providerId = r.providerId;
