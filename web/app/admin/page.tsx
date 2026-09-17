@@ -95,6 +95,18 @@ export default function AdminDashboard() {
           </Link>
         </div>
       </div>
+      <div className="mt-8">
+        <h2 className="mb-3 text-sm font-semibold text-zinc-700">Integraciones</h2>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Link
+            href="/admin/agentes"
+            className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-zinc-300 hover:shadow"
+          >
+            <p className="text-sm font-medium text-zinc-800">Agentes CLI</p>
+            <p className="mt-1 text-xs text-zinc-500">Tokens para la API /api/agent</p>
+          </Link>
+        </div>
+      </div>
     </div>
   );
 }

@@ -22,6 +22,8 @@ const ADMIN_SUB = [
   { href: "/admin/clientes", label: "Clientes" },
   { href: "/admin/ubicaciones", label: "Ubicaciones" },
   { href: "/admin/catalogos", label: "Catálogos" },
+  { href: "/admin/notificaciones", label: "Notificaciones" },
+  { href: "/admin/agentes", label: "Agentes CLI" },
 ] as const;
 
 export default function AppNav() {

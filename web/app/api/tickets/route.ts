@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
 import { jsonOk, jsonError } from "@/app/lib/api";
+import { createTicket, type CreateTicketInput } from "@/app/lib/services/tickets";
+import { ServiceError } from "@/app/lib/services/errors";
 
 const TICKET_STATUS = [
   "new",
@@ -68,72 +70,19 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  let body: {
-    title?: string;
-    description?: string;
-    ticket_type?: string;
-    client_id?: string;
-    location_id?: string;
-    priority_id?: string;
-    coordinator_id?: string;
-    reported_by?: string;
-    channel_id?: string;
-    actor_id?: string;
-  };
+  let body: CreateTicketInput & { actor_id?: string };
   try {
     body = await req.json();
   } catch {
     return jsonError("Cuerpo JSON inválido");
   }
-  const title = body.title?.trim();
-  const description = body.description?.trim();
-  const type = body.ticket_type === "internal" ? "internal" : "external";
-  const reportedBy = body.reported_by?.trim();
-
-  if (!title) return jsonError("title es obligatorio");
-  if (!description) return jsonError("description es obligatorio");
-  if (type === "external" && !body.client_id) return jsonError("client es obligatorio para tickets externos");
 
   const actorId = await getActorId(body);
-
-  const client = await pool.connect();
   try {
-    await client.query("BEGIN");
-    const codeRes = await client.query(
-      `SELECT 'TK-' || lpad(nextval('ticket_code_seq')::text, 3, '0') AS code`
-    );
-    const ticketRes = await client.query(
-      `INSERT INTO tickets (code, title, description, ticket_type, client_id, location_id,
-                            priority_id, coordinator_id, reported_by, channel_id, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       RETURNING id, code, title, ticket_type, status, opened_at`,
-      [
-        codeRes.rows[0].code,
-        title,
-        description,
-        type,
-        type === "external" ? body.client_id : body.client_id || null,
-        body.location_id || null,
-        body.priority_id || null,
-        body.coordinator_id || null,
-        reportedBy,
-        body.channel_id || null,
-        actorId,
-      ]
-    );
-    if (actorId) {
-      await client.query(
-        `INSERT INTO status_history (entity_type, entity_id, from_status, to_status, changed_by, reason)
-         VALUES ('ticket', $1, NULL, 'new', $2, 'Apertura de ticket')`,
-        [ticketRes.rows[0].id, actorId]
-      );
-    }
-    await client.query("COMMIT");
-    return jsonOk({ ticket: ticketRes.rows[0] }, 201);
+    const ticket = await createTicket(body, actorId);
+    return jsonOk({ ticket }, 201);
   } catch (err) {
-    await client.query("ROLLBACK");
+    if (err instanceof ServiceError) return jsonError(err.message, err.status);
     return jsonError("No se pudo crear el ticket", 500, String(err));
-  } finally {
-    client.release();
   }
 }

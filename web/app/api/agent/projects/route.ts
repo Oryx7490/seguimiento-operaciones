@@ -1,10 +1,11 @@
 import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
 import { jsonOk, jsonError } from "@/app/lib/api";
+import { authenticateAgent, agentReason, unauthorized } from "@/app/lib/agent-auth";
 import { createProject, type CreateProjectInput } from "@/app/lib/services/projects";
 import { ServiceError } from "@/app/lib/services/errors";
 
-const PROJECT_STATUS = [
+const ACTIVE_STATUS = [
   "new",
   "planning",
   "waiting_authorization",
@@ -13,45 +14,47 @@ const PROJECT_STATUS = [
   "ready_install",
   "installation",
   "pending_docs",
-  "closed",
-  "cancelled",
 ];
 
-async function getActorId(body?: { actor_id?: string }): Promise<string | null> {
-  if (body?.actor_id) {
-    const { rows } = await pool.query(`SELECT id FROM users WHERE id = $1`, [body.actor_id]);
-    if (rows.length > 0) return rows[0].id;
-  }
-  const { rows } = await pool.query(`SELECT id FROM users WHERE role = 'admin' ORDER BY created_at LIMIT 1`);
-  return rows.length > 0 ? rows[0].id : null;
-}
-
 export async function GET(req: NextRequest) {
+  const identity = await authenticateAgent(req);
+  if (!identity) return unauthorized();
+
   const { searchParams } = new URL(req.url);
   const status = searchParams.get("status");
   const q = searchParams.get("q");
 
-  let sql = `SELECT p.id, p.code, p.name, p.status, p.health_status, p.priority_id, p.coordinator_id,
-                    p.client_id, p.location_id, p.planned_start_date, p.planned_end_date,
-                    p.actual_start_date, p.actual_end_date, p.blocked_reason, p.next_action,
-                    p.next_action_date, p.last_activity_at, p.version,
+  let sql = `SELECT p.id, p.code, p.name, p.status, p.health_status, p.blocked_reason,
+                    p.next_action, p.next_action_date, p.planned_start_date, p.planned_end_date,
+                    p.actual_start_date, p.actual_end_date, p.coordinator_id,
                     c.name AS client_name, l.name AS location_name, l.city,
-                    pr.name AS priority_name,
                     u.name AS coordinator_name,
-                    (SELECT count(*) FROM project_phases ph2 WHERE ph2.project_id = p.id) AS phase_count,
-                    (SELECT min(ph2.planned_start_date) FROM project_phases ph2 WHERE ph2.project_id = p.id) AS min_phase_start,
-                    (SELECT max(ph2.planned_end_date)   FROM project_phases ph2 WHERE ph2.project_id = p.id) AS max_phase_end,
-                    (SELECT bool_and(ph2.status IN ('completed', 'not_applicable')) FROM project_phases ph2 WHERE ph2.project_id = p.id) AS all_phases_completed
+                    COALESCE(ph.phases, '[]'::json) AS phases
              FROM projects p
              LEFT JOIN clients c ON c.id = p.client_id
              LEFT JOIN locations l ON l.id = p.location_id
-             LEFT JOIN priorities pr ON pr.id = p.priority_id
              LEFT JOIN users u ON u.id = p.coordinator_id
+             LEFT JOIN LATERAL (
+               SELECT json_agg(json_build_object(
+                        'id', pp.id,
+                        'name', pp.name,
+                        'status', pp.status,
+                        'sort_order', pp.sort_order,
+                        'owner_id', pp.owner_id,
+                        'planned_start_date', pp.planned_start_date,
+                        'planned_end_date', pp.planned_end_date,
+                        'actual_start_date', pp.actual_start_date,
+                        'actual_end_date', pp.actual_end_date
+                      ) ORDER BY pp.sort_order) AS phases
+                 FROM project_phases pp WHERE pp.project_id = p.id
+             ) ph ON true
              WHERE p.status <> 'cancelled'`;
   const values: unknown[] = [];
-  if (status && PROJECT_STATUS.includes(status)) {
+  if (status && ACTIVE_STATUS.includes(status)) {
     values.push(status);
     sql += ` AND p.status = $${values.length}`;
+  } else {
+    sql += ` AND p.status NOT IN ('closed', 'cancelled')`;
   }
   if (q) {
     values.push(`%${q.trim()}%`);
@@ -68,16 +71,18 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  let body: CreateProjectInput & { actor_id?: string };
+  const identity = await authenticateAgent(req);
+  if (!identity) return unauthorized();
+
+  let body: CreateProjectInput;
   try {
     body = await req.json();
   } catch {
     return jsonError("Cuerpo JSON inválido");
   }
 
-  const actorId = await getActorId(body);
   try {
-    const project = await createProject(body, actorId);
+    const project = await createProject(body, identity.actorId, agentReason(identity, "Proyecto creado"));
     return jsonOk({ project }, 201);
   } catch (err) {
     if (err instanceof ServiceError) return jsonError(err.message, err.status);
