@@ -18,7 +18,7 @@ export default function CommentSection({
   comments,
   onSaved,
 }: {
-  kind: "project" | "ticket";
+  kind: "project" | "ticket" | "client";
   entityId: string;
   comments: Comment[];
   onSaved: () => void;

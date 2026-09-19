@@ -186,7 +186,7 @@ export default function TechnicianView({
           <div className="space-y-4">
             {days.map((d, i) => {
               const iso = isoDate(d);
-              const dayActs = activities.filter((a) => a.date === iso);
+              const dayActs = activities.filter((a) => a.date <= iso && iso <= (a.end_date && a.end_date > a.date ? a.end_date : a.date));
               const today = isToday(d);
               return (
                 <section key={i}>
@@ -403,8 +403,9 @@ function ActivityCard({ activity, onClick }: { activity: Activity; onClick: () =
   const meta = STATUS_META[activity.status];
   const kind = KIND_META[activity.kind];
   const code = activityCode(activity);
+  const endIso = activity.end_date && activity.end_date > activity.date ? activity.end_date : activity.date;
   const overdue =
-    activity.date < isoDate(new Date()) && (activity.status === "planned" || activity.status === "in_progress");
+    endIso < isoDate(new Date()) && (activity.status === "planned" || activity.status === "in_progress");
   const hours =
     activity.worked_hours > 0
       ? `${activity.worked_hours} h reg · ${activity.planned_hours} h plan`

@@ -6,7 +6,9 @@ export async function GET() {
   try {
     const { rows } = await pool.query(
       `SELECT c.id, c.name, c.contact_name, c.contact_email, c.contact_phone, c.active,
-              (SELECT count(*) FROM locations l WHERE l.client_id = c.id AND l.active) AS location_count
+              (SELECT count(*) FROM locations l WHERE l.client_id = c.id AND l.active) AS location_count,
+              (SELECT count(*) FROM client_contacts cc WHERE cc.client_id = c.id AND cc.active) AS contacts_count,
+              (SELECT count(*) FROM comments cm WHERE cm.client_id = c.id) AS comments_count
        FROM clients c ORDER BY c.name`
     );
     return jsonOk({ clients: rows });

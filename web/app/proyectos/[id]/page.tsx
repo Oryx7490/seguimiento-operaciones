@@ -121,6 +121,7 @@ export default function ProjectDetailPage() {
                   <th className="px-3 py-2 text-left">Inicio</th>
                   <th className="px-3 py-2 text-left">Fin</th>
                   <th className="px-3 py-2 text-left">Responsable</th>
+                  <th className="px-3 py-2 text-left">Bloqueo</th>
                   <th className="px-3 py-2 text-right">Acciones</th>
                 </tr>
               </thead>
@@ -132,6 +133,11 @@ export default function ProjectDetailPage() {
                     <td className="px-3 py-2 text-zinc-500">{formatDate(ph.planned_start_date)}</td>
                     <td className="px-3 py-2 text-zinc-500">{formatDate(ph.planned_end_date)}</td>
                     <td className="px-3 py-2 text-zinc-600">{ph.owner_name ?? "—"}</td>
+                    <td className="px-3 py-2 text-xs text-zinc-500">
+                      {ph.status === "blocked"
+                        ? [ph.blocked_reason, ph.next_action].filter(Boolean).join(" · ") || "—"
+                        : "—"}
+                    </td>
                     <td className="px-3 py-2 text-right">
                       <EditPhase detail={detail} phase={ph} onSaved={reload} />
                     </td>
@@ -411,13 +417,34 @@ function EditPhase({ detail, phase, onSaved }: { detail: ProjectDetail; phase: P
   const [status, setStatus] = useState<string>(phase.status);
   const [startDate, setStartDate] = useState<string>(phase.planned_start_date ?? "");
   const [endDate, setEndDate] = useState<string>(phase.planned_end_date ?? "");
-  const [reason, setReason] = useState("");
+  const [reason, setReason] = useState(phase.blocked_reason ?? "");
+  const [nextAction, setNextAction] = useState(phase.next_action ?? "");
+  const [nextActionDate, setNextActionDate] = useState(phase.next_action_date ?? "");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  async function submit() {
-    setSaving(true);
+  function ymd(v: string | null | undefined): string {
+    return v ? String(v).slice(0, 10) : "";
+  }
+
+  function openModal() {
+    setStatus(phase.status);
+    setStartDate(ymd(phase.planned_start_date));
+    setEndDate(ymd(phase.planned_end_date));
+    setReason(phase.blocked_reason ?? "");
+    setNextAction(phase.next_action ?? "");
+    setNextActionDate(ymd(phase.next_action_date));
     setErr(null);
+    setOpen(true);
+  }
+
+  async function submit() {
+    setErr(null);
+    if (status === "blocked" && (!reason.trim() || !nextAction.trim())) {
+      setErr("Indica el motivo del bloqueo y la próxima acción.");
+      return;
+    }
+    setSaving(true);
     try {
       const phases = detail.phases.map((ph) => ({
         id: ph.id,
@@ -430,8 +457,9 @@ function EditPhase({ detail, phase, onSaved }: { detail: ProjectDetail; phase: P
               status,
               planned_start_date: startDate || null,
               planned_end_date: endDate || null,
-              blocked_reason: status === "blocked" ? reason : null,
-              next_action: status === "blocked" ? reason : null,
+              blocked_reason: status === "blocked" ? reason.trim() : null,
+              next_action: status === "blocked" ? nextAction.trim() : null,
+              next_action_date: status === "blocked" ? nextActionDate || null : null,
             }
           : {}),
       }));
@@ -450,7 +478,7 @@ function EditPhase({ detail, phase, onSaved }: { detail: ProjectDetail; phase: P
 
   return (
     <>
-      <SecondaryButton onClick={() => { setStatus(phase.status); setStartDate(phase.planned_start_date ?? ""); setEndDate(phase.planned_end_date ?? ""); setOpen(true); }} className="px-2 py-1 text-xs">
+      <SecondaryButton onClick={openModal} className="px-2 py-1 text-xs">
         Actualizar
       </SecondaryButton>
       {open && (
@@ -476,9 +504,17 @@ function EditPhase({ detail, phase, onSaved }: { detail: ProjectDetail; phase: P
             </div>
             <p className="text-[11px] text-zinc-400">Las fases pueden traslaparse: define fechas propias por fase aunque otra aún siga activa.</p>
             {status === "blocked" && (
-              <Field label="Motivo de bloqueo / próxima acción">
-                <TextInput value={reason} onChange={setReason} placeholder="Describe el bloqueo" />
-              </Field>
+              <div className="space-y-4">
+                <Field label="Motivo del bloqueo">
+                  <Textarea value={reason} onChange={setReason} rows={2} placeholder="¿Por qué está bloqueada esta fase?" />
+                </Field>
+                <Field label="Próxima acción">
+                  <TextInput value={nextAction} onChange={setNextAction} placeholder="Siguiente paso concreto" />
+                </Field>
+                <Field label="Fecha de la próxima acción">
+                  <TextInput value={nextActionDate} onChange={setNextActionDate} type="date" />
+                </Field>
+              </div>
             )}
             {err && <p className="text-xs text-red-600">{err}</p>}
           </div>

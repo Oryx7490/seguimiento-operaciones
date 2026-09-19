@@ -3,14 +3,17 @@ import { jsonOk } from "@/app/lib/api";
 
 export async function GET() {
   const { rows: projects } = await pool.query(
-    `SELECT id, code, name, health_status, planned_start_date, planned_end_date,
+    `SELECT projects.id, projects.code, projects.name, projects.health_status,
+            projects.planned_start_date, projects.planned_end_date,
+            clients.name AS client_name,
             (SELECT min(planned_start_date) FROM project_phases
               WHERE project_id = projects.id AND status <> 'not_applicable' AND planned_start_date IS NOT NULL) AS min_phase_start,
             (SELECT max(planned_end_date) FROM project_phases
               WHERE project_id = projects.id AND status <> 'not_applicable' AND planned_end_date IS NOT NULL) AS max_phase_end
        FROM projects
-      WHERE status <> 'cancelled'
-      ORDER BY created_at ASC`
+       LEFT JOIN clients ON clients.id = projects.client_id
+      WHERE projects.status <> 'cancelled'
+      ORDER BY projects.created_at ASC`
   );
 
   const { rows: phases } = await pool.query(

@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
   const to = searchParams.get("to") ?? "";
   if (!DATE_RE.test(from) || !DATE_RE.test(to)) return jsonError("Se requieren parámetros from y to (YYYY-MM-DD)");
 
-  const where = ["a.date BETWEEN $1 AND $2"];
+  const where = ["(a.date BETWEEN $1 AND $2 OR (a.end_date IS NOT NULL AND a.date <= $2 AND a.end_date >= $1))"];
   const params: unknown[] = [from, to];
 
   const technician = searchParams.get("technician");
@@ -57,6 +57,7 @@ export async function GET(req: NextRequest) {
     const sql = `
       SELECT a.id,
              a.date::text AS date,
+             a.end_date::text AS end_date,
              a.description,
              a.status,
              a.planned_hours,
@@ -115,6 +116,7 @@ export async function GET(req: NextRequest) {
     const activities = rows.map((r) => ({
       id: r.id,
       date: r.date,
+      end_date: r.end_date ?? null,
       description: r.description,
       status: r.status,
       planned_hours: Number(r.planned_hours),
@@ -139,6 +141,7 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   let body: {
     date?: string;
+    end_date?: string | null;
     description?: string;
     status?: string;
     planned_hours?: number;
@@ -156,6 +159,10 @@ export async function POST(req: NextRequest) {
 
   const date = body.date ?? "";
   if (!DATE_RE.test(date)) return jsonError("date es obligatorio (YYYY-MM-DD)");
+  const endDate = body.end_date ?? null;
+  if (endDate !== null && (!DATE_RE.test(endDate) || endDate < date)) {
+    return jsonError("end_date debe ser YYYY-MM-DD y no anterior a date");
+  }
   const description = body.description?.trim();
   if (!description) return jsonError("description es obligatorio");
   const projectIds = Array.isArray(body.project_ids) ? body.project_ids.filter((id) => id && parseId(id)) : [];
@@ -188,10 +195,10 @@ export async function POST(req: NextRequest) {
     }
 
     const act = await client.query(
-      `INSERT INTO activities (date, description, status, planned_hours, ticket_id, internal_activity_type_id, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO activities (date, end_date, description, status, planned_hours, ticket_id, internal_activity_type_id, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING id`,
-      [date, description, status, planned, hasTicket ? body.ticket_id : null, hasInternal ? body.internal_activity_type_id : null, actorId]
+      [date, endDate, description, status, planned, hasTicket ? body.ticket_id : null, hasInternal ? body.internal_activity_type_id : null, actorId]
     );
     const activityId = act.rows[0].id;
 

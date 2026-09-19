@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type DragEvent as ReactDragEvent } from "react";
 import Link from "next/link";
 import { useResource, fetchJson } from "@/app/lib/client";
 import { mondayOfWeek, weekDays, formatShortDate, isToday, WEEKDAY_SHORT } from "@/app/lib/prototype-data";
@@ -53,9 +53,40 @@ function isoDate(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+function activityEnd(a: Activity): string {
+  return a.end_date && a.end_date > a.date ? a.end_date : a.date;
+}
+
+function covers(a: Activity, iso: string): boolean {
+  return a.date <= iso && iso <= activityEnd(a);
+}
+
+function addDaysIso(iso: string, n: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(y, m - 1, d, 12, 0, 0, 0);
+  dt.setDate(dt.getDate() + n);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+}
+
+function dayDiff(fromIso: string, toIso: string): number {
+  const [y1, m1, d1] = fromIso.split("-").map(Number);
+  const [y2, m2, d2] = toIso.split("-").map(Number);
+  const a = new Date(y1, m1 - 1, d1, 12, 0, 0, 0);
+  const b = new Date(y2, m2 - 1, d2, 12, 0, 0, 0);
+  return Math.round((b.getTime() - a.getTime()) / 86400000);
+}
+
+const STATUS_CYCLE: Record<Activity["status"], Activity["status"]> = {
+  planned: "in_progress",
+  in_progress: "completed",
+  completed: "planned",
+  cancelled: "planned",
+};
+
 export default function WeekAgenda() {
   const [monday, setMonday] = useState(() => mondayOfWeek(new Date()));
   const [view, setView] = useState<"week" | "day">("week");
+  const [compact, setCompact] = useState(false);
   const [day, setDay] = useState<string>(() => isoDate(new Date()));
   const [kind, setKind] = useState<string>("");
   const [techId, setTechId] = useState<string>("");
@@ -63,8 +94,12 @@ export default function WeekAgenda() {
   const [clientId, setClientId] = useState<string>("");
   const [selected, setSelected] = useState<Activity | null>(null);
   const [creating, setCreating] = useState<{ date: string; techIds: string[] } | null>(null);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dropIso, setDropIso] = useState<string | null>(null);
+  const [moveErr, setMoveErr] = useState<string | null>(null);
 
   const days = weekDays(monday);
+  const showDays = compact ? days.slice(0, 5) : days;
 
   const params = new URLSearchParams();
   params.set("from", view === "day" ? day : isoDate(days[0]));
@@ -83,6 +118,9 @@ export default function WeekAgenda() {
 
   const activities = act.data?.activities ?? [];
   const technicians = (techs.data?.technicians ?? []).filter((t) => t.technician_active);
+  const visibleDayTechs = compact
+    ? technicians.filter((t) => activities.some((a) => covers(a, day) && a.technicians.some((x) => x.technician_id === t.id)))
+    : technicians;
   const loading = !act.data && !act.error;
 
   function shift(delta: number) {
@@ -103,11 +141,81 @@ export default function WeekAgenda() {
     setMonday(mondayOfWeek(new Date()));
   }
 
-  const overdueCount = activities.filter((a) => a.date < isoDate(new Date()) && (a.status === "planned" || a.status === "in_progress")).length;
+  const overdueCount = activities.filter((a) => activityEnd(a) < isoDate(new Date()) && (a.status === "planned" || a.status === "in_progress")).length;
   const unassignedTickets = (tickets.data?.tickets ?? []).filter((t) => ["new", "unassigned", "to_review"].includes(t.status)).length;
   const blockedProjects = (projects.data?.projects ?? []).filter((p) => p.health_status === "blocked").length;
   const plannedTotal = activities.reduce((s, a) => s + a.planned_hours, 0);
   const workedTotal = activities.reduce((s, a) => s + Number(a.worked_hours), 0);
+
+  async function moveActivity(id: string, toIso: string) {
+    const a = activities.find((x) => x.id === id);
+    setDraggingId(null);
+    setDropIso(null);
+    if (!a) return;
+    const delta = dayDiff(a.date, toIso);
+    if (delta === 0) return;
+    setMoveErr(null);
+    try {
+      await fetchJson(`/api/activities/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ date: toIso, end_date: a.end_date ? addDaysIso(a.end_date, delta) : null }),
+      });
+      act.reload();
+    } catch (e) {
+      setMoveErr(String(e));
+    }
+  }
+
+  async function cycleStatus(a: Activity) {
+    setMoveErr(null);
+    try {
+      await fetchJson(`/api/activities/${a.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: STATUS_CYCLE[a.status] }),
+      });
+      act.reload();
+    } catch (e) {
+      setMoveErr(String(e));
+    }
+  }
+
+  function cardDragProps(a: Activity) {
+    return {
+      draggable: true as const,
+      onDragStart: (e: ReactDragEvent) => {
+        e.dataTransfer.effectAllowed = "move";
+        try {
+          e.dataTransfer.setData("text/plain", a.id);
+        } catch {}
+        setDraggingId(a.id);
+      },
+      onDragEnd: () => {
+        setDraggingId(null);
+        setDropIso(null);
+      },
+    };
+  }
+
+  function cellDropProps(iso: string) {
+    return {
+      onDragOver: (e: ReactDragEvent) => {
+        if (draggingId) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = "move";
+          setDropIso(iso);
+        }
+      },
+      onDragLeave: () => {
+        setDropIso((cur) => (cur === iso ? null : cur));
+      },
+      onDrop: (e: ReactDragEvent) => {
+        e.preventDefault();
+        const id = draggingId ?? (() => { try { return e.dataTransfer.getData("text/plain") || null; } catch { return null; } })();
+        if (id) void moveActivity(id, iso);
+        else setDropIso(null);
+      },
+    };
+  }
 
   const weekLabel = `Semana del ${formatShortDate(days[0])} – ${formatShortDate(days[6])} de ${new Intl.DateTimeFormat("es-MX", { month: "long", year: "numeric" }).format(days[0])}`;
   const dayLabel = new Intl.DateTimeFormat("es-MX", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date(`${day}T00:00:00`));
@@ -139,6 +247,13 @@ export default function WeekAgenda() {
               </button>
             ))}
           </div>
+          <button
+            onClick={() => setCompact((c) => !c)}
+            title="Oculta la columna de técnicos y el fin de semana; muestra días más grandes"
+            className={`rounded-md border px-3 py-1.5 text-sm ${compact ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50"}`}
+          >
+            {compact ? "Vista completa" : "Vista reducida"}
+          </button>
 
           <div className="ml-auto flex overflow-hidden rounded-md border border-zinc-300 text-sm">
             {([["", "Todo"], ["project", "Proyectos"], ["ticket", "Tickets"], ["internal", "Internas"]] as const).map(([v, label]) => (
@@ -194,8 +309,47 @@ export default function WeekAgenda() {
 
       <main className="p-4">
         {act.error && <div className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{act.error}</div>}
+        {moveErr && <div className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{moveErr}</div>}
 
-        {view === "week" ? (
+        {view === "week" && compact ? (
+          <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm">
+            <div className="min-w-[760px]">
+              <div className="grid grid-cols-5 border-b border-zinc-200 bg-zinc-50">
+                {showDays.map((d, i) => (
+                  <div key={i} className={`border-r border-zinc-200 px-1 py-2 text-center last:border-r-0 ${isToday(d) ? "bg-sky-50" : ""}`}>
+                    <p className={`text-sm font-semibold ${isToday(d) ? "text-sky-700" : "text-zinc-700"}`}>{WEEKDAY_SHORT[i]}</p>
+                    <p className={`text-xs ${isToday(d) ? "text-sky-600" : "text-zinc-400"}`}>{formatShortDate(d)}</p>
+                  </div>
+                ))}
+              </div>
+              {loading ? (
+                <div className="p-8"><Spinner /></div>
+              ) : (
+                <div className="grid grid-cols-5">
+                  {showDays.map((d, i) => {
+                    const iso = isoDate(d);
+                    const cellActs = activities.filter((a) => covers(a, iso));
+                    return (
+                      <div key={i} {...cellDropProps(iso)} className={`min-h-[180px] border-r border-zinc-100 p-1.5 last:border-r-0 ${isToday(d) ? "bg-sky-50/60" : ""} ${dropIso === iso ? "bg-sky-100 ring-2 ring-inset ring-sky-400" : ""}`}>
+                        <div className="flex flex-col gap-1.5">
+                          {cellActs.map((a) => (
+                            <ActivityCard key={a.id} activity={a} large showTechs onClick={() => setSelected(a)} onCycleStatus={() => cycleStatus(a)} dragging={draggingId === a.id} {...cardDragProps(a)} />
+                          ))}
+                          <button
+                            onClick={() => setCreating({ date: iso, techIds: [] })}
+                            className="flex h-6 items-center justify-center rounded border border-dashed border-zinc-300 text-xs text-zinc-400 hover:border-zinc-400 hover:text-zinc-600"
+                          >
+                            + Actividad
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : view === "week" ? (
           <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm">
             <div className="min-w-[980px]">
               <div className="grid grid-cols-[150px_repeat(7,1fr)] border-b border-zinc-200 bg-zinc-50">
@@ -223,12 +377,12 @@ export default function WeekAgenda() {
                     </div>
                     {days.map((d, i) => {
                       const iso = isoDate(d);
-                      const cellActs = activities.filter((a) => a.date === iso && a.technicians.some((t) => t.technician_id === tech.id));
+                      const cellActs = activities.filter((a) => covers(a, iso) && a.technicians.some((t) => t.technician_id === tech.id));
                       return (
-                        <div key={i} className={`min-h-[96px] border-r border-zinc-100 p-1 last:border-r-0 ${isToday(d) ? "bg-sky-50/60" : ""}`}>
+                        <div key={i} {...cellDropProps(iso)} className={`min-h-[96px] border-r border-zinc-100 p-1 last:border-r-0 ${isToday(d) ? "bg-sky-50/60" : ""} ${dropIso === iso ? "bg-sky-100 ring-2 ring-inset ring-sky-400" : ""}`}>
                           <div className="flex flex-col gap-1">
                             {cellActs.map((a) => (
-                              <ActivityCard key={a.id} activity={a} onClick={() => setSelected(a)} />
+                              <ActivityCard key={a.id} activity={a} onClick={() => setSelected(a)} onCycleStatus={() => cycleStatus(a)} dragging={draggingId === a.id} {...cardDragProps(a)} />
                             ))}
                             <button
                               onClick={() => setCreating({ date: iso, techIds: [tech.id] })}
@@ -249,16 +403,16 @@ export default function WeekAgenda() {
           <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm">
             {loading ? (
               <div className="p-8"><Spinner /></div>
-            ) : technicians.length === 0 ? (
-              <p className="p-6 text-sm text-zinc-400">No hay técnicos activos. Crea técnicos desde Configuración.</p>
+            ) : visibleDayTechs.length === 0 ? (
+              <p className="p-6 text-sm text-zinc-400">{technicians.length === 0 ? "No hay técnicos activos. Crea técnicos desde Configuración." : "Nadie tiene actividades este día."}</p>
             ) : (
               <div className="flex min-w-max items-stretch">
-                {technicians.map((tech) => {
-                  const techActs = activities.filter((a) => a.date === day && a.technicians.some((t) => t.technician_id === tech.id));
+                {visibleDayTechs.map((tech) => {
+                  const techActs = activities.filter((a) => covers(a, day) && a.technicians.some((t) => t.technician_id === tech.id));
                   const planned = techActs.reduce((s, a) => s + Number(a.planned_hours), 0);
                   const worked = techActs.reduce((s, a) => s + Number(a.worked_hours), 0);
                   return (
-                    <div key={tech.id} className="flex w-80 shrink-0 flex-col border-r border-zinc-100 last:border-r-0">
+                    <div key={tech.id} className={`flex shrink-0 flex-col border-r border-zinc-100 last:border-r-0 ${compact ? "w-96" : "w-80"}`}>
                       <div className="flex items-center gap-2 border-b border-zinc-200 bg-zinc-50 px-3 py-2">
                         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-[11px] font-semibold text-white">
                           {initials(tech.display_name)}
@@ -270,7 +424,7 @@ export default function WeekAgenda() {
                       </div>
                       <div className="flex min-h-[180px] flex-1 flex-col gap-1.5 p-2">
                         {techActs.map((a) => (
-                          <ActivityCard key={a.id} activity={a} onClick={() => setSelected(a)} />
+                          <ActivityCard key={a.id} activity={a} variant="day" onClick={() => setSelected(a)} onCycleStatus={() => cycleStatus(a)} />
                         ))}
                         {techActs.length === 0 && (
                           <p className="px-1 py-2 text-center text-[11px] text-zinc-400">Sin actividades planeadas</p>
@@ -293,12 +447,16 @@ export default function WeekAgenda() {
         <p className="mt-3 text-xs text-zinc-500">
           Haz clic en una tarjeta para ver detalle, registrar horas o cancelarla. Cada técnico puede tener
           varias actividades al día y una actividad puede tener varios técnicos.
+          Arrastra una tarjeta a otro día para moverla (se conserva su duración). El punto de color cambia
+          el estado directamente. Desde el detalle puedes duplicarla o extender su fin a varios días.
+          La vista reducida oculta la columna de técnicos y el fin de semana para mostrar días más grandes.
         </p>
       </main>
 
       {selected && (
         <ActivityDetailModal
           activity={selected}
+          technicians={technicians}
           onClose={() => setSelected(null)}
           onSaved={() => act.reload()}
         />
@@ -330,7 +488,18 @@ function initials(name: string): string {
   return (parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "").toUpperCase();
 }
 
-function ActivityCard({ activity, onClick }: { activity: Activity; onClick: () => void }) {
+function ActivityCard({ activity, onClick, large, showTechs, variant, draggable, onDragStart, onDragEnd, onCycleStatus, dragging }: {
+  activity: Activity;
+  onClick: () => void;
+  large?: boolean;
+  showTechs?: boolean;
+  variant?: "day";
+  draggable?: boolean;
+  onDragStart?: (e: ReactDragEvent) => void;
+  onDragEnd?: () => void;
+  onCycleStatus?: () => void;
+  dragging?: boolean;
+}) {
   const meta = STATUS_META[activity.status];
   const kind = KIND_META[activity.kind];
   const code = activity.kind === "project" ? activity.projects[0]?.project_code
@@ -339,39 +508,115 @@ function ActivityCard({ activity, onClick }: { activity: Activity; onClick: () =
   const hours = activity.worked_hours > 0
     ? `${activity.worked_hours}h / ${activity.planned_hours}h plan`
     : `${activity.planned_hours}h plan`;
-  const overdue = activity.date < isoDate(new Date()) && (activity.status === "planned" || activity.status === "in_progress");
+  const overdue = activityEnd(activity) < isoDate(new Date()) && (activity.status === "planned" || activity.status === "in_progress");
+  const multi = activity.end_date !== null && activity.end_date > activity.date;
+  const dayMain = activity.kind === "project"
+    ? (activity.projects[0]?.project_name ?? activity.description)
+    : activity.kind === "ticket"
+      ? (activity.client_name ?? activity.ticket_title ?? "Ticket")
+      : (activity.internal_activity_type_name ?? "Interna");
+  const daySub = activity.kind === "ticket" && activity.ticket_title
+    ? `${activity.ticket_code ?? "Ticket"} · ${activity.ticket_title}`
+    : null;
 
   return (
-    <button onClick={onClick} className={`flex w-full flex-col gap-1 rounded-md border p-1.5 text-left shadow-sm transition hover:shadow ${meta.card} ${overdue ? "ring-1 ring-rose-400" : ""}`}>
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onClick}
+      onKeyDown={(e) => { if (e.key === "Enter") onClick(); }}
+      draggable={draggable}
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      title={draggable ? "Arrastra para cambiar de día · clic para abrir" : "Clic para abrir"}
+      className={`flex w-full cursor-pointer flex-col gap-1 rounded-md border text-left shadow-sm transition hover:shadow ${large ? "p-2.5" : "p-1.5"} ${meta.card} ${overdue ? "ring-1 ring-rose-400" : ""} ${dragging ? "opacity-50" : ""}`}
+    >
       <div className="flex items-center justify-between gap-1">
         <span className={`max-w-[80%] truncate rounded px-1 text-[10px] font-semibold ${kind.chip}`}>{code}</span>
-        <span className={`h-2 w-2 shrink-0 rounded-full ${meta.dot}`} title={meta.label} />
+        <button
+          type="button"
+          title={`${meta.label} · clic para cambiar estado`}
+          onClick={(e) => { e.stopPropagation(); onCycleStatus?.(); }}
+          className="flex shrink-0 items-center rounded-full p-0.5 hover:bg-zinc-300/60"
+        >
+          <span className={`h-2.5 w-2.5 rounded-full ${meta.dot}`} />
+        </button>
       </div>
-      <p className="truncate text-[11px] font-medium leading-tight text-zinc-800">{activity.description}</p>
-      {activity.kind === "project" && activity.projects[0] && (
+      {variant === "day" ? (
+        <>
+          <p className="truncate text-sm font-semibold leading-tight text-zinc-900">{dayMain}</p>
+          <p className="truncate text-[11px] leading-tight text-zinc-500">{activity.description}</p>
+          {daySub && <p className="truncate text-[10px] text-zinc-500">{daySub}</p>}
+        </>
+      ) : (
+        <p className={`truncate font-medium leading-tight text-zinc-800 ${large ? "text-sm" : "text-[11px]"}`}>{activity.description}</p>
+      )}
+      {multi && (
+        <p className="truncate text-[10px] font-semibold text-sky-700">
+          {formatShortDate(new Date(`${activity.date}T00:00:00`))} → {formatShortDate(new Date(`${activity.end_date}T00:00:00`))}
+        </p>
+      )}
+      {showTechs && (
+        <p className="truncate text-[11px] font-medium text-zinc-600">{activity.technicians.map((t) => t.technician_name).join(", ")}</p>
+      )}
+      {variant !== "day" && activity.kind === "project" && activity.projects[0] && (
         <p className="truncate text-[10px] font-medium text-zinc-700">{activity.projects[0].project_name}</p>
       )}
-      <p className="truncate text-[10px] text-zinc-500">{activity.client_name ?? "—"}</p>
+      {!(variant === "day" && activity.kind === "ticket") && (
+        <p className="truncate text-[10px] text-zinc-500">{activity.client_name ?? "—"}</p>
+      )}
       <div className="flex items-center justify-between text-[10px] text-zinc-600">
         <span>{hours}</span>
         {overdue && <span className="text-rose-600">Vencido</span>}
       </div>
-    </button>
+    </div>
   );
 }
 
-function ActivityDetailModal({ activity, onClose, onSaved }: { activity: Activity; onClose: () => void; onSaved: () => void }) {
+function ActivityDetailModal({ activity, technicians, onClose, onSaved }: {
+  activity: Activity;
+  technicians: { id: string; display_name: string }[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
   const kind = KIND_META[activity.kind];
   const code = activity.kind === "project" ? activity.projects[0]?.project_code
     : activity.kind === "ticket" ? activity.ticket_code
     : activity.internal_activity_type_name;
   const [status, setStatus] = useState<string>(activity.status);
+  const [description, setDescription] = useState(activity.description);
+  const [startDate, setStartDate] = useState(activity.date);
+  const [endDate, setEndDate] = useState(activity.end_date ?? "");
+  const [techIds, setTechIds] = useState<string[]>(activity.technicians.map((t) => t.technician_id));
   const [hourTech, setHourTech] = useState<string>(activity.technicians[0]?.technician_id ?? "");
   const [hours, setHours] = useState("");
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const statusMeta = STATUS_META[activity.status];
+  const techsChanged = [...techIds].sort().join(",") !== activity.technicians.map((t) => t.technician_id).sort().join(",");
+
+  function toggleTechId(tid: string) {
+    setTechIds((prev) => (prev.includes(tid) ? prev.filter((x) => x !== tid) : [...prev, tid]));
+  }
+
+  async function saveTechs() {
+    if (techIds.length === 0) {
+      setErr("La actividad debe tener al menos un técnico");
+      return;
+    }
+    setSaving(true);
+    setErr(null);
+    try {
+      await fetchJson(`/api/activities/${activity.id}`, { method: "PATCH", body: JSON.stringify({ technician_ids: techIds }) });
+      onSaved();
+      onClose();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
 
   async function saveStatus() {
     if (status === activity.status) return;
@@ -411,6 +656,78 @@ function ActivityDetailModal({ activity, onClose, onSaved }: { activity: Activit
     }
   }
 
+  async function saveDescription() {
+    if (!description.trim()) {
+      setErr("La descripción es obligatoria");
+      return;
+    }
+    setSaving(true);
+    setErr(null);
+    try {
+      await fetchJson(`/api/activities/${activity.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ description: description.trim() }),
+      });
+      onSaved();
+      onClose();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveDates() {
+    if (!startDate) {
+      setErr("Indica la fecha de inicio");
+      return;
+    }
+    if (endDate && endDate < startDate) {
+      setErr("La fecha fin no puede ser anterior al inicio");
+      return;
+    }
+    setSaving(true);
+    setErr(null);
+    try {
+      await fetchJson(`/api/activities/${activity.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ date: startDate, end_date: endDate || null }),
+      });
+      onSaved();
+      onClose();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function duplicate() {
+    setSaving(true);
+    setErr(null);
+    try {
+      await fetchJson("/api/activities", {
+        method: "POST",
+        body: JSON.stringify({
+          date: activity.date,
+          end_date: activity.end_date,
+          description: `${activity.description} (copia)`,
+          planned_hours: activity.planned_hours,
+          project_ids: activity.projects.map((p) => p.project_id),
+          ticket_id: activity.ticket_id ?? undefined,
+          internal_activity_type_id: activity.internal_activity_type_id ?? undefined,
+          technician_ids: activity.technicians.map((t) => t.technician_id),
+        }),
+      });
+      onSaved();
+      onClose();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function cancel() {
     if (!confirm("¿Cancelar esta actividad?")) return;
     setSaving(true);
@@ -429,6 +746,7 @@ function ActivityDetailModal({ activity, onClose, onSaved }: { activity: Activit
       footer={
         activity.status !== "cancelled" ? (
           <>
+            <SecondaryButton onClick={duplicate} disabled={saving}>Duplicar</SecondaryButton>
             <SecondaryButton onClick={cancel} disabled={saving}>Cancelar actividad</SecondaryButton>
             <PrimaryButton onClick={saveStatus} disabled={saving || status === activity.status}>Guardar estado</PrimaryButton>
           </>
@@ -441,7 +759,16 @@ function ActivityDetailModal({ activity, onClose, onSaved }: { activity: Activit
           <span className="flex items-center gap-1.5 text-xs text-zinc-500">
             <span className={`h-2 w-2 rounded-full ${statusMeta.dot}`} /> {statusMeta.label}
           </span>
-          <span className="text-xs text-zinc-400">{activity.date}</span>
+          <span className="text-xs text-zinc-400">{activity.date}{activity.end_date && activity.end_date > activity.date ? ` → ${activity.end_date}` : ""}</span>
+        </div>
+
+        <div className="space-y-3 border-t border-zinc-100 pt-4">
+          <Field label="Descripción de la actividad">
+            <TextInput value={description} onChange={setDescription} placeholder="P. ej. Instalación de gabinetes" />
+          </Field>
+          <SecondaryButton onClick={saveDescription} disabled={saving || !description.trim() || description.trim() === activity.description}>
+            Guardar descripción
+          </SecondaryButton>
         </div>
 
         <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
@@ -456,6 +783,19 @@ function ActivityDetailModal({ activity, onClose, onSaved }: { activity: Activit
         )}
 
         <div className="space-y-3 border-t border-zinc-100 pt-4">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Fechas y duración</h3>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Inicio">
+              <TextInput type="date" value={startDate} onChange={setStartDate} />
+            </Field>
+            <Field label="Fin (opcional, varios días)">
+              <TextInput type="date" value={endDate} onChange={setEndDate} />
+            </Field>
+          </div>
+          <SecondaryButton onClick={saveDates} disabled={saving}>Guardar fechas</SecondaryButton>
+        </div>
+
+        <div className="space-y-3 border-t border-zinc-100 pt-4">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Estado</h3>
           <Select
             value={status}
@@ -467,6 +807,28 @@ function ActivityDetailModal({ activity, onClose, onSaved }: { activity: Activit
               { value: "cancelled", label: "Cancelada" },
             ]}
           />
+        </div>
+
+        <div className="space-y-3 border-t border-zinc-100 pt-4">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Técnicos asignados</h3>
+          <div className="flex flex-wrap gap-1.5">
+            {technicians.map((t) => {
+              const on = techIds.includes(t.id);
+              const wasAssigned = activity.technicians.some((x) => x.technician_id === t.id);
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => toggleTechId(t.id)}
+                  title={wasAssigned ? "Asignado actualmente" : "Asignar"}
+                  className={`rounded-md border px-2 py-1 text-xs font-medium ${on ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-300 bg-white text-zinc-600 hover:bg-zinc-50"}`}
+                >
+                  {wasAssigned && !on ? "✕ " : ""}{t.display_name}
+                </button>
+              );
+            })}
+          </div>
+          <SecondaryButton onClick={saveTechs} disabled={saving || !techsChanged}>Guardar técnicos</SecondaryButton>
         </div>
 
         <div className="space-y-3 border-t border-zinc-100 pt-4">
@@ -644,7 +1006,7 @@ function NewActivityModal({ date, initialTechIds, technicians, onClose, onSaved 
             {technicians.map((t) => {
               const on = techIds.includes(t.id);
               return (
-                <button key={t.id} onClick={() => toggleTech(t.id)} className={`rounded-md border px-2 py-1 text-xs font-medium ${on ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-300 bg-white text-zinc-600 hover:bg-zinc-50"}`}>
+                <button key={t.id} type="button" onClick={() => toggleTech(t.id)} className={`rounded-md border px-2 py-1 text-xs font-medium ${on ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-300 bg-white text-zinc-600 hover:bg-zinc-50"}`}>
                   {t.display_name}
                 </button>
               );

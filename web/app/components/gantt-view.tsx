@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import Link from "next/link";
 import { fetchJson, useResource } from "@/app/lib/client";
 import { Modal, Field, TextInput, PrimaryButton, SecondaryButton } from "@/app/components/ui";
@@ -47,6 +47,7 @@ interface GanttProject {
   id: string;
   code: string;
   name: string;
+  client_name: string | null;
   health_status: string;
   planned_start_date: string | null;
   planned_end_date: string | null;
@@ -89,6 +90,65 @@ const SCALES: Record<ScaleKey, { label: string; days: number; px: number }> = {
 
 const WEEKDAYS = ["D", "L", "M", "M", "J", "V", "S"];
 
+type SortKey = "default" | "name" | "client";
+const SORTS: Record<SortKey, string> = {
+  default: "Creación",
+  name: "Proyecto",
+  client: "Cliente",
+};
+
+const LANE_H = 26;
+
+interface LanePlacement {
+  phase: GanttPhase;
+  lane: number;
+}
+
+function phaseVisibleRange(
+  phase: GanttPhase,
+  from: Date,
+  todayIdx: number,
+  scale: { days: number }
+): { i0: number; i1: number } | null {
+  const startIso = toDateIso(phase.planned_start_date);
+  if (!startIso) return null;
+  const i0 = diffDays(from, startIso);
+  let i1 = phase.planned_end_date ? diffDays(from, toDateIso(phase.planned_end_date)) : todayIdx;
+  if (phase.status === "completed" && !phase.planned_end_date) i1 = i0;
+  if (i1 < i0) i1 = i0;
+  if (i0 > scale.days - 1 || i1 < 0) return null;
+  return { i0, i1 };
+}
+
+function assignLanes(
+  phases: GanttPhase[],
+  from: Date,
+  todayIdx: number,
+  scale: { days: number }
+): { placed: LanePlacement[]; lanes: number } {
+  const items = phases
+    .map((phase) => {
+      const range = phaseVisibleRange(phase, from, todayIdx, scale);
+      return range ? { phase, ...range } : null;
+    })
+    .filter((x): x is { phase: GanttPhase; i0: number; i1: number } => x !== null)
+    .sort((a, b) => a.i0 - b.i0 || a.i1 - b.i1);
+
+  const laneEnds: number[] = [];
+  const placed: LanePlacement[] = [];
+  for (const it of items) {
+    let lane = laneEnds.findIndex((end) => end < it.i0);
+    if (lane === -1) {
+      lane = laneEnds.length;
+      laneEnds.push(it.i1);
+    } else {
+      laneEnds[lane] = it.i1;
+    }
+    placed.push({ phase: it.phase, lane });
+  }
+  return { placed, lanes: laneEnds.length };
+}
+
 function mondayRef(): Date {
   const d = new Date();
   const day = (d.getDay() + 6) % 7;
@@ -116,6 +176,7 @@ export default function GanttView() {
   const { data, error, reload } = useGantt();
   const [scaleKey, setScaleKey] = useState<ScaleKey>("month");
   const [activeKinds, setActiveKinds] = useState<GanttKind[]>([]);
+  const [sortKey, setSortKey] = useState<SortKey>("default");
   const [edit, setEdit] = useState<{ projectId: string; phase: GanttPhase } | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
@@ -137,11 +198,21 @@ export default function GanttView() {
       if (activeKinds.length === 0) return true;
       return activeKinds.includes(kindOf(ph.kind));
     };
-    return data?.projects.map((p) => {
+    const list = (data?.projects ?? []).map((p) => {
       const visible = p.phases.filter(filter);
-      return { ...p, visible };
+      const hasDates = p.phases.some((ph) => ph.planned_start_date);
+      return { ...p, visible, hasDates };
     });
-  }, [data, activeKinds]);
+    const cmpText = (a: string | null, b: string | null) =>
+      (a ?? "").localeCompare(b ?? "", "es", { sensitivity: "base" });
+    list.sort((a, b) => {
+      if (a.hasDates !== b.hasDates) return a.hasDates ? -1 : 1;
+      if (sortKey === "name") return cmpText(a.name, b.name) || cmpText(a.code, b.code);
+      if (sortKey === "client") return cmpText(a.client_name, b.client_name) || cmpText(a.name, b.name);
+      return 0;
+    });
+    return list;
+  }, [data, activeKinds, sortKey]);
 
   async function saveDates(start: string | null, end: string | null) {
     if (!edit) return;
@@ -166,6 +237,21 @@ export default function GanttView() {
       setSaveErr(String(err));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function resizePhase(projectId: string, phaseId: string, start: string, end: string | null) {
+    setSaveErr(null);
+    try {
+      await fetchJson(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          phases: [{ id: phaseId, planned_start_date: start, planned_end_date: end }],
+        }),
+      });
+      reload();
+    } catch (err) {
+      setSaveErr(String(err));
     }
   }
 
@@ -203,6 +289,21 @@ export default function GanttView() {
               {SCALES[key].label}
             </button>
           ))}
+          <span className="ml-2 text-xs text-zinc-500">Orden:</span>
+          {(Object.keys(SORTS) as SortKey[]).map((key) => (
+            <button
+              key={key}
+              onClick={() => setSortKey(key)}
+              title="Los proyectos con fechas van primero; los vacíos al final"
+              className={`rounded-md border px-3 py-1.5 text-sm ${
+                sortKey === key
+                  ? "bg-zinc-900 text-white border-zinc-900"
+                  : "border-zinc-300 bg-white text-zinc-700"
+              }`}
+            >
+              {SORTS[key]}
+            </button>
+          ))}
           <div className="ml-auto w-full sm:w-auto">
             <div className="flex flex-wrap items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-1.5">
               <span className="text-xs text-zinc-500">Etapas · toca para filtrar:</span>
@@ -238,6 +339,11 @@ export default function GanttView() {
       <main className="p-4">
         {error && (
           <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>
+        )}
+        {saveErr && !edit && (
+          <div className="mb-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+            No se pudieron guardar las fechas: {saveErr}
+          </div>
         )}
         {!data && !error && (
           <div className="rounded-lg border border-zinc-200 bg-white p-4 text-sm text-zinc-500">
@@ -278,6 +384,8 @@ export default function GanttView() {
 
               {(visibleProjects ?? []).map((p) => {
                 const hasDates = p.visible.length > 0 || activeKinds.length === 0;
+                const { placed, lanes } = assignLanes(p.visible, from, todayIdx, scale);
+                const rowHeight = Math.max(46, lanes * LANE_H + 16);
                 return (
                   <div
                     key={p.id}
@@ -286,11 +394,14 @@ export default function GanttView() {
                     }`}
                   >
                     <div className="flex w-72 shrink-0 flex-col justify-center gap-1 border-r border-zinc-100 px-4 py-2.5">
-                      <div className="min-w-0">
+                      <Link href={`/proyectos/${p.id}`} title={`Abrir ${p.code}`} className="min-w-0 rounded hover:underline">
                         <p className="truncate text-sm font-medium text-zinc-800">
-                          <span className="font-mono text-xs text-zinc-500">{p.code}</span> {p.name}
+                          <span className="font-mono text-xs text-sky-700">{p.code}</span> {p.name}
                         </p>
-                      </div>
+                        {p.client_name && (
+                          <p className="truncate text-[10px] text-zinc-400">{p.client_name}</p>
+                        )}
+                      </Link>
                       <div className="flex flex-wrap items-center gap-2">
                         <span
                           className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
@@ -304,7 +415,7 @@ export default function GanttView() {
                         </span>
                       </div>
                     </div>
-                    <div className="relative flex flex-1 items-center py-2.5" style={{ minHeight: 46 }}>
+                    <div className="relative flex flex-1 items-stretch" style={{ minHeight: rowHeight }}>
                       {days.map((i) => (
                         <div key={i} className="h-full border-l border-zinc-50" style={{ width: scale.px }} />
                       ))}
@@ -315,14 +426,16 @@ export default function GanttView() {
                           title="Hoy"
                         />
                       )}
-                      {p.visible.map((ph) => (
+                      {placed.map(({ phase, lane }) => (
                         <Bar
-                          key={ph.id}
-                          phase={ph}
+                          key={phase.id}
+                          phase={phase}
                           scale={scale}
                           from={from}
                           todayIdx={todayIdx}
-                          onEdit={() => setEdit({ projectId: p.id, phase: ph })}
+                          top={8 + lane * LANE_H}
+                          onEdit={() => setEdit({ projectId: p.id, phase })}
+                          onResize={(start, end) => resizePhase(p.id, phase.id, start, end)}
                         />
                       ))}
                     </div>
@@ -335,7 +448,8 @@ export default function GanttView() {
 
         <p className="mt-3 text-xs text-zinc-500">
           Solo se dibujan fases con fecha planificada; las marcadas como “no aplica” no aparecen.
-          Toca una barra para ajustar sus fechas. El rango del proyecto se deriva de sus fases.
+          Arrastra una barra para moverla, o sus bordes para cambiar inicio y fin; al soltar se guarda.
+          Toca una barra sin moverla para editar sus fechas con precisión. El rango del proyecto se deriva de sus fases.
         </p>
       </main>
 
@@ -352,52 +466,136 @@ export default function GanttView() {
   );
 }
 
+type DragMode = "move" | "start" | "end";
+
 function Bar({
   phase,
   scale,
   from,
   todayIdx,
+  top,
   onEdit,
+  onResize,
 }: {
   phase: GanttPhase;
   scale: { days: number; px: number };
   from: Date;
   todayIdx: number;
+  top: number;
   onEdit: () => void;
+  onResize: (start: string, end: string | null) => void;
 }) {
-  const start = phase.planned_start_date;
-  const end = phase.planned_end_date;
-  if (!start) return null;
+  const startIso = toDateIso(phase.planned_start_date);
+  const endIso = toDateIso(phase.planned_end_date);
+  const dragRef = useRef<{
+    mode: DragMode;
+    origStart: string;
+    origEnd: string | null;
+    days: number;
+    moved: boolean;
+  } | null>(null);
+  const startXRef = useRef(0);
+  const [preview, setPreview] = useState<{ mode: DragMode; days: number } | null>(null);
 
-  const i0 = diffDays(from, start);
-  let i1 = end ? diffDays(from, end) : todayIdx;
-  if (phase.status === "completed" && !end) i1 = i0;
+  if (!startIso) return null;
+
+  const i0 = diffDays(from, startIso);
+  let i1 = endIso ? diffDays(from, endIso) : todayIdx;
+  if (phase.status === "completed" && !endIso) i1 = i0;
   if (i1 < i0) i1 = i0;
   if (i0 > scale.days - 1 || i1 < 0) return null;
 
-  const left = Math.max(0, i0);
-  const right = Math.min(scale.days - 1, i1);
-  const width = (right - left + 1) * scale.px - 4;
   const kind = kindOf(phase.kind);
   const blocked = phase.status === "blocked" || Boolean(phase.blocked_reason);
+  const shiftStart = preview && (preview.mode === "move" || preview.mode === "start") ? preview.days : 0;
+  const shiftEnd = preview && (preview.mode === "move" || preview.mode === "end") ? preview.days : 0;
+  const left = Math.max(0, i0 + shiftStart);
+  const right = Math.min(scale.days - 1, i1 + shiftEnd);
+  const width = Math.max(scale.px - 4, (right - left + 1) * scale.px - 4);
+
+  function begin(e: ReactPointerEvent, mode: DragMode) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    startXRef.current = e.clientX;
+    dragRef.current = { mode, origStart: startIso, origEnd: endIso || null, days: 0, moved: false };
+    setPreview({ mode, days: 0 });
+  }
+
+  function move(e: ReactPointerEvent) {
+    const d = dragRef.current;
+    if (!d) return;
+    let days = Math.round((e.clientX - startXRef.current) / scale.px);
+    const endIdx = d.origEnd ? diffDays(from, d.origEnd) : null;
+    if (d.mode === "start" && endIdx !== null) days = Math.min(days, endIdx - i0);
+    if (d.mode === "end") days = Math.max(days, i0 - i1);
+    d.days = days;
+    if (days !== 0) d.moved = true;
+    setPreview({ mode: d.mode, days });
+  }
+
+  function end() {
+    const d = dragRef.current;
+    if (!d) return;
+    dragRef.current = null;
+    setPreview(null);
+    if (!d.moved) {
+      onEdit();
+      return;
+    }
+    const newStart = d.mode === "end" ? d.origStart : addDaysIso(d.origStart, d.days);
+    const newEnd =
+      d.origEnd === null
+        ? null
+        : d.mode === "start"
+          ? d.origEnd
+          : addDaysIso(d.origEnd, d.days);
+    onResize(newStart, newEnd);
+  }
 
   return (
-    <button
-      type="button"
-      onClick={onEdit}
-      className={`absolute flex h-7 items-center overflow-hidden rounded-md border border-white/70 pl-2 pr-2 text-left text-[11px] font-medium text-zinc-800 shadow-sm transition hover:brightness-95 ${
-        phase.status === "completed" ? "opacity-50" : "opacity-100"
-      }`}
+    <div
+      role="button"
+      tabIndex={0}
+      onPointerDown={(e) => begin(e, "move")}
+      onPointerMove={move}
+      onPointerUp={end}
+      onPointerCancel={end}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onEdit();
+        }
+      }}
+      className={`absolute flex h-[22px] select-none items-center overflow-hidden rounded-md border border-white/70 pl-2 pr-2 text-left text-[11px] font-medium text-zinc-800 shadow-sm transition hover:brightness-95 ${
+        preview ? "z-20 cursor-grabbing opacity-90 shadow-md" : "cursor-grab"
+      } ${phase.status === "completed" && !preview ? "opacity-50" : "opacity-100"}`}
       style={{
         left: left * scale.px + 2,
+        top,
         width,
         backgroundColor: KIND_STYLE[kind].color,
+        touchAction: "none",
         ...(blocked ? { outline: "2px solid #f59e0b", outlineOffset: "1px" } : {}),
       }}
-      title={`${phase.name}${blocked ? " · BLOQUEADO" : ""}\n${toDateIso(start) ?? "?"} → ${toDateIso(end) ?? "abierta"} · ${statusLabel(phase.status)}`}
+      title={`${phase.name}${blocked ? " · BLOQUEADO" : ""}\n${startIso || "?"} → ${endIso || "abierta"} · ${statusLabel(
+        phase.status
+      )}\nArrastra para mover · usa los bordes para cambiar inicio y fin`}
     >
-      {width > 78 ? <span className="truncate">{phase.name}</span> : null}
-    </button>
+      <span
+        onPointerDown={(e) => begin(e, "start")}
+        className="absolute inset-y-0 left-0 z-10 w-2 cursor-ew-resize bg-black/10 opacity-0 transition-opacity hover:opacity-100"
+        aria-hidden
+      />
+      <span className="pointer-events-none truncate">{width > 78 ? phase.name : ""}</span>
+      {endIso ? (
+        <span
+          onPointerDown={(e) => begin(e, "end")}
+          className="absolute inset-y-0 right-0 z-10 w-2 cursor-ew-resize bg-black/10 opacity-0 transition-opacity hover:opacity-100"
+          aria-hidden
+        />
+      ) : null}
+    </div>
   );
 }
 
@@ -486,6 +684,13 @@ function addDays(d: Date, n: number): Date {
   const copy = new Date(d);
   copy.setDate(copy.getDate() + n);
   return copy;
+}
+
+function addDaysIso(iso: string, n: number): string {
+  const [y, m, d] = toDateIso(iso).split("-").map(Number);
+  const dt = new Date(y, m - 1, d, 12, 0, 0, 0);
+  dt.setDate(dt.getDate() + n);
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
 }
 
 function isoToday(): string {

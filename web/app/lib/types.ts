@@ -99,6 +99,27 @@ export interface Client {
   active: boolean;
   created_at: string;
   updated_at: string;
+  location_count?: number | string;
+  contacts_count?: number | string;
+  comments_count?: number | string;
+}
+
+export interface ClientContact {
+  id: string;
+  client_id: string;
+  name: string;
+  position: string | null;
+  email: string | null;
+  phone: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ClientDetail {
+  client: Client;
+  contacts: ClientContact[];
+  comments: Comment[];
 }
 
 export interface Location {
@@ -269,6 +290,7 @@ export interface ActivityProject {
 export interface Activity {
   id: string;
   date: string;
+  end_date: string | null;
   description: string;
   status: "planned" | "in_progress" | "completed" | "cancelled";
   planned_hours: number;

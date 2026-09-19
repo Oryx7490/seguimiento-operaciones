@@ -112,6 +112,9 @@ interface PhasePatch {
     actual_start_date?: string | null;
     actual_end_date?: string | null;
     status?: string;
+    blocked_reason?: string | null;
+    next_action?: string | null;
+    next_action_date?: string | null;
     _deleted?: boolean;
   }>;
 }
@@ -253,7 +256,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           if (ph.planned_end_date !== undefined) setPush("planned_end_date", ph.planned_end_date || null);
           if (ph.actual_start_date !== undefined) setPush("actual_start_date", ph.actual_start_date || null);
           if (ph.actual_end_date !== undefined) setPush("actual_end_date", ph.actual_end_date || null);
-          if (ph.status) setPush("status", ph.status);
+          if (ph.status) {
+            if (ph.status === "blocked") {
+              const reason = typeof ph.blocked_reason === "string" ? ph.blocked_reason.trim() : "";
+              const nextAction = typeof ph.next_action === "string" ? ph.next_action.trim() : "";
+              if (!reason || !nextAction) {
+                await client.query("ROLLBACK");
+                return jsonError("Para bloquear una fase indica motivo y próxima acción");
+              }
+            }
+            setPush("status", ph.status);
+          }
+          if (ph.blocked_reason !== undefined) setPush("blocked_reason", ph.blocked_reason?.trim() || null);
+          if (ph.next_action !== undefined) setPush("next_action", ph.next_action?.trim() || null);
+          if (ph.next_action_date !== undefined) setPush("next_action_date", ph.next_action_date || null);
           if (sets.length > 0) {
             await client.query(
               `UPDATE project_phases SET ${sets.join(", ")} WHERE id = $1 AND project_id = $2`,

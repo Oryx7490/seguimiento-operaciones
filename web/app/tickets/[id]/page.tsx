@@ -13,11 +13,12 @@ import {
   Select,
   Spinner,
   StatusBadge,
+  Textarea,
   TextInput,
 } from "@/app/components/ui";
 import CommentSection from "@/app/components/comment-section";
 import AttachmentsSection from "@/app/components/attachments-section";
-import type { Technician, TechniciansResponse, TicketDetail } from "@/app/lib/types";
+import type { Client, ClientsResponse, Technician, TechniciansResponse, TicketDetail } from "@/app/lib/types";
 
 const TICKET_STATUS_FLOW = [
   "new",
@@ -45,7 +46,7 @@ export default function TicketDetailPage() {
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-semibold text-zinc-700">{t.code}</span>
-          <h1 className="mt-2 text-xl font-semibold text-zinc-900">{t.title}</h1>
+          <h1 className="mt-2 break-words text-xl font-semibold text-zinc-900">{t.title}</h1>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-zinc-500">
             {t.ticket_type === "external" ? (
               <>
@@ -65,27 +66,27 @@ export default function TicketDetailPage() {
       </div>
 
       {t.description && (
-        <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
-          <p className="whitespace-pre-wrap text-sm text-zinc-600">{t.description}</p>
+        <div className="min-w-0 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+          <p className="whitespace-pre-wrap break-words text-sm text-zinc-600">{t.description}</p>
         </div>
       )}
 
       <div className="grid gap-4 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-4">
-        <div>
+        <div className="min-w-0">
           <p className="text-xs text-zinc-400">Estado</p>
           <StatusBadge status={t.status} kind="ticket" />
         </div>
-        <div>
+        <div className="min-w-0">
           <p className="text-xs text-zinc-400">Prioridad</p>
-          <p className="text-sm font-medium text-zinc-800">{t.priority_name ?? "—"}</p>
+          <p className="break-words text-sm font-medium text-zinc-800">{t.priority_name ?? "—"}</p>
         </div>
-        <div>
+        <div className="min-w-0">
           <p className="text-xs text-zinc-400">Coordinador</p>
-          <p className="text-sm font-medium text-zinc-800">{t.coordinator_name ?? "Sin asignar"}</p>
+          <p className="break-words text-sm font-medium text-zinc-800">{t.coordinator_name ?? "Sin asignar"}</p>
         </div>
-        <div>
+        <div className="min-w-0">
           <p className="text-xs text-zinc-400">Abierto</p>
-          <p className="text-sm font-medium text-zinc-800">{formatDateTime(t.opened_at)}</p>
+          <p className="break-words text-sm font-medium text-zinc-800">{formatDateTime(t.opened_at)}</p>
         </div>
       </div>
 
@@ -98,6 +99,7 @@ export default function TicketDetailPage() {
       {t.status !== "cancelled" && (
         <div className="flex flex-wrap gap-2">
           <TicketStatusChanger detail={detail} onSaved={reload} />
+          <EditTicket detail={detail} onSaved={reload} />
         </div>
       )}
 
@@ -208,6 +210,94 @@ function TicketStatusChanger({ detail, onSaved }: { detail: TicketDetail; onSave
             <Field label="Motivo / notas (opcional)">
               <TextInput value={reason} onChange={setReason} placeholder="Motivo del cambio" />
             </Field>
+            {err && <p className="text-xs text-red-600">{err}</p>}
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+/* ── Edit title & description ────────────────────── */
+
+function EditTicket({ detail, onSaved }: { detail: TicketDetail; onSaved: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState(detail.ticket.title);
+  const [description, setDescription] = useState(detail.ticket.description ?? "");
+  const [clientId, setClientId] = useState(detail.ticket.client_id ?? "");
+  const [clients, setClients] = useState<Client[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const t = detail.ticket;
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchJson<ClientsResponse>("/api/clients")
+      .then((c) => { if (!cancelled) setClients(c.clients); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  function openModal() {
+    setTitle(t.title);
+    setDescription(t.description ?? "");
+    setClientId(t.client_id ?? "");
+    setErr(null);
+    setOpen(true);
+  }
+
+  async function submit() {
+    if (!title.trim()) {
+      setErr("El título es obligatorio");
+      return;
+    }
+    setSaving(true);
+    setErr(null);
+    try {
+      const clientChanged = (clientId || null) !== t.client_id;
+      await fetchJson(`/api/tickets/${t.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          title: title.trim(),
+          description: description.trim() || null,
+          client_id: clientId || null,
+          ...(clientChanged && t.location_id ? { location_id: null } : {}),
+        }),
+      });
+      setOpen(false);
+      onSaved();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <SecondaryButton onClick={openModal}>Editar ticket</SecondaryButton>
+      {open && (
+        <Modal open={true} onClose={() => setOpen(false)} title={`Editar ticket ${t.code}`}
+          footer={
+            <>
+              <SecondaryButton onClick={() => setOpen(false)}>Cancelar</SecondaryButton>
+              <PrimaryButton onClick={submit} disabled={saving}>{saving ? "Guardando…" : "Guardar"}</PrimaryButton>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <Field label="Título">
+              <TextInput value={title} onChange={setTitle} placeholder="Título del ticket" />
+            </Field>
+            <Field label="Descripción (opcional)">
+              <Textarea value={description} onChange={setDescription} rows={5} placeholder="Detalle del problema, síntomas, alcance…" />
+            </Field>
+            <Field label="Cliente">
+              <Select value={clientId} onChange={setClientId} placeholder="— Sin cliente —" options={clients.map((c) => ({ value: c.id, label: c.name }))} />
+            </Field>
+            {t.location_id && (clientId || null) !== t.client_id && (
+              <p className="text-[11px] text-amber-600">Al cambiar de cliente se quitará la ubicación actual ({t.location_name ?? "sin nombre"}).</p>
+            )}
             {err && <p className="text-xs text-red-600">{err}</p>}
           </div>
         </Modal>

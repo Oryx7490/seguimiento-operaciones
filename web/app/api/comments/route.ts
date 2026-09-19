@@ -15,6 +15,7 @@ export async function POST(req: NextRequest) {
   let body: {
     project_id?: string;
     ticket_id?: string;
+    client_id?: string;
     body?: string;
     actor_id?: string;
   };
@@ -26,7 +27,10 @@ export async function POST(req: NextRequest) {
 
   const hasProject = Boolean(body.project_id && parseId(body.project_id as string));
   const hasTicket = Boolean(body.ticket_id && parseId(body.ticket_id as string));
-  if (hasProject === hasTicket) return jsonError("Debes indicar exactamente uno: project_id o ticket_id");
+  const hasClient = Boolean(body.client_id && parseId(body.client_id as string));
+  if (Number(hasProject) + Number(hasTicket) + Number(hasClient) !== 1) {
+    return jsonError("Debes indicar exactamente uno: project_id, ticket_id o client_id");
+  }
   const commentBody = body.body?.trim();
   if (!commentBody) return jsonError("body es obligatorio");
 
@@ -36,12 +40,14 @@ export async function POST(req: NextRequest) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const entityCol = hasProject ? "project_id" : "ticket_id";
-    const entityId = (hasProject ? body.project_id : body.ticket_id) as string;
-    const ok = await client.query(`SELECT id FROM ${hasProject ? "projects" : "tickets"} WHERE id = $1`, [entityId]);
+    const entityCol = hasProject ? "project_id" : hasTicket ? "ticket_id" : "client_id";
+    const entityTable = hasProject ? "projects" : hasTicket ? "tickets" : "clients";
+    const entityLabel = hasProject ? "proyecto" : hasTicket ? "ticket" : "cliente";
+    const entityId = (hasProject ? body.project_id : hasTicket ? body.ticket_id : body.client_id) as string;
+    const ok = await client.query(`SELECT id FROM ${entityTable} WHERE id = $1`, [entityId]);
     if (ok.rows.length === 0) {
       await client.query("ROLLBACK");
-      return jsonError(`${hasProject ? "proyecto" : "ticket"} no encontrado`, 404);
+      return jsonError(`${entityLabel} no encontrado`, 404);
     }
     const { rows } = await client.query(
       `INSERT INTO comments (${entityCol}, author_id, body)

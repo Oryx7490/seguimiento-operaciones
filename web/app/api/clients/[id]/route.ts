@@ -2,6 +2,35 @@ import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
 import { jsonOk, jsonError, parseId } from "@/app/lib/api";
 
+export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  if (!parseId(id)) return jsonError("id inválido");
+  try {
+    const client = await pool.query(
+      `SELECT id, name, contact_name, contact_email, contact_phone, active, created_at, updated_at
+         FROM clients WHERE id = $1`,
+      [id]
+    );
+    if (client.rows.length === 0) return jsonError("cliente no encontrado", 404);
+    const [contacts, comments] = await Promise.all([
+      pool.query(
+        `SELECT id, client_id, name, position, email, phone, active, created_at, updated_at
+           FROM client_contacts WHERE client_id = $1 ORDER BY active DESC, name`,
+        [id]
+      ),
+      pool.query(
+        `SELECT cm.id, cm.author_id, cm.body, cm.created_at, cm.updated_at, u.name AS author_name
+           FROM comments cm JOIN users u ON u.id = cm.author_id
+          WHERE cm.client_id = $1 ORDER BY cm.created_at`,
+        [id]
+      ),
+    ]);
+    return jsonOk({ client: client.rows[0], contacts: contacts.rows, comments: comments.rows });
+  } catch (err) {
+    return jsonError("No se pudo leer el cliente", 500, String(err));
+  }
+}
+
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!parseId(id)) return jsonError("id inválido");
