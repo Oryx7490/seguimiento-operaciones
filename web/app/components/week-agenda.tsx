@@ -330,7 +330,7 @@ export default function WeekAgenda() {
                     const iso = isoDate(d);
                     const cellActs = activities.filter((a) => covers(a, iso));
                     return (
-                      <div key={i} {...cellDropProps(iso)} className={`min-h-[180px] border-r border-zinc-100 p-1.5 last:border-r-0 ${isToday(d) ? "bg-sky-50/60" : ""} ${dropIso === iso ? "bg-sky-100 ring-2 ring-inset ring-sky-400" : ""}`}>
+                      <div key={i} {...cellDropProps(iso)} className={`min-w-0 min-h-[180px] border-r border-zinc-100 p-1.5 last:border-r-0 ${isToday(d) ? "bg-sky-50/60" : ""} ${dropIso === iso ? "bg-sky-100 ring-2 ring-inset ring-sky-400" : ""}`}>
                         <div className="flex flex-col gap-1.5">
                           {cellActs.map((a) => (
                             <ActivityCard key={a.id} activity={a} large showTechs onClick={() => setSelected(a)} onCycleStatus={() => cycleStatus(a)} dragging={draggingId === a.id} {...cardDragProps(a)} />
@@ -379,7 +379,7 @@ export default function WeekAgenda() {
                       const iso = isoDate(d);
                       const cellActs = activities.filter((a) => covers(a, iso) && a.technicians.some((t) => t.technician_id === tech.id));
                       return (
-                        <div key={i} {...cellDropProps(iso)} className={`min-h-[96px] border-r border-zinc-100 p-1 last:border-r-0 ${isToday(d) ? "bg-sky-50/60" : ""} ${dropIso === iso ? "bg-sky-100 ring-2 ring-inset ring-sky-400" : ""}`}>
+                        <div key={i} {...cellDropProps(iso)} className={`min-w-0 min-h-[96px] border-r border-zinc-100 p-1 last:border-r-0 ${isToday(d) ? "bg-sky-50/60" : ""} ${dropIso === iso ? "bg-sky-100 ring-2 ring-inset ring-sky-400" : ""}`}>
                           <div className="flex flex-col gap-1">
                             {cellActs.map((a) => (
                               <ActivityCard key={a.id} activity={a} onClick={() => setSelected(a)} onCycleStatus={() => cycleStatus(a)} dragging={draggingId === a.id} {...cardDragProps(a)} />
@@ -529,7 +529,7 @@ function ActivityCard({ activity, onClick, large, showTechs, variant, draggable,
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       title={draggable ? "Arrastra para cambiar de día · clic para abrir" : "Clic para abrir"}
-      className={`flex w-full cursor-pointer flex-col gap-1 rounded-md border text-left shadow-sm transition hover:shadow ${large ? "p-2.5" : "p-1.5"} ${meta.card} ${overdue ? "ring-1 ring-rose-400" : ""} ${dragging ? "opacity-50" : ""}`}
+      className={`flex min-w-0 w-full cursor-pointer flex-col gap-1 rounded-md border text-left shadow-sm transition hover:shadow ${large ? "p-2.5" : "p-1.5"} ${meta.card} ${overdue ? "ring-1 ring-rose-400" : ""} ${dragging ? "opacity-50" : ""}`}
     >
       <div className="flex items-center justify-between gap-1">
         <span className={`max-w-[80%] truncate rounded px-1 text-[10px] font-semibold ${kind.chip}`}>{code}</span>
@@ -545,11 +545,17 @@ function ActivityCard({ activity, onClick, large, showTechs, variant, draggable,
       {variant === "day" ? (
         <>
           <p className="truncate text-sm font-semibold leading-tight text-zinc-900">{dayMain}</p>
-          <p className="truncate text-[11px] leading-tight text-zinc-500">{activity.description}</p>
+          <p className="min-w-0 break-words text-[11px] leading-tight text-zinc-500 [overflow-wrap:anywhere]">{activity.description}</p>
           {daySub && <p className="truncate text-[10px] text-zinc-500">{daySub}</p>}
         </>
       ) : (
-        <p className={`truncate font-medium leading-tight text-zinc-800 ${large ? "text-sm" : "text-[11px]"}`}>{activity.description}</p>
+        <>
+          <p className="truncate text-sm text-zinc-500">{activity.client_name ?? "—"}</p>
+          {activity.kind === "project" && activity.projects[0] && (
+            <p className="truncate text-sm font-medium text-zinc-700">{activity.projects[0].project_name}</p>
+          )}
+          <p className="min-w-0 break-words text-[10px] font-medium leading-tight text-zinc-800 [overflow-wrap:anywhere]">{activity.description}</p>
+        </>
       )}
       {multi && (
         <p className="truncate text-[10px] font-semibold text-sky-700">
@@ -558,12 +564,6 @@ function ActivityCard({ activity, onClick, large, showTechs, variant, draggable,
       )}
       {showTechs && (
         <p className="truncate text-[11px] font-medium text-zinc-600">{activity.technicians.map((t) => t.technician_name).join(", ")}</p>
-      )}
-      {variant !== "day" && activity.kind === "project" && activity.projects[0] && (
-        <p className="truncate text-[10px] font-medium text-zinc-700">{activity.projects[0].project_name}</p>
-      )}
-      {!(variant === "day" && activity.kind === "ticket") && (
-        <p className="truncate text-[10px] text-zinc-500">{activity.client_name ?? "—"}</p>
       )}
       <div className="flex items-center justify-between text-[10px] text-zinc-600">
         <span>{hours}</span>

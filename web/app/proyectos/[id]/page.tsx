@@ -105,9 +105,12 @@ export default function ProjectDetailPage() {
 
       {/* Phases */}
       <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-semibold text-zinc-800">Fases</h2>
-          <AddPhase detail={detail} onSaved={reload} />
+          <div className="flex gap-2">
+            <NotApplicableChecklist detail={detail} onSaved={reload} />
+            <AddPhase detail={detail} onSaved={reload} />
+          </div>
         </div>
         {detail.phases.length === 0 ? (
           <p className="mt-3 text-sm text-zinc-400">No hay fases registradas.</p>
@@ -404,6 +407,90 @@ function AddPhase({ detail, onSaved }: { detail: ProjectDetail; onSaved: () => v
             </div>
             {err && <p className="text-xs text-red-600">{err}</p>}
           </div>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+/* ── Mark phases not applicable ──────────────────── */
+
+function NotApplicableChecklist({ detail, onSaved }: { detail: ProjectDetail; onSaved: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [checked, setChecked] = useState<Record<string, boolean>>({});
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  function openModal() {
+    const initial: Record<string, boolean> = {};
+    for (const ph of detail.phases) initial[ph.id] = ph.status === "not_applicable";
+    setChecked(initial);
+    setErr(null);
+    setOpen(true);
+  }
+
+  async function submit() {
+    setErr(null);
+    setSaving(true);
+    try {
+      const phases = detail.phases
+        .filter((ph) => (checked[ph.id] ?? false) !== (ph.status === "not_applicable"))
+        .map((ph) => ({
+          id: ph.id,
+          status: checked[ph.id] ? "not_applicable" : "not_started",
+        }));
+      if (phases.length === 0) {
+        setOpen(false);
+        onSaved();
+        return;
+      }
+      await fetchJson(`/api/projects/${detail.project.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ phases }),
+      });
+      setOpen(false);
+      onSaved();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <SecondaryButton onClick={openModal} className="px-2 py-1 text-xs">Marcar no aplican</SecondaryButton>
+      {open && (
+        <Modal open={true} onClose={() => setOpen(false)} title="Fases que no aplican"
+          footer={
+            <>
+              <SecondaryButton onClick={() => setOpen(false)}>Cancelar</SecondaryButton>
+              <PrimaryButton onClick={submit} disabled={saving}>{saving ? "Guardando…" : "Guardar"}</PrimaryButton>
+            </>
+          }
+        >
+          <p className="mb-3 text-[11px] text-zinc-400">
+            Marca las fases que no aplican para este proyecto. Al guardar se marcan como «No aplica»; al desmarcarlas vuelven a «No iniciada».
+          </p>
+          <div className="max-h-80 space-y-1 overflow-y-auto">
+            {detail.phases.length === 0 ? (
+              <p className="text-sm text-zinc-400">No hay fases registradas.</p>
+            ) : (
+              detail.phases.map((ph) => (
+                <label key={ph.id} className="flex cursor-pointer items-center gap-3 rounded-md border border-zinc-200 px-3 py-2 hover:bg-zinc-50">
+                  <input
+                    type="checkbox"
+                    checked={checked[ph.id] ?? false}
+                    onChange={(e) => setChecked((c) => ({ ...c, [ph.id]: e.target.checked }))}
+                    className="h-4 w-4 accent-zinc-900"
+                  />
+                  <span className="flex-1 text-sm text-zinc-800">{ph.name}</span>
+                  {ph.status === "not_applicable" && <Badge className="bg-zinc-100 text-zinc-500">No aplica</Badge>}
+                </label>
+              ))
+            )}
+          </div>
+          {err && <p className="mt-3 text-xs text-red-600">{err}</p>}
         </Modal>
       )}
     </>
