@@ -152,17 +152,26 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const current = await client.query(`SELECT status FROM tickets WHERE id = $1 FOR UPDATE`, [id]);
+    const current = await client.query<{ status: string; ticket_type: string }>(
+      `SELECT status, ticket_type FROM tickets WHERE id = $1 FOR UPDATE`,
+      [id]
+    );
     if (current.rows.length === 0) {
       await client.query("ROLLBACK");
       return jsonError("ticket no encontrado", 404);
     }
     const fromStatus = current.rows[0].status;
+    const ticketType = current.rows[0].ticket_type;
 
-    if (body.status && body.status === "closed") {
+    if ("client_id" in body && !body.client_id && ticketType === "external") {
+      await client.query("ROLLBACK");
+      return jsonError("Un ticket externo requiere cliente");
+    }
+
+    if (body.status && body.status === "closed" && !("closed_at" in body)) {
       push("closed_at", new Date().toISOString());
     }
-    if (body.status && body.status === "resolved_pending_validation") {
+    if (body.status && body.status === "resolved_pending_validation" && !("resolved_at" in body)) {
       push("resolved_at", new Date().toISOString());
     }
 

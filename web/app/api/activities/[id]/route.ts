@@ -63,8 +63,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const previous = await client.query<{ status: string; date: string }>(
-      `SELECT status, date::text AS date FROM activities WHERE id = $1 FOR UPDATE`,
+    const previous = await client.query<{ status: string; date: string; end_date: string | null }>(
+      `SELECT status, date::text AS date, end_date::text AS end_date FROM activities WHERE id = $1 FOR UPDATE`,
       [id]
     );
     if (previous.rows.length === 0) {
@@ -73,7 +73,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
     const fromStatus = previous.rows[0].status;
     const effectiveDate = body.date ?? previous.rows[0].date;
-    if (body.end_date !== undefined && body.end_date !== null && body.end_date < effectiveDate) {
+    const effectiveEnd = body.end_date !== undefined ? body.end_date : previous.rows[0].end_date;
+    if (effectiveEnd && effectiveEnd < effectiveDate) {
       await client.query("ROLLBACK");
       return jsonError("end_date no puede ser anterior a date");
     }

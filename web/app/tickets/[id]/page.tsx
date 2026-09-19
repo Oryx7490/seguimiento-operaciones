@@ -251,6 +251,10 @@ function EditTicket({ detail, onSaved }: { detail: TicketDetail; onSaved: () => 
       setErr("El título es obligatorio");
       return;
     }
+    if (t.ticket_type === "external" && !clientId) {
+      setErr("Un ticket externo requiere cliente");
+      return;
+    }
     setSaving(true);
     setErr(null);
     try {
@@ -293,7 +297,12 @@ function EditTicket({ detail, onSaved }: { detail: TicketDetail; onSaved: () => 
               <Textarea value={description} onChange={setDescription} rows={5} placeholder="Detalle del problema, síntomas, alcance…" />
             </Field>
             <Field label="Cliente">
-              <Select value={clientId} onChange={setClientId} placeholder="— Sin cliente —" options={clients.map((c) => ({ value: c.id, label: c.name }))} />
+              <Select
+                value={clientId}
+                onChange={setClientId}
+                placeholder={t.ticket_type === "external" ? undefined : "— Sin cliente —"}
+                options={clients.map((c) => ({ value: c.id, label: c.name }))}
+              />
             </Field>
             {t.location_id && (clientId || null) !== t.client_id && (
               <p className="text-[11px] text-amber-600">Al cambiar de cliente se quitará la ubicación actual ({t.location_name ?? "sin nombre"}).</p>

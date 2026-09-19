@@ -112,11 +112,9 @@ export async function POST(req: NextRequest) {
   try {
     await client.query("BEGIN");
 
-    const [rosterRes, aliasRes, settings] = await Promise.all([
-      client.query<RosterTech>(`SELECT id, display_name FROM technicians WHERE active = true`),
-      client.query<AliasRow>(`SELECT alias, technician_id FROM technician_aliases`),
-      getSettings(),
-    ]);
+    const rosterRes = await client.query<RosterTech>(`SELECT id, display_name FROM technicians WHERE active = true`);
+    const aliasRes = await client.query<AliasRow>(`SELECT alias, technician_id FROM technician_aliases`);
+    const settings = await getSettings();
     const dailyStd = asNumber(settings.overtime_daily_hours, 8);
     const weeklyStd = asNumber(settings.overtime_weekly_hours, 40);
 

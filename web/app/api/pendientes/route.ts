@@ -115,7 +115,7 @@ export async function GET() {
       LEFT JOIN projects p ON p.id = ap.project_id
       LEFT JOIN activity_technicians at ON at.activity_id = a.id
       LEFT JOIN technicians tech ON tech.id = at.technician_id
-     WHERE a.status IN ('planned', 'in_progress') AND a.date < current_date
+     WHERE a.status IN ('planned', 'in_progress') AND COALESCE(a.end_date, a.date) < current_date
      GROUP BY a.id, t.code, t.title
      ORDER BY a.date ASC
   `);
