@@ -1,5 +1,23 @@
 # Constraints & Decisions Log
 
+## 0.2.1 — Archivo administrativo + borrado en dos pasos + m² report (2026-09-23)
+
+### Borrado de proyectos en dos pasos
+- Migración `026_project_deletion_request.sql`: `deletion_requested_at/by`, `deletion_reason` en `projects`.
+- Usuario en detalle: "Solicitar eliminación" (PATCH `request_deletion`) con motivo obligatorio → alerta roja + "Cancelar solicitud" (PATCH `cancel_deletion`).
+- El proyecto NO se borra: la solicitud queda pendiente de autorización del admin.
+
+### `/admin/archivo` — sección unificada de revisión
+- Pestaña **Solicitudes de eliminación**: admin aprueba (POST `[id]/delete` = DELETE definitivo en cascada) o rechaza (DELETE `[id]/delete` = conserva proyecto).
+- Pestaña **Proyectos cerrados**: GET `/api/admin/projects/closed`; POST `/api/admin/projects/[id]/restore` → restaura al estado anterior al cierre (lo lee de `status_history`, fallback `planning`).
+- Pestaña **Tickets cerrados**: GET `/api/admin/tickets/closed`; POST `/api/admin/tickets/[id]/reopen` → reabre al estado anterior al cierre (fallback `to_review`).
+- Restauración inteligente: usa el `from_status` del último `status_history` con `to_status='closed'`, nunca hardcodea.
+- Dashboard admin apunta a `/admin/archivo` (reemplaza `/admin/proyectos`).
+
+### Estimación m² a instalar (admin)
+- API `/api/reports/screens-m2` (`months` + `anchor`): filtra proyectos por `planned_end_date` en periodo, agrupa por mes/tipo.
+- UI `/admin/pantallas`: horizonte 1/3/6/12 meses, navegación ←/Hoy/→, cards resumen, tabla tipo×mes con totales, detalle expandible por proyecto.
+
 ## 023_improvement_entity_type.sql (2026-09-22)
 **Enum**: `entity_type` += `improvement` para status_history de mejoras.
 
