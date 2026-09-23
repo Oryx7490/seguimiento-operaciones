@@ -18,7 +18,7 @@ INSERT INTO internal_activity_types (name, requires_approval, sort_order) VALUES
   ('Enfermedad',               true,  2),
   ('Permiso',                  true,  3),
   ('Capacitación',             false, 4),
-  ('Bodega o preparación',     false, 5),
+  ('Bodega',                   false, 5),
   ('Traslado',                 false, 6),
   ('Reunión',                  false, 7),
   ('Actividad administrativa', false, 8);

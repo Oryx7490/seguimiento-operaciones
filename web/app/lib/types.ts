@@ -27,6 +27,7 @@ export interface Technician {
   username: string | null;
   user_active: boolean;
   timezone: string;
+  activity_count?: number;
 }
 
 export interface Specialty {
@@ -102,6 +103,7 @@ export interface Client {
   location_count?: number | string;
   contacts_count?: number | string;
   comments_count?: number | string;
+  activity_count?: number;
 }
 
 export interface ClientContact {
@@ -170,6 +172,8 @@ export interface Project {
   phase_count: string | null;
   min_phase_start: string | null;
   max_phase_end: string | null;
+  screen_count: number;
+  screen_m2_total: number;
   created_at: string;
   updated_at: string;
 }
@@ -186,7 +190,7 @@ export interface ProjectPhase {
   planned_end_date: string | null;
   actual_start_date: string | null;
   actual_end_date: string | null;
-  status: "not_started" | "in_progress" | "completed" | "blocked" | "not_applicable";
+  status: "planned" | "not_started" | "in_progress" | "completed" | "blocked" | "not_applicable";
   blocked_reason: string | null;
   next_action: string | null;
   next_action_date: string | null;
@@ -266,6 +270,17 @@ export interface Ticket {
   first_response_at: string | null;
   resolved_at: string | null;
   closed_at: string | null;
+  repair_note: string | null;
+  billing_authorized: boolean | null;
+  billable: boolean | null;
+  warranty: boolean | null;
+  charge_amount: number | null;
+  charge_description: string | null;
+  authorized_by: string | null;
+  authorized_at: string | null;
+  invoice_generated: boolean | null;
+  invoice_id: string | null;
+  notes: string | null;
   opened_at: string;
   last_activity_at: string | null;
   version: number;
@@ -320,11 +335,52 @@ export interface TimeEntry {
 }
 
 export interface TicketDetail {
-  ticket: Ticket & { opened_at: string };
+  ticket: Ticket;
   assignments: Assignment[];
   comments: Comment[];
   history: StatusHistoryEntry[];
   attachments: Attachment[];
+  closure: Closure | null;
+}
+
+export interface Closure {
+  repair_note: string | null;
+  billing_authorized: boolean | null;
+  billable: boolean | null;
+  warranty: boolean | null;
+  charge_amount: number | null;
+  charge_description: string | null;
+  authorized_by: string | null;
+  authorized_at: string | null;
+  invoice_generated: boolean | null;
+  invoice_id: string | null;
+  notes: string | null;
+}
+
+export interface ProjectAttachment {
+  id: string;
+  screen_id: string | null;
+  file_name: string;
+  mime_type: string | null;
+  size_bytes: number | null;
+  attachment_type: string;
+  uploaded_by_name: string | null;
+  created_at: string;
+}
+
+export interface ProjectScreen {
+  id: string;
+  project_id: string;
+  screen_type: string;
+  quantity: number;
+  width_m: number | null;
+  height_m: number | null;
+  is_irregular: boolean;
+  area_m2: number | null;
+  pitch_mm: number | null;
+  m2: number;
+  created_at: string;
+  attachment: ProjectAttachment[];
 }
 
 export interface ProjectDetail {
@@ -334,6 +390,7 @@ export interface ProjectDetail {
   comments: Comment[];
   history: StatusHistoryEntry[];
   attachments: Attachment[];
+  screens: ProjectScreen[];
   closure: unknown | null;
 }
 
@@ -409,6 +466,53 @@ export interface AnnualSummaryResponse {
   threshold_hours: number;
   non_working_days: { total: number; official: number; discretionary: number };
   technicians: AnnualSummaryTechnician[];
+}
+
+export interface EffortBucket {
+  key: string;
+  label: string;
+  hours: number;
+  percent: number;
+}
+
+export interface EffortClientRow {
+  client_id: string | null;
+  name: string;
+  hours: number;
+  percent: number;
+  projects: number;
+  tickets: number;
+}
+
+export interface EffortProjectRow {
+  project_id: string;
+  code: string;
+  name: string;
+  client_name: string | null;
+  hours: number;
+  percent: number;
+}
+
+export interface EffortTicketRow {
+  ticket_id: string;
+  code: string;
+  title: string;
+  client_name: string | null;
+  type: string | null;
+  hours: number;
+  percent: number;
+}
+
+export interface EffortResponse {
+  scale: "week" | "month" | "year";
+  start: string;
+  end: string;
+  label: string;
+  total_hours: number;
+  buckets: EffortBucket[];
+  by_client: EffortClientRow[];
+  by_project: EffortProjectRow[];
+  by_ticket: EffortTicketRow[];
 }
 
 export interface AttendanceEntry {
@@ -493,4 +597,33 @@ export interface TechnicianAlias {
 
 export interface TechnicianAliasesResponse {
   aliases: TechnicianAlias[];
+}
+
+export interface Improvement {
+  id: string;
+  title: string;
+  description: string | null;
+  category: "feature" | "bug" | "ux" | "other";
+  priority: "low" | "medium" | "high" | "critical";
+  status: "open" | "in_progress" | "done" | "wontfix";
+  reporter_name: string | null;
+  reporter_email: string | null;
+  assigned_to: string | null;
+  assigned_to_name: string | null;
+  created_at: string;
+  updated_at: string;
+  closed_at: string | null;
+  closed_by: string | null;
+  closed_by_name: string | null;
+  resolution: string | null;
+}
+
+export interface ImprovementsResponse {
+  improvements: Improvement[];
+}
+
+export interface ImprovementDetail {
+  improvement: Improvement;
+  comments: Comment[];
+  history: StatusHistoryEntry[];
 }

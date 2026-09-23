@@ -1,0 +1,1 @@
+ALTER TYPE project_phase_status ADD VALUE IF NOT EXISTS 'planned';

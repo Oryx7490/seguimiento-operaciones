@@ -42,10 +42,12 @@ export async function POST(req: NextRequest) {
 
   const projectId = formString(form, "project_id");
   const ticketId = formString(form, "ticket_id");
+  const screenId = formString(form, "screen_id");
   const projectUuid = projectId ? parseId(projectId) : null;
   const ticketUuid = ticketId ? parseId(ticketId) : null;
-  if (projectUuid && ticketUuid) return jsonError("Indica solo project_id o ticket_id");
-  if (!projectUuid && !ticketUuid) return jsonError("Falta project_id o ticket_id");
+  const screenUuid = screenId ? parseId(screenId) : null;
+  const entityCount = [projectUuid, ticketUuid, screenUuid].filter(Boolean).length;
+  if (entityCount !== 1) return jsonError("Indica project_id, ticket_id o screen_id");
 
   const attachmentType = formString(form, "attachment_type") ?? "other";
   if (!ATTACHMENT_TYPES.includes(attachmentType)) return jsonError("Tipo de adjunto inválido");
@@ -59,13 +61,25 @@ export async function POST(req: NextRequest) {
   const storageKey = `attachments/${id}${ext ? `.${ext}` : ""}`;
 
   try {
+    if (projectUuid) {
+      const exists = await pool.query(`SELECT id FROM projects WHERE id = $1`, [projectUuid]);
+      if (exists.rows.length === 0) return jsonError("proyecto no encontrado", 404);
+    }
+    if (ticketUuid) {
+      const exists = await pool.query(`SELECT id FROM tickets WHERE id = $1`, [ticketUuid]);
+      if (exists.rows.length === 0) return jsonError("ticket no encontrado", 404);
+    }
+    if (screenUuid) {
+      const exists = await pool.query(`SELECT id FROM project_screens WHERE id = $1`, [screenUuid]);
+      if (exists.rows.length === 0) return jsonError("pantalla no encontrada", 404);
+    }
     await putStorageObject(storageKey, buffer, file.type || "application/octet-stream");
     const { rows } = await pool.query(
-      `INSERT INTO attachments (id, project_id, ticket_id, file_name, storage_key, mime_type,
+      `INSERT INTO attachments (id, project_id, ticket_id, screen_id, file_name, storage_key, mime_type,
                                 size_bytes, attachment_type, uploaded_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-       RETURNING id, project_id, ticket_id, file_name, attachment_type, mime_type, size_bytes, created_at`,
-      [id, projectUuid, ticketUuid, file.name, storageKey, file.type || null, file.size, attachmentType, actorId]
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+       RETURNING id, project_id, ticket_id, screen_id, file_name, attachment_type, mime_type, size_bytes, created_at`,
+      [id, projectUuid, ticketUuid, screenUuid, file.name, storageKey, file.type || null, file.size, attachmentType, actorId]
     );
     return jsonOk({ attachment: rows[0] }, 201);
   } catch (err) {

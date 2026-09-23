@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { fetchJson, useResource } from "@/app/lib/client";
 import { formatDate, formatDateTime, projectStatusLabel, healthStatusLabel, phaseStatusLabel } from "@/app/lib/format";
@@ -20,8 +20,10 @@ import CommentSection from "@/app/components/comment-section";
 import AttachmentsSection from "@/app/components/attachments-section";
 import ProjectClosure from "@/app/components/project-closure";
 import type {
+  ProjectAttachment,
   ProjectDetail,
   ProjectPhase,
+  ProjectScreen,
   Technician,
   TechniciansResponse,
 } from "@/app/lib/types";
@@ -41,22 +43,42 @@ const PROJECT_TRANSITIONS: Record<string, string[]> = {
 
 const HEALTH_OPTIONS = ["on_time", "at_risk", "blocked", "no_update"];
 
-const PHASE_STATUS_OPTIONS = ["not_started", "in_progress", "completed", "blocked", "not_applicable"];
+const PHASE_STATUS_OPTIONS = ["planned", "not_started", "in_progress", "completed", "blocked", "not_applicable"];
 
 export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const { data: detail, error, reload } = useResource<ProjectDetail>(`/api/projects/${id}`);
 
+  // Columnas visibles en tabla de fases
+  const [phaseCols, setPhaseCols] = useState<Record<string, boolean>>({
+    estado: true,
+    inicio: true,
+    fin: true,
+    responsable: true,
+    bloqueo: true,
+    m2total: false,
+  });
+  const [showColMenu, setShowColMenu] = useState(false);
+
+  function togglePhaseCol(key: string) {
+    setPhaseCols((c) => ({ ...c, [key]: !c[key] }));
+  }
+
   if (!detail) return <div className="p-6">{error ? <p className="text-red-600">Error: {error}</p> : <Spinner />}</div>;
   const p = detail.project;
+
+  const totalM2 = detail.screens.reduce((sum, s) => sum + (s.m2 || 0) * (s.quantity || 0), 0);
 
   return (
     <div className="max-w-5xl space-y-6 p-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-xs font-semibold text-zinc-700">{p.code}</span>
-          <h1 className="mt-2 text-xl font-semibold text-zinc-900">{p.name}</h1>
+          <div className="mt-2 flex items-center gap-2">
+            <h1 className="text-xl font-semibold text-zinc-900">{p.name}</h1>
+            <EditProjectName projectId={id} currentName={p.name} onSaved={reload} />
+          </div>
           <div className="mt-1 flex flex-wrap items-center gap-2 text-sm text-zinc-500">
             <span>{p.client_name ?? "Sin cliente"}</span>
             {p.location_name && <span>· {p.location_name}{p.city ? `, ${p.city}` : ""}</span>}
@@ -72,11 +94,7 @@ export default function ProjectDetailPage() {
       </div>
 
       {/* Status / health / dates */}
-      <div className="grid gap-4 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-4">
-        <div>
-          <p className="text-xs text-zinc-400">Estado</p>
-          <StatusBadge status={p.status} kind="project" />
-        </div>
+      <div className="grid gap-4 rounded-lg border border-zinc-200 bg-white p-4 shadow-sm sm:grid-cols-3">
         <div>
           <p className="text-xs text-zinc-400">Salud</p>
           <StatusBadge status={p.health_status} kind="health" />
@@ -110,6 +128,37 @@ export default function ProjectDetailPage() {
           <div className="flex gap-2">
             <NotApplicableChecklist detail={detail} onSaved={reload} />
             <AddPhase detail={detail} onSaved={reload} />
+            <div className="relative">
+              <button
+                onClick={() => setShowColMenu((s) => !s)}
+                className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-50 flex items-center gap-1"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" /></svg>
+                Columnas
+              </button>
+              {showColMenu && (
+                <div className="absolute right-0 mt-1 z-10 rounded-md border border-zinc-200 bg-white shadow-lg py-1 min-w-[160px]">
+                  {([
+                    { key: "estado", label: "Estado" },
+                    { key: "inicio", label: "Inicio" },
+                    { key: "fin", label: "Fin" },
+                    { key: "responsable", label: "Responsable" },
+                    { key: "bloqueo", label: "Bloqueo" },
+                    { key: "m2total", label: "m² total (pantallas)" },
+                  ] as const).map((col) => (
+                    <label key={col.key} className="flex items-center gap-2 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={phaseCols[col.key]}
+                        onChange={() => togglePhaseCol(col.key)}
+                        className="h-4 w-4 accent-zinc-900"
+                      />
+                      {col.label}
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         </div>
         {detail.phases.length === 0 ? (
@@ -120,11 +169,12 @@ export default function ProjectDetailPage() {
               <thead className="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500">
                 <tr>
                   <th className="px-3 py-2 text-left">Fase</th>
-                  <th className="px-3 py-2 text-left">Estado</th>
-                  <th className="px-3 py-2 text-left">Inicio</th>
-                  <th className="px-3 py-2 text-left">Fin</th>
-                  <th className="px-3 py-2 text-left">Responsable</th>
-                  <th className="px-3 py-2 text-left">Bloqueo</th>
+                  {phaseCols.estado && <th className="px-3 py-2 text-left">Estado</th>}
+                  {phaseCols.inicio && <th className="px-3 py-2 text-left">Inicio</th>}
+                  {phaseCols.fin && <th className="px-3 py-2 text-left">Fin</th>}
+                  {phaseCols.responsable && <th className="px-3 py-2 text-left">Responsable</th>}
+                  {phaseCols.bloqueo && <th className="px-3 py-2 text-left">Bloqueo</th>}
+                  {phaseCols.m2total && <th className="px-3 py-2 text-right">m² total</th>}
                   <th className="px-3 py-2 text-right">Acciones</th>
                 </tr>
               </thead>
@@ -132,15 +182,18 @@ export default function ProjectDetailPage() {
                 {detail.phases.map((ph) => (
                   <tr key={ph.id} className={ph.status === "not_applicable" ? "opacity-50" : "hover:bg-zinc-50"}>
                     <td className="px-3 py-2 font-medium text-zinc-800">{ph.name}</td>
-                    <td className="px-3 py-2"><StatusBadge status={ph.status} kind="phase" /></td>
-                    <td className="px-3 py-2 text-zinc-500">{formatDate(ph.planned_start_date)}</td>
-                    <td className="px-3 py-2 text-zinc-500">{formatDate(ph.planned_end_date)}</td>
-                    <td className="px-3 py-2 text-zinc-600">{ph.owner_name ?? "—"}</td>
-                    <td className="px-3 py-2 text-xs text-zinc-500">
-                      {ph.status === "blocked"
-                        ? [ph.blocked_reason, ph.next_action].filter(Boolean).join(" · ") || "—"
-                        : "—"}
-                    </td>
+                    {phaseCols.estado && <td className="px-3 py-2"><StatusBadge status={ph.status} kind="phase" /></td>}
+                    {phaseCols.inicio && <td className="px-3 py-2 text-zinc-500">{formatDate(ph.planned_start_date)}</td>}
+                    {phaseCols.fin && <td className="px-3 py-2 text-zinc-500">{formatDate(ph.planned_end_date)}</td>}
+                    {phaseCols.responsable && <td className="px-3 py-2 text-zinc-600">{ph.owner_name ?? "—"}</td>}
+                    {phaseCols.bloqueo && (
+                      <td className="px-3 py-2 text-xs text-zinc-500">
+                        {ph.status === "blocked"
+                          ? [ph.blocked_reason, ph.next_action].filter(Boolean).join(" · ") || "—"
+                          : "—"}
+                      </td>
+                    )}
+                    {phaseCols.m2total && <td className="px-3 py-2 text-right font-medium text-zinc-800">{totalM2 > 0 ? `${formatNum(totalM2)} m²` : "—"}</td>}
                     <td className="px-3 py-2 text-right">
                       <EditPhase detail={detail} phase={ph} onSaved={reload} />
                     </td>
@@ -174,6 +227,9 @@ export default function ProjectDetailPage() {
           </ul>
         )}
       </section>
+
+      {/* Pantallas */}
+      <ScreensSection projectId={id} detail={detail} onSaved={reload} />
 
       {/* History */}
       <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
@@ -418,15 +474,29 @@ function AddPhase({ detail, onSaved }: { detail: ProjectDetail; onSaved: () => v
 function NotApplicableChecklist({ detail, onSaved }: { detail: ProjectDetail; onSaved: () => void }) {
   const [open, setOpen] = useState(false);
   const [checked, setChecked] = useState<Record<string, boolean>>({});
+  const [origStatus, setOrigStatus] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   function openModal() {
     const initial: Record<string, boolean> = {};
-    for (const ph of detail.phases) initial[ph.id] = ph.status === "not_applicable";
+    const orig: Record<string, string> = {};
+    for (const ph of detail.phases) {
+      initial[ph.id] = ph.status === "not_applicable";
+      orig[ph.id] = ph.status;
+    }
     setChecked(initial);
+    setOrigStatus(orig);
     setErr(null);
     setOpen(true);
+  }
+
+  function handleCheck(id: string, checked: boolean) {
+    setChecked((c) => ({ ...c, [id]: checked }));
+    if (checked) {
+      // Al marcar N/A, guardamos el estado actual como el que se restaurará al desmarcar
+      setOrigStatus((o) => ({ ...o, [id]: detail.phases.find((p) => p.id === id)?.status ?? "not_started" }));
+    }
   }
 
   async function submit() {
@@ -437,7 +507,7 @@ function NotApplicableChecklist({ detail, onSaved }: { detail: ProjectDetail; on
         .filter((ph) => (checked[ph.id] ?? false) !== (ph.status === "not_applicable"))
         .map((ph) => ({
           id: ph.id,
-          status: checked[ph.id] ? "not_applicable" : "not_started",
+          status: checked[ph.id] ? "not_applicable" : (origStatus[ph.id] ?? "not_started"),
         }));
       if (phases.length === 0) {
         setOpen(false);
@@ -470,7 +540,7 @@ function NotApplicableChecklist({ detail, onSaved }: { detail: ProjectDetail; on
           }
         >
           <p className="mb-3 text-[11px] text-zinc-400">
-            Marca las fases que no aplican para este proyecto. Al guardar se marcan como «No aplica»; al desmarcarlas vuelven a «No iniciada».
+            Marca las fases que no aplican para este proyecto. Al guardar se marcan como «No aplica»; al desmarcarlas recuperan su estado anterior.
           </p>
           <div className="max-h-80 space-y-1 overflow-y-auto">
             {detail.phases.length === 0 ? (
@@ -481,7 +551,7 @@ function NotApplicableChecklist({ detail, onSaved }: { detail: ProjectDetail; on
                   <input
                     type="checkbox"
                     checked={checked[ph.id] ?? false}
-                    onChange={(e) => setChecked((c) => ({ ...c, [ph.id]: e.target.checked }))}
+                    onChange={(e) => handleCheck(ph.id, e.target.checked)}
                     className="h-4 w-4 accent-zinc-900"
                   />
                   <span className="flex-1 text-sm text-zinc-800">{ph.name}</span>
@@ -669,6 +739,469 @@ function AddAssignment({ projectId, onSaved }: { projectId: string; onSaved: () 
           <p className="mt-2 text-[11px] text-zinc-400">
             Si el técnico ya tiene una asignación activa en este proyecto, se reemplazará.
           </p>
+        </Modal>
+      )}
+    </>
+  );
+}
+/* ── Pantallas a instalar ─────────────────── */
+
+interface ScreenPatchInput {
+  id?: string;
+  screen_type: string;
+  quantity: number;
+  width_m: number | null;
+  height_m: number | null;
+  is_irregular: boolean;
+  area_m2: number | null;
+  pitch_mm: number | null;
+  _deleted?: boolean;
+}
+
+function ScreensSection({ projectId, detail, onSaved }: { projectId: string; detail: ProjectDetail; onSaved: () => void }) {
+  const [editing, setEditing] = useState<ProjectScreen | "new" | null>(null);
+
+  function buildPayload(update?: { id: string; patch: Omit<ScreenPatchInput, "id" | "_deleted"> }): ScreenPatchInput[] {
+    return detail.screens.map((s): ScreenPatchInput =>
+      update && s.id === update.id
+        ? { id: s.id, ...update.patch }
+        : {
+            id: s.id,
+            screen_type: s.screen_type,
+            quantity: s.quantity,
+            width_m: s.width_m,
+            height_m: s.height_m,
+            is_irregular: s.is_irregular,
+            area_m2: s.area_m2,
+            pitch_mm: s.pitch_mm,
+          }
+    );
+  }
+
+  async function save(screen: ProjectScreen | null, patch: Omit<ScreenPatchInput, "id" | "_deleted">) {
+    const screens = screen ? buildPayload({ id: screen.id, patch }) : [...buildPayload(), { ...patch }];
+    await fetchJson(`/api/projects/${projectId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ screens }),
+    });
+    onSaved();
+  }
+
+  async function remove(screen: ProjectScreen) {
+    if (!confirm(`¿Eliminar la pantalla "${screen.screen_type}"?`)) return;
+    const screens = buildPayload().map((s) =>
+      s.id === screen.id ? { ...s, _deleted: true } : s
+    );
+    await fetchJson(`/api/projects/${projectId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ screens }),
+    });
+    onSaved();
+  }
+
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-zinc-800">Pantallas a instalar</h2>
+        <ScreenForm
+          editing={editing}
+          setEditing={setEditing}
+          onSaved={save}
+        />
+      </div>
+      {detail.screens.length === 0 ? (
+        <p className="mt-3 text-sm text-zinc-400">No hay pantallas registradas.</p>
+      ) : (
+        <div className="mt-3 overflow-hidden">
+          <table className="min-w-full text-sm">
+            <thead className="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500">
+              <tr>
+                <th className="px-3 py-2 text-left">Tipo</th>
+                <th className="px-3 py-2 text-right">Cantidad</th>
+                <th className="px-3 py-2 text-left">Dimensiones</th>
+                <th className="px-3 py-2 text-right">Pitch (mm)</th>
+                <th className="px-3 py-2 text-right">m² (total)</th>
+                <th className="px-3 py-2 text-left">Ficha PDF</th>
+                <th className="px-3 py-2 text-right">Acciones</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100">
+              {detail.screens.map((s) => (
+                <tr key={s.id} className="hover:bg-zinc-50 align-top">
+                  <td className="px-3 py-2 font-medium text-zinc-800">{s.screen_type}</td>
+                  <td className="px-3 py-2 text-right text-zinc-700">{s.quantity}</td>
+                  <td className="px-3 py-2 text-zinc-600">
+                    {s.is_irregular
+                      ? (s.area_m2 ? `${formatNum(s.area_m2)} m²` : "Irregular —")
+                      : s.width_m && s.height_m
+                        ? `${formatNum(s.width_m)} × ${formatNum(s.height_m)} m`
+                        : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-right text-zinc-600">
+                    {s.pitch_mm ? `${formatNum(s.pitch_mm)} mm` : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-right font-medium text-zinc-800">
+                    {s.m2 > 0 ? `${formatNum(s.m2 * s.quantity)} m²` : "—"}
+                  </td>
+                  <td className="px-3 py-2">
+                    <ScreenPdf screen={s} onChanged={onSaved} />
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <div className="flex justify-end gap-1">
+                      <button
+                        onClick={() => setEditing(s)}
+                        className="rounded border border-zinc-200 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
+                      >
+                        Editar
+                      </button>
+                      <button
+                        onClick={() => remove(s)}
+                        className="rounded border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                      >
+                        Eliminar
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function formatNum(v: number): string {
+  return String(Number.isInteger(v) ? v : Math.round(v * 100) / 100);
+}
+
+function ScreenForm({
+  editing,
+  setEditing,
+  onSaved,
+}: {
+  editing: ProjectScreen | "new" | null;
+  setEditing: (s: ProjectScreen | "new" | null) => void;
+  onSaved: (screen: ProjectScreen | null, patch: Omit<ScreenPatchInput, "id" | "_deleted">) => Promise<void>;
+}) {
+  return (
+    <>
+      <SecondaryButton onClick={() => setEditing("new")} className="text-xs px-2 py-1">Agregar pantalla</SecondaryButton>
+      {editing && (
+        <ScreenModal
+          key={editing === "new" ? "new" : editing.id}
+          editing={editing}
+          onClose={() => setEditing(null)}
+          onSaved={onSaved}
+        />
+      )}
+    </>
+  );
+}
+
+function ScreenModal({
+  editing,
+  onClose,
+  onSaved,
+}: {
+  editing: ProjectScreen | "new";
+  onClose: () => void;
+  onSaved: (screen: ProjectScreen | null, patch: Omit<ScreenPatchInput, "id" | "_deleted">) => Promise<void>;
+}) {
+  const [screenType, setScreenType] = useState(editing === "new" ? "" : editing.screen_type);
+  const [quantity, setQuantity] = useState(editing === "new" ? "1" : String(editing.quantity));
+  const [irregular, setIrregular] = useState<boolean>(editing !== "new" && editing.is_irregular);
+  const [width, setWidth] = useState(editing === "new" ? "" : editing.width_m ? String(editing.width_m) : "");
+  const [height, setHeight] = useState(editing === "new" ? "" : editing.height_m ? String(editing.height_m) : "");
+  const [area, setArea] = useState(editing === "new" ? "" : editing.area_m2 ? String(editing.area_m2) : "");
+  const [pitch, setPitch] = useState(editing === "new" ? "" : editing.pitch_mm ? String(editing.pitch_mm) : "");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit() {
+    if (!screenType.trim()) {
+      setErr("Indica el tipo de pantalla");
+      return;
+    }
+    const qty = Number(quantity);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      setErr("Cantidad debe ser un número > 0");
+      return;
+    }
+    const patch: Omit<ScreenPatchInput, "id" | "_deleted"> = {
+      screen_type: screenType.trim(),
+      quantity: qty,
+      width_m: null,
+      height_m: null,
+      is_irregular: irregular,
+      area_m2: null,
+      pitch_mm: null,
+    };
+    if (irregular) {
+      const a = Number(area);
+      if (Number.isFinite(a) && a > 0) patch.area_m2 = a;
+      else {
+        setErr("Para pantalla irregular indica el área total (m²)");
+        return;
+      }
+    } else {
+      const w = Number(width);
+      const h = Number(height);
+      if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) {
+        setErr("Indica ancho y alto (m) de la pantalla");
+        return;
+      }
+      patch.width_m = w;
+      patch.height_m = h;
+    }
+    const p = Number(pitch);
+    if (pitch.trim() && (Number.isFinite(p) && p >= 0)) {
+      patch.pitch_mm = p;
+    } else if (pitch.trim() && (!Number.isFinite(p) || p < 0)) {
+      setErr("Pitch debe ser un número ≥ 0");
+      return;
+    }
+    setSaving(true);
+    setErr(null);
+    try {
+      const item = editing === "new" ? null : editing;
+      await onSaved(item, patch);
+      onClose();
+    } catch (e) {
+      setErr(String(e));
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal open={true} onClose={onClose}
+      title={editing === "new" ? "Nueva pantalla" : "Editar pantalla"}
+      footer={
+        <>
+          <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
+          <PrimaryButton onClick={submit} disabled={saving}>{saving ? "Guardando…" : "Guardar"}</PrimaryButton>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <Field label="Tipo de pantalla">
+          <TextInput value={screenType} onChange={setScreenType} placeholder="P. ej. LED interior" />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Cantidad">
+            <TextInput value={quantity} onChange={setQuantity} type="number" />
+          </Field>
+          <Field label="Forma">
+            <div className="flex overflow-hidden rounded-md border border-zinc-300 text-sm">
+              <button
+                type="button"
+                onClick={() => setIrregular(false)}
+                className={`flex-1 px-2 py-1.5 ${!irregular ? "bg-sky-600 text-white" : "bg-white text-zinc-600 hover:bg-zinc-50"}`}
+              >
+                Regular
+              </button>
+              <button
+                type="button"
+                onClick={() => setIrregular(true)}
+                className={`flex-1 px-2 py-1.5 ${irregular ? "bg-sky-600 text-white" : "bg-white text-zinc-600 hover:bg-zinc-50"}`}
+              >
+                Irregular
+              </button>
+            </div>
+          </Field>
+        </div>
+        {irregular ? (
+          <Field label="Área total (m²)">
+            <TextInput value={area} onChange={setArea} type="number" placeholder="P. ej. 12.5" />
+          </Field>
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Ancho (m)">
+              <TextInput value={width} onChange={setWidth} type="number" placeholder="P. ej. 2.5" />
+            </Field>
+            <Field label="Alto (m)">
+              <TextInput value={height} onChange={setHeight} type="number" placeholder="P. ej. 1.5" />
+            </Field>
+          </div>
+        )}
+        <Field label="Pitch (mm)">
+          <TextInput value={pitch} onChange={setPitch} type="number" placeholder="P. ej. 1.5" />
+        </Field>
+        {err && <p className="text-xs text-red-600">{err}</p>}
+      </div>
+    </Modal>
+  );
+}
+
+// Mutex global para evitar subidas concurrentes (reloads múltiples)
+let uploadMutex = Promise.resolve();
+
+function ScreenPdf({ screen, onChanged }: { screen: ProjectScreen; onChanged: () => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const MAX_BYTES = 25 * 1024 * 1024;
+
+  async function upload(file: File) {
+    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
+      setErr("Solo se permiten archivos PDF");
+      return;
+    }
+    if (file.size > MAX_BYTES) {
+      setErr(`El archivo supera 25 MB (${(file.size / 1024 / 1024).toFixed(1)} MB)`);
+      return;
+    }
+    if (uploading) return;
+
+    // Serializa subidas para evitar reloads concurrentes
+    setUploading(true);
+    setErr(null);
+    try {
+      await uploadMutex;
+      const form = new FormData();
+      form.append("file", file);
+      form.append("screen_id", screen.id);
+      await uploadFetch(`/api/attachments`, form);
+      onChanged();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setUploading(false);
+      uploadMutex = Promise.resolve(); // libera mutex
+    }
+  }
+
+  async function remove(a: ProjectAttachment) {
+    if (!confirm(`¿Eliminar el documento "${a.file_name}"?`)) return;
+    await fetchJson(`/api/attachments/${a.id}`, { method: "DELETE" });
+    onChanged();
+  }
+
+  return (
+    <div className="space-y-1">
+      {screen.attachment.length === 0 ? (
+        <button
+          onClick={() => inputRef.current?.click()}
+          className="rounded border border-dashed border-zinc-300 px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-50"
+        >
+          {uploading ? "Subiendo…" : "+ Ficha PDF"}
+        </button>
+      ) : (
+        <ul className="space-y-1">
+          {screen.attachment.map((a) => (
+            <li key={a.id} className="flex items-center gap-1 text-xs">
+              <a
+                href={`/api/attachments/${a.id}/download`}
+                className="max-w-[140px] truncate text-sky-700 underline-offset-2 hover:underline"
+                title={a.file_name}
+              >
+                {a.file_name}
+              </a>
+              <button
+                onClick={() => remove(a)}
+                className="text-red-600 hover:underline"
+                title="Eliminar documento"
+              >
+                ✕
+              </button>
+            </li>
+          ))}
+          <li>
+            <button
+              onClick={() => inputRef.current?.click()}
+              className="text-xs text-sky-700 hover:underline"
+            >
+              {uploading ? "Subiendo…" : "+ Adjuntar PDF"}
+            </button>
+          </li>
+        </ul>
+      )}
+      <input
+        ref={inputRef}
+        type="file"
+        accept="application/pdf,.pdf"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) upload(f);
+          e.target.value = "";
+        }}
+      />
+      {err && <p className="text-xs text-red-600">{err}</p>}
+    </div>
+  );
+}
+
+async function uploadFetch(url: string, form: FormData) {
+  const res = await fetch(url, { method: "POST", body: form });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const msg =
+      typeof data === "object" && data !== null && "error" in data
+        ? String((data as { error: unknown }).error)
+        : res.statusText;
+    throw new Error(msg || `HTTP ${res.status}`);
+  }
+  return data;
+}
+
+/* ── Edit project name ─────────────────────────────── */
+
+function EditProjectName({ projectId, currentName, onSaved }: { projectId: string; currentName: string; onSaved: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState(currentName);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  function openModal() {
+    setName(currentName);
+    setErr(null);
+    setOpen(true);
+  }
+
+  async function submit() {
+    if (!name.trim()) {
+      setErr("El nombre es obligatorio");
+      return;
+    }
+    setSaving(true);
+    setErr(null);
+    try {
+      await fetchJson(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name: name.trim() }),
+      });
+      setOpen(false);
+      onSaved();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <button onClick={openModal} className="text-zinc-400 hover:text-zinc-600 p-1" title="Editar nombre">
+        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
+      </button>
+      {open && (
+        <Modal open={true} onClose={() => setOpen(false)} title="Editar nombre del proyecto"
+          footer={
+            <>
+              <SecondaryButton onClick={() => setOpen(false)}>Cancelar</SecondaryButton>
+              <PrimaryButton onClick={submit} disabled={saving}>{saving ? "Guardando…" : "Guardar"}</PrimaryButton>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <Field label="Nombre del proyecto">
+              <TextInput value={name} onChange={setName} placeholder="Nombre del proyecto" />
+            </Field>
+            {err && <p className="text-xs text-red-600">{err}</p>}
+          </div>
         </Modal>
       )}
     </>

@@ -174,17 +174,28 @@ function useGantt() {
 
 export default function GanttView() {
   const { data, error, reload } = useGantt();
-  const [scaleKey, setScaleKey] = useState<ScaleKey>("month");
+  const [scaleKey, setScaleKey] = useState<ScaleKey>("week");
   const [activeKinds, setActiveKinds] = useState<GanttKind[]>([]);
   const [sortKey, setSortKey] = useState<SortKey>("default");
+  const [search, setSearch] = useState("");
+  const [dayOffset, setDayOffset] = useState(0);
   const [edit, setEdit] = useState<{ projectId: string; phase: GanttPhase } | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
 
   const scale = SCALES[scaleKey];
-  const from = useMemo(() => mondayRef(), []);
+  const baseMonday = useMemo(() => mondayRef(), []);
+  const from = useMemo(() => addDays(baseMonday, dayOffset), [baseMonday, dayOffset]);
   const days = useMemo(() => Array.from({ length: scale.days }, (_, i) => i), [scale.days]);
   const todayIdx = diffDays(from, isoToday());
+
+  function shiftDay(delta: number) {
+    setDayOffset((prev) => prev + delta);
+  }
+
+  function goToToday() {
+    setDayOffset(0);
+  }
 
   function toggleKind(kind: GanttKind) {
     setActiveKinds((prev) =>
@@ -193,16 +204,23 @@ export default function GanttView() {
   }
 
   const visibleProjects = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase("es");
     const filter = (ph: GanttPhase): boolean => {
       if (!ph.planned_start_date) return false;
       if (activeKinds.length === 0) return true;
       return activeKinds.includes(kindOf(ph.kind));
     };
-    const list = (data?.projects ?? []).map((p) => {
-      const visible = p.phases.filter(filter);
-      const hasDates = p.phases.some((ph) => ph.planned_start_date);
-      return { ...p, visible, hasDates };
-    });
+    const matches = (text: string | null | undefined): boolean => {
+      if (!query) return true;
+      return (text ?? "").toLocaleLowerCase("es").includes(query);
+    };
+    const list = (data?.projects ?? [])
+      .filter((p) => matches(p.code) || matches(p.name) || matches(p.client_name))
+      .map((p) => {
+        const visible = p.phases.filter(filter);
+        const hasDates = p.phases.some((ph) => ph.planned_start_date);
+        return { ...p, visible, hasDates };
+      });
     const cmpText = (a: string | null, b: string | null) =>
       (a ?? "").localeCompare(b ?? "", "es", { sensitivity: "base" });
     list.sort((a, b) => {
@@ -212,7 +230,7 @@ export default function GanttView() {
       return 0;
     });
     return list;
-  }, [data, activeKinds, sortKey]);
+  }, [data, activeKinds, sortKey, search]);
 
   async function saveDates(start: string | null, end: string | null) {
     if (!edit) return;
@@ -261,9 +279,32 @@ export default function GanttView() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-lg font-semibold leading-tight">Proyectos · Vista Gantt</h1>
-            <p className="text-sm text-zinc-500">
-              Cadencia {formatDay(from)} en adelante · cada barra es una fase con fecha planificada
-            </p>
+            <div className="flex flex-wrap items-center gap-2 mt-1">
+              <p className="text-sm text-zinc-500">
+                Cadencia {formatDay(from)} en adelante · cada barra es una fase con fecha planificada
+              </p>
+              <button
+                onClick={() => shiftDay(-1)}
+                className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-700 hover:bg-zinc-50"
+                title="Día anterior"
+              >
+                ← Día
+              </button>
+              <button
+                onClick={goToToday}
+                className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-700 hover:bg-zinc-50"
+                title="Hoy"
+              >
+                Hoy
+              </button>
+              <button
+                onClick={() => shiftDay(1)}
+                className="rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-700 hover:bg-zinc-50"
+                title="Día siguiente"
+              >
+                Día →
+              </button>
+            </div>
           </div>
           <nav className="flex items-center gap-2">
             <Link
@@ -275,6 +316,12 @@ export default function GanttView() {
           </nav>
         </div>
         <div className="mt-3 flex flex-wrap items-center gap-2">
+          <TextInput
+            value={search}
+            onChange={setSearch}
+            placeholder="Buscar proyecto…"
+            className="w-48 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-700 focus:border-zinc-500 focus:outline-none"
+          />
           <span className="text-xs text-zinc-500">Escala:</span>
           {(Object.keys(SCALES) as ScaleKey[]).map((key) => (
             <button
@@ -354,7 +401,7 @@ export default function GanttView() {
           <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm">
             <div className="min-w-[900px]">
               <div className="flex border-b border-zinc-200 bg-zinc-50">
-                <div className="w-72 shrink-0 px-4 py-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
+                <div className="w-[260px] shrink-0 px-4 py-2 text-xs font-medium uppercase tracking-wide text-zinc-500">
                   Proyecto
                 </div>
                 <div className="flex flex-1 border-l border-zinc-200">
@@ -393,16 +440,13 @@ export default function GanttView() {
                       hasDates ? "" : "opacity-40"
                     }`}
                   >
-                    <div className="flex w-72 shrink-0 flex-col justify-center gap-1 border-r border-zinc-100 px-4 py-2.5">
+                    <div className="flex w-[260px] shrink-0 flex-col justify-center gap-1 border-r border-zinc-100 px-4 py-2.5">
                       <Link href={`/proyectos/${p.id}`} title={`Abrir ${p.code}`} className="min-w-0 rounded hover:underline">
                         <p className="truncate text-sm font-medium text-zinc-800">
                           <span className="font-mono text-xs text-sky-700">{p.code}</span> {p.name}
                         </p>
-                        {p.client_name && (
-                          <p className="truncate text-[10px] text-zinc-400">{p.client_name}</p>
-                        )}
                       </Link>
-                      <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
                         <span
                           className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
                             HEALTH_META[p.health_status]?.cls ?? HEALTH_META.no_update.cls
@@ -410,9 +454,9 @@ export default function GanttView() {
                         >
                           {HEALTH_META[p.health_status]?.label ?? "Sin novedad"}
                         </span>
-                        <span className="text-[10px] text-zinc-400">
-                          {projectRange(p)}
-                        </span>
+                        {p.client_name && (
+                          <span className="truncate text-[10px] text-zinc-400">{p.client_name}</span>
+                        )}
                       </div>
                     </div>
                     <div className="relative flex flex-1 items-stretch" style={{ minHeight: rowHeight }}>
@@ -662,6 +706,8 @@ function kindOf(kind: string | null): GanttKind {
 
 function statusLabel(status: string): string {
   switch (status) {
+    case "planned":
+      return "planeada";
     case "completed":
       return "completada";
     case "in_progress":
@@ -671,13 +717,6 @@ function statusLabel(status: string): string {
     default:
       return "no iniciada";
   }
-}
-
-function projectRange(p: GanttProject): string {
-  const from = p.min_phase_start ?? p.planned_start_date;
-  const to = p.max_phase_end ?? p.planned_end_date;
-  if (!from && !to) return "sin fechas";
-  return `${from ? toDateIso(from) : "?"} → ${to ? toDateIso(to) : "?"}`;
 }
 
 function addDays(d: Date, n: number): Date {

@@ -81,6 +81,7 @@ export function healthStatusLabel(status: string): string {
 
 export function phaseStatusLabel(status: string): string {
   const map: Record<string, string> = {
+    planned: "Planeado",
     not_started: "No iniciado",
     in_progress: "En progreso",
     completed: "Completado",

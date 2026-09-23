@@ -95,20 +95,34 @@ export default function AdminDashboard() {
             <p className="text-sm font-medium text-zinc-800">Horas extra y conciliación</p>
             <p className="mt-1 text-xs text-zinc-500">Asistencia, reparto por proyecto y quincenas</p>
           </Link>
-        </div>
-      </div>
-      <div className="mt-8">
-        <h2 className="mb-3 text-sm font-semibold text-zinc-700">Comunicaciones</h2>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Link
-            href="/admin/notificaciones"
+            href="/admin/horas-hombre"
             className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-zinc-300 hover:shadow"
           >
-            <p className="text-sm font-medium text-zinc-800">Alertas y notificaciones</p>
-            <p className="mt-1 text-xs text-zinc-500">Umbrales, plantillas y registro de envíos</p>
+            <p className="text-sm font-medium text-zinc-800">Horas hombre</p>
+            <p className="mt-1 text-xs text-zinc-500">Esfuerzo por cliente, proyecto y ticket</p>
           </Link>
         </div>
       </div>
+<div className="mt-8">
+          <h2 className="mb-3 text-sm font-semibold text-zinc-700">Comunicaciones</h2>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Link
+              href="/admin/notificaciones"
+              className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-zinc-300 hover:shadow"
+            >
+              <p className="text-sm font-medium text-zinc-800">Alertas y notificaciones</p>
+              <p className="mt-1 text-xs text-zinc-500">Umbrales, plantillas y registro de envíos</p>
+            </Link>
+            <Link
+              href="/admin/mejoras"
+              className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-zinc-300 hover:shadow"
+            >
+              <p className="text-sm font-medium text-zinc-800">Mejoras y feedback</p>
+              <p className="mt-1 text-xs text-zinc-500">Gestiona sugerencias, errores y peticiones</p>
+            </Link>
+          </div>
+        </div>
       <div className="mt-8">
         <h2 className="mb-3 text-sm font-semibold text-zinc-700">Integraciones</h2>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

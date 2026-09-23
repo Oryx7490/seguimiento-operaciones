@@ -25,8 +25,10 @@ export async function getSettings(): Promise<Record<string, unknown>> {
 }
 
 export function asNumber(value: unknown, fallback: number): number {
-  const n = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(n) ? n : fallback;
+  if (value === null || value === undefined) return fallback;
+  const n = typeof value === "number" ? value : Number(String(value).trim());
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return n;
 }
 
 export function asBool(value: unknown, fallback: boolean): boolean {
@@ -245,25 +247,14 @@ async function sendWhatsApp(
 const MAX_ATTEMPTS = 3;
 
 export async function processPendingDeliveries(limit = 20): Promise<{ sent: number; failed: number }> {
-  const { rows } = await pool.query<PendingNotification>(
-    `SELECT n.id, n.recipient_id, n.channel, n.title, n.body, n.payload, n.attempts,
-            u.email, t.phone
-       FROM notifications n
-       JOIN users u ON u.id = n.recipient_id
-       LEFT JOIN technicians t ON t.user_id = u.id
-      WHERE n.status = 'pending' AND n.channel IN ('email','whatsapp')
-      ORDER BY n.created_at ASC
-      LIMIT $1`,
-    [limit]
-  );
+  const claimed = await claimPending(limit);
 
   const email = emailConfig();
   const whatsapp = whatsappConfig();
   let sent = 0;
   let failed = 0;
 
-  for (const n of rows) {
-    await pool.query(`UPDATE notifications SET status = 'sending' WHERE id = $1`, [n.id]);
+  for (const n of claimed) {
     const attemptedAt = new Date();
     let provider: string | null = null;
     let providerId: string | null = null;
@@ -307,6 +298,35 @@ export async function processPendingDeliveries(limit = 20): Promise<{ sent: numb
   }
 
   return { sent, failed };
+}
+
+async function claimPending(limit: number): Promise<PendingNotification[]> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query<PendingNotification>(
+      `SELECT n.id, n.recipient_id, n.channel, n.title, n.body, n.payload, n.attempts,
+              u.email, t.phone
+         FROM notifications n
+         JOIN users u ON u.id = n.recipient_id
+         LEFT JOIN technicians t ON t.user_id = u.id
+        WHERE n.status = 'pending' AND n.channel IN ('email','whatsapp')
+        ORDER BY n.created_at ASC
+        LIMIT $1
+        FOR UPDATE SKIP LOCKED`,
+      [limit]
+    );
+    for (const n of rows) {
+      await client.query(`UPDATE notifications SET status = 'sending' WHERE id = $1`, [n.id]);
+    }
+    await client.query("COMMIT");
+    return rows;
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 export async function createInboxNotification(input: {

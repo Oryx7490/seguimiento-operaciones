@@ -44,7 +44,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     );
     if (project.rows.length === 0) return jsonError("proyecto no encontrado", 404);
 
-    const [phases, assignments, comments, history, attachments] = await Promise.all([
+    const [phases, assignments, comments, history, attachments, screens, screenAttachments] = await Promise.all([
       pool.query(
         `SELECT ph.*, u.name AS owner_name FROM project_phases ph
          LEFT JOIN users u ON u.id = ph.owner_id
@@ -79,12 +79,34 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
          WHERE at.project_id = $1 ORDER BY at.created_at`,
         [id]
       ),
+      pool.query(
+        `SELECT ps.id, ps.project_id, ps.screen_type, ps.quantity,
+                ps.width_m, ps.height_m, ps.is_irregular, ps.area_m2, ps.pitch_mm, ps.created_at,
+                CASE WHEN ps.is_irregular THEN COALESCE(ps.area_m2, 0)
+                     ELSE COALESCE(ps.width_m, 0) * COALESCE(ps.height_m, 0) END AS m2
+         FROM project_screens ps
+         WHERE ps.project_id = $1 ORDER BY ps.created_at`,
+        [id]
+      ),
+      pool.query(
+        `SELECT at.id, at.screen_id, at.file_name, at.mime_type, at.size_bytes,
+                at.attachment_type, at.created_at, u.name AS uploaded_by_name
+         FROM attachments at JOIN users u ON u.id = at.uploaded_by
+         WHERE at.screen_id IN (SELECT id FROM project_screens WHERE project_id = $1)
+         ORDER BY at.created_at`,
+        [id]
+      ),
     ]);
 
     const closure = await pool.query(
       `SELECT pc.* FROM project_closures pc WHERE pc.project_id = $1`,
       [id]
     );
+
+    const screenRows = screens.rows.map((s) => ({
+      ...s,
+      attachment: screenAttachments.rows.filter((a) => a.screen_id === s.id),
+    }));
 
     return jsonOk({
       project: project.rows[0],
@@ -93,6 +115,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       comments: comments.rows,
       history: history.rows,
       attachments: attachments.rows,
+      screens: screenRows,
       closure: closure.rows[0] ?? null,
     });
   } catch (err) {
@@ -135,6 +158,20 @@ interface ClosurePatch {
   close_project?: boolean;
 }
 
+interface ScreensPatch {
+  screens?: Array<{
+    id?: string;
+    screen_type?: string;
+    quantity?: number;
+    width_m?: number | null;
+    height_m?: number | null;
+    is_irregular?: boolean;
+    area_m2?: number | null;
+    pitch_mm?: number | null;
+    _deleted?: boolean;
+  }>;
+}
+
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!parseId(id)) return jsonError("id inválido");
@@ -156,7 +193,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     next_action_date?: string | null;
     reason?: string;
     actor_id?: string;
-  } & PhasePatch & ClosurePatch;
+  } & PhasePatch & ClosurePatch & ScreensPatch;
   try {
     body = await req.json();
   } catch {
@@ -287,6 +324,80 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
     }
 
+    if (Array.isArray(body.screens)) {
+      for (const sc of body.screens) {
+        if (sc._deleted && sc.id) {
+          await client.query(`DELETE FROM project_screens WHERE id = $1 AND project_id = $2`, [sc.id, id]);
+          continue;
+        }
+        if (
+          sc.screen_type !== undefined ||
+          sc.quantity !== undefined ||
+          sc.width_m !== undefined ||
+          sc.height_m !== undefined ||
+          sc.is_irregular !== undefined ||
+          sc.area_m2 !== undefined ||
+          sc.pitch_mm !== undefined
+        ) {
+          const sType = typeof sc.screen_type === "string" ? sc.screen_type.trim() : undefined;
+          const qty = sc.quantity;
+          const w = sc.width_m;
+          const h = sc.height_m;
+          const irregular = sc.is_irregular;
+          const area = sc.area_m2;
+
+          // Validar coherencia de dimensiones
+          const willBeIrregular = irregular ?? (sc.id ? false : false); // si no se envía, asume regular
+          if (willBeIrregular) {
+            if (area === undefined || area === null || !Number.isFinite(Number(area)) || Number(area) <= 0) {
+              await client.query("ROLLBACK");
+              return jsonError("Pantalla irregular requiere area_m2 > 0");
+            }
+          } else {
+            if (w === undefined || w === null || !Number.isFinite(Number(w)) || Number(w) <= 0 ||
+                h === undefined || h === null || !Number.isFinite(Number(h)) || Number(h) <= 0) {
+              await client.query("ROLLBACK");
+              return jsonError("Pantalla regular requiere width_m > 0 y height_m > 0");
+            }
+          }
+          if (qty !== undefined && qty !== null && (!Number.isFinite(Number(qty)) || Number(qty) <= 0)) {
+            await client.query("ROLLBACK");
+            return jsonError("quantity debe ser > 0");
+          }
+
+          const num = (v: number | null | undefined): number | null =>
+            v === null || v === undefined ? null : Number.isFinite(Number(v)) ? Number(v) : null;
+          if (sc.id) {
+            const sets: string[] = [];
+            const vals: unknown[] = [];
+            const setPush = (col: string, val: unknown) => {
+              sets.push(`${col} = $${vals.length + 3}`);
+              vals.push(val);
+            };
+            if (sType !== undefined) setPush("screen_type", sType);
+            if (sc.quantity !== undefined) setPush("quantity", sc.quantity);
+            if (sc.width_m !== undefined) setPush("width_m", num(sc.width_m));
+            if (sc.height_m !== undefined) setPush("height_m", num(sc.height_m));
+            if (sc.is_irregular !== undefined) setPush("is_irregular", sc.is_irregular);
+            if (sc.area_m2 !== undefined) setPush("area_m2", num(sc.area_m2));
+            if (sc.pitch_mm !== undefined) setPush("pitch_mm", num(sc.pitch_mm));
+            if (sets.length > 0) {
+              await client.query(
+                `UPDATE project_screens SET ${sets.join(", ")} WHERE id = $1 AND project_id = $2`,
+                [sc.id, id, ...vals]
+              );
+            }
+          } else if (sType) {
+            await client.query(
+              `INSERT INTO project_screens (project_id, screen_type, quantity, width_m, height_m, is_irregular, area_m2, pitch_mm)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+              [id, sType, sc.quantity ?? 1, num(sc.width_m), num(sc.height_m), sc.is_irregular ?? false, num(sc.area_m2), num(sc.pitch_mm)]
+            );
+          }
+        }
+      }
+    }
+
     if (body.closure) {
       const cols: string[] = [];
       const vals: unknown[] = [];
@@ -378,21 +489,30 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const { id } = await params;
   if (!parseId(id)) return jsonError("id inválido");
   const actorId = await getActorId();
+  const client = await pool.connect();
   try {
-    const { rows } = await pool.query(
+    await client.query("BEGIN");
+    const { rows } = await client.query(
       `UPDATE projects SET status = 'cancelled' WHERE id = $1 AND status <> 'cancelled' RETURNING id, status`,
       [id]
     );
-    if (rows.length === 0) return jsonError("proyecto no encontrado", 404);
+    if (rows.length === 0) {
+      await client.query("ROLLBACK");
+      return jsonError("proyecto no encontrado", 404);
+    }
     if (actorId) {
-      await pool.query(
+      await client.query(
         `INSERT INTO status_history (entity_type, entity_id, from_status, to_status, changed_by, reason)
          VALUES ('project', $1, $2, 'cancelled', $3, 'Cancelación de proyecto')`,
         [id, rows[0].status, actorId]
       );
     }
+    await client.query("COMMIT");
     return jsonOk({ cancelled: rows[0].id });
   } catch (err) {
+    await client.query("ROLLBACK");
     return jsonError("No se pudo cancelar el proyecto", 500, String(err));
+  } finally {
+    client.release();
   }
 }

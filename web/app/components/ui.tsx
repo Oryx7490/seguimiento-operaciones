@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 
 /* ── Status badge colors ─────────────────────────── */
 
@@ -39,6 +39,7 @@ const HEALTH_BADGE: Record<string, string> = {
 };
 
 const PHASE_BADGE: Record<string, string> = {
+  planned: "bg-sky-100 text-sky-700",
   not_started: "bg-slate-100 text-slate-600",
   in_progress: "bg-blue-100 text-blue-700",
   completed: "bg-emerald-100 text-emerald-700",
@@ -47,6 +48,7 @@ const PHASE_BADGE: Record<string, string> = {
 };
 
 const PHASE_LABEL: Record<string, string> = {
+  planned: "Planeado",
   not_started: "No iniciado",
   in_progress: "En progreso",
   completed: "Completado",
@@ -189,7 +191,7 @@ export function Modal({
       onClick={(e) => {
         if (e.target === ref.current) onClose();
       }}
-      className={`rounded-lg bg-white shadow-xl border border-zinc-200 ${wide ? "max-w-2xl" : "max-w-md"} p-0 backdrop:backdrop-blur-sm`}
+      className={`fixed left-1/2 top-1/2 m-0 max-h-[90vh] w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border border-zinc-200 bg-white p-0 shadow-xl ${wide ? "max-w-2xl" : "max-w-md"} backdrop:backdrop-blur-sm`}
     >
       <form
         method="dialog"
@@ -397,6 +399,126 @@ export function TagInput({
           <div className="absolute inset-x-0 top-full z-10 mt-1 hidden max-h-40 overflow-y-auto rounded-md border border-zinc-200 bg-white shadow-lg peer-focus:block" />
         )}
       </div>
+    </div>
+  );
+}
+
+/* ── Searchable select (top frecuentes + búsqueda) ─ */
+
+function normText(s: string): string {
+  return (s ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+export function SearchableSelect({
+  value,
+  onChange,
+  placeholder,
+  options,
+  topN = 5,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  options: { value: string; label: string; frequency?: number }[];
+  topN?: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const boxRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function onClickOutside(e: MouseEvent) {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, []);
+
+  const selected = options.find((o) => o.value === value);
+  const q = normText(query);
+
+  const frecuentes = [...options]
+    .filter((o) => (o.frequency ?? 0) > 0)
+    .sort((a, b) => (b.frequency ?? 0) - (a.frequency ?? 0));
+  const matches = q
+    ? options.filter((o) => normText(o.label).includes(q))
+    : frecuentes.slice(0, topN);
+
+  const shown = selected && !matches.some((o) => o.value === value) ? [selected, ...matches] : matches;
+
+  return (
+    <div ref={boxRef} className="relative">
+      <button
+        type="button"
+        onClick={() => {
+          setOpen((o) => !o);
+          setQuery("");
+        }}
+        className={`${inputBase} flex items-center justify-between gap-1 text-left`}
+      >
+        <span className={`truncate ${selected ? "text-zinc-800" : "text-zinc-400"}`}>
+          {selected ? selected.label : placeholder}
+        </span>
+        <span className="text-[10px] text-zinc-400">▼</span>
+      </button>
+      {open && (
+        <div className="absolute inset-x-0 top-full z-20 mt-1 overflow-hidden rounded-md border border-zinc-200 bg-white shadow-lg">
+          <input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={q ? "Escribe para buscar…" : `Buscar en ${placeholder}…`}
+            className="w-full border-b border-zinc-200 px-2.5 py-1.5 text-sm outline-none focus:bg-zinc-50"
+          />
+          <div className="max-h-64 overflow-y-auto">
+            {!q && (
+              <button
+                type="button"
+                onClick={() => {
+                  onChange("");
+                  setOpen(false);
+                  setQuery("");
+                }}
+                title="Quitar filtro"
+                className={`block w-full truncate px-2.5 py-1.5 text-left text-sm hover:bg-zinc-50 ${value === "" ? "bg-zinc-100 font-medium text-zinc-800" : "text-zinc-400"}`}
+              >
+                {value === "" ? "— Todos —" : "Quitar filtro"}
+              </button>
+            )}
+            {shown.length === 0 && q && (
+              <p className="px-2.5 py-2 text-sm text-zinc-400">Sin coincidencias</p>
+            )}
+            {q && (
+              <button
+                type="button"
+                onClick={() => {
+                  onChange("");
+                  setOpen(false);
+                  setQuery("");
+                }}
+                title="Quitar filtro"
+                className="block w-full truncate px-2.5 py-1.5 text-left text-sm text-zinc-400 hover:bg-zinc-50"
+              >
+                — Todos —
+              </button>
+            )}
+            {shown.map((o) => (
+              <button
+                key={o.value}
+                type="button"
+                onClick={() => {
+                  onChange(o.value);
+                  setOpen(false);
+                  setQuery("");
+                }}
+                className={`block w-full truncate px-2.5 py-1.5 text-left text-sm hover:bg-zinc-50 ${o.value === value ? "bg-zinc-100 font-medium text-zinc-800" : "text-zinc-800"}`}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

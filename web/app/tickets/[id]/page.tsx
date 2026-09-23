@@ -16,6 +16,7 @@ import {
   Textarea,
   TextInput,
 } from "@/app/components/ui";
+import TicketClosure from "@/app/components/ticket-closure";
 import CommentSection from "@/app/components/comment-section";
 import AttachmentsSection from "@/app/components/attachments-section";
 import type { Client, ClientsResponse, Technician, TechniciansResponse, TicketDetail } from "@/app/lib/types";
@@ -54,7 +55,7 @@ export default function TicketDetailPage() {
                 {t.location_name && <span>· {t.location_name}{t.city ? `, ${t.city}` : ""}</span>}
               </>
             ) : (
-              <span>Ticket interno</span>
+              <span>Ticket interno · {t.client_name ?? "RGB"}</span>
             )}
             {t.channel_name && <span>· Canal: {t.channel_name}</span>}
             {t.reported_by && <span>· Reportado por: {t.reported_by}</span>}
@@ -156,6 +157,16 @@ export default function TicketDetailPage() {
 
       {/* Comments */}
       <CommentSection kind="ticket" entityId={id} comments={detail.comments} onSaved={reload} />
+
+      {/* Cierre del ticket */}
+      <TicketClosure
+        ticketId={id}
+        status={detail.ticket.status}
+        ticketType={detail.ticket.ticket_type}
+        closure={detail.closure}
+        attachments={detail.attachments}
+        onChanged={reload}
+      />
     </div>
   );
 }
@@ -297,12 +308,15 @@ function EditTicket({ detail, onSaved }: { detail: TicketDetail; onSaved: () => 
               <Textarea value={description} onChange={setDescription} rows={5} placeholder="Detalle del problema, síntomas, alcance…" />
             </Field>
             <Field label="Cliente">
-              <Select
-                value={clientId}
-                onChange={setClientId}
-                placeholder={t.ticket_type === "external" ? undefined : "— Sin cliente —"}
-                options={clients.map((c) => ({ value: c.id, label: c.name }))}
-              />
+              {t.ticket_type === "internal" ? (
+                <TextInput value="RGB" onChange={() => {}} disabled />
+              ) : (
+                <Select
+                  value={clientId}
+                  onChange={setClientId}
+                  options={clients.map((c) => ({ value: c.id, label: c.name }))}
+                />
+              )}
             </Field>
             {t.location_id && (clientId || null) !== t.client_id && (
               <p className="text-[11px] text-amber-600">Al cambiar de cliente se quitará la ubicación actual ({t.location_name ?? "sin nombre"}).</p>

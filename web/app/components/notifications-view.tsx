@@ -71,6 +71,20 @@ export default function NotificationsView() {
     }
   }
 
+  async function validate() {
+    setBusy(true);
+    setScanMsg(null);
+    try {
+      const r = await fetchJson<{ validated: number; removed: number }>("/api/notifications/validate", { method: "POST" });
+      setScanMsg(`Validación completa: ${r.validated} revisadas, ${r.removed} obsoletas eliminadas.`);
+      reload();
+    } catch (e) {
+      setScanMsg(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function scan() {
     setBusy(true);
     setScanMsg(null);
@@ -101,6 +115,9 @@ export default function NotificationsView() {
         <div className="flex flex-wrap gap-2">
           <SecondaryButton onClick={scan} disabled={busy}>
             {busy ? "…" : "Generar alertas ahora"}
+          </SecondaryButton>
+          <SecondaryButton onClick={validate} disabled={busy}>
+            Validar notificaciones
           </SecondaryButton>
           <SecondaryButton onClick={markAll} disabled={busy || unread === 0}>
             Marcar todo como leído
