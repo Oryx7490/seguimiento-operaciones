@@ -40,9 +40,10 @@ export async function GET(req: NextRequest) {
           ),
           planned AS (
             SELECT at.technician_id, a.date AS day, SUM(a.planned_hours) AS hours
-              FROM activities a
+FROM activities a
               JOIN activity_technicians at ON at.activity_id = a.id
-             WHERE a.date BETWEEN make_date($1, 1, 1) AND make_date($1, 12, 31)
+             WHERE (a.date BETWEEN make_date($1, 1, 1) AND make_date($1, 12, 31)
+                    OR (a.end_date IS NOT NULL AND a.date <= make_date($1, 12, 31) AND a.end_date >= make_date($1, 1, 1)))
                AND a.status <> 'cancelled'
              GROUP BY at.technician_id, a.date
           ),

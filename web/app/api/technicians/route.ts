@@ -21,7 +21,9 @@ export async function GET(req: NextRequest) {
                  WHERE ts.technician_id = t.id AND ts.status = 'approved'
               ), '[]'::json) AS specialties,
               (SELECT count(*) FROM technician_specialties ts
-                WHERE ts.technician_id = t.id AND ts.status = 'pending')::int AS pending_specialties
+                WHERE ts.technician_id = t.id AND ts.status = 'pending')::int AS pending_specialties,
+              (SELECT count(DISTINCT at.activity_id) FROM activity_technicians at
+                WHERE at.technician_id = t.id)::int AS activity_count
        FROM technicians t
        JOIN users u ON u.id = t.user_id
        ${includeInactive ? "" : "WHERE t.active = true"}

@@ -85,25 +85,39 @@ export default function AdminDashboard() {
           ))}
         </div>
       </div>
-      <div className="mt-8">
-        <h2 className="mb-3 text-sm font-semibold text-zinc-700">Operación</h2>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <Link
-            href="/admin/horas-extra"
-            className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-zinc-300 hover:shadow"
-          >
-            <p className="text-sm font-medium text-zinc-800">Horas extra y conciliación</p>
-            <p className="mt-1 text-xs text-zinc-500">Asistencia, reparto por proyecto y quincenas</p>
-          </Link>
-          <Link
-            href="/admin/horas-hombre"
-            className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-zinc-300 hover:shadow"
-          >
-            <p className="text-sm font-medium text-zinc-800">Horas hombre</p>
-            <p className="mt-1 text-xs text-zinc-500">Esfuerzo por cliente, proyecto y ticket</p>
-          </Link>
+<div className="mt-8">
+          <h2 className="mb-3 text-sm font-semibold text-zinc-700">Operación</h2>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Link
+              href="/admin/horas-extra"
+              className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-zinc-300 hover:shadow"
+            >
+              <p className="text-sm font-medium text-zinc-800">Horas extra y conciliación</p>
+              <p className="mt-1 text-xs text-zinc-500">Asistencia, reparto por proyecto y quincenas</p>
+            </Link>
+            <Link
+              href="/admin/horas-hombre"
+              className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-zinc-300 hover:shadow"
+            >
+              <p className="text-sm font-medium text-zinc-800">Horas hombre</p>
+              <p className="mt-1 text-xs text-zinc-500">Esfuerzo por cliente, proyecto y ticket</p>
+            </Link>
+            <Link
+              href="/admin/pantallas"
+              className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-zinc-300 hover:shadow"
+            >
+              <p className="text-sm font-medium text-zinc-800">m² de pantallas</p>
+              <p className="mt-1 text-xs text-zinc-500">Estimación de metros a instalar por mes</p>
+            </Link>
+            <Link
+              href="/admin/proyectos"
+              className="rounded-lg border border-red-200 bg-red-50 p-4 shadow-sm transition hover:border-red-300 hover:shadow"
+            >
+              <p className="text-sm font-medium text-red-800">Solicitudes de eliminación</p>
+              <p className="mt-1 text-xs text-red-500">Revisar y aprobar eliminaciones de proyectos</p>
+            </Link>
+          </div>
         </div>
-      </div>
 <div className="mt-8">
           <h2 className="mb-3 text-sm font-semibold text-zinc-700">Comunicaciones</h2>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

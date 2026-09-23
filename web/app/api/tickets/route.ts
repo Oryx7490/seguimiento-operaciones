@@ -37,7 +37,8 @@ export async function GET(req: NextRequest) {
                     t.client_id, t.location_id, t.coordinator_id, t.reported_by, t.opened_at,
                     t.first_response_at, t.resolved_at, t.closed_at, t.waiting_reason,
                     t.next_action, t.next_action_date, t.last_activity_at, t.version,
-                    c.name AS client_name, l.name AS location_name, l.city,
+                    COALESCE(c.name, CASE WHEN t.ticket_type = 'internal' THEN 'RGB' END) AS client_name,
+                    l.name AS location_name, l.city,
                     pr.name AS priority_name, u.name AS coordinator_name, ch.name AS channel_name
              FROM tickets t
              LEFT JOIN clients c ON c.id = t.client_id

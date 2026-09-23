@@ -174,6 +174,9 @@ export interface Project {
   max_phase_end: string | null;
   screen_count: number;
   screen_m2_total: number;
+  deletion_requested_at: string | null;
+  deletion_requested_by: string | null;
+  deletion_reason: string | null;
   created_at: string;
   updated_at: string;
 }

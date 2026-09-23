@@ -43,54 +43,59 @@ function sha256(text) {
 async function main() {
   await client.connect();
   try {
-    await ensureTable();
+    await client.query("SELECT pg_advisory_lock(72401)");
+    try {
+      await ensureTable();
 
-    const files = readdirSync(MIGRATIONS_DIR)
-      .map(parseVersion)
-      .filter(Boolean)
-      .sort((a, b) => a.version - b.version);
+      const files = readdirSync(MIGRATIONS_DIR)
+        .map(parseVersion)
+        .filter(Boolean)
+        .sort((a, b) => a.version - b.version);
 
-    if (files.length === 0) {
-      console.log("No hay migraciones pendientes (directorio vacío).");
-      return;
-    }
+      if (files.length === 0) {
+        console.log("No hay migraciones pendientes (directorio vacío).");
+        return;
+      }
 
-    const { rows } = await client.query(
-      `SELECT version, checksum FROM ${MIGRATIONS_TABLE} ORDER BY version`
-    );
-    const applied = new Map(rows.map((r) => [r.version, r.checksum]));
+      const { rows } = await client.query(
+        `SELECT version, checksum FROM ${MIGRATIONS_TABLE} ORDER BY version`
+      );
+      const applied = new Map(rows.map((r) => [r.version, r.checksum]));
 
-    for (const file of files) {
-      const sql = readFileSync(path.join(MIGRATIONS_DIR, file.name), "utf8");
-      const checksum = sha256(sql);
+      for (const file of files) {
+        const sql = readFileSync(path.join(MIGRATIONS_DIR, file.name), "utf8");
+        const checksum = sha256(sql);
 
-      const previous = applied.get(file.version);
-      if (previous !== undefined) {
-        if (previous !== checksum) {
-          throw new Error(
-            `Migración ${file.name} ya aplicada con distinto contenido. ` +
-              `Revisa el archivo o restaura el respaldo; no edites migraciones aplicadas.`
-          );
+        const previous = applied.get(file.version);
+        if (previous !== undefined) {
+          if (previous !== checksum) {
+            throw new Error(
+              `Migración ${file.name} ya aplicada con distinto contenido. ` +
+                `Revisa el archivo o restaura el respaldo; no edites migraciones aplicadas.`
+            );
+          }
+          console.log(`- ${file.name}: ya aplicada`);
+          continue;
         }
-        console.log(`- ${file.name}: ya aplicada`);
-        continue;
-      }
 
-      console.log(`Aplicando ${file.name}...`);
-      try {
-        await client.query("BEGIN");
-        await client.query(sql);
-        await client.query(
-          `INSERT INTO ${MIGRATIONS_TABLE} (version, name, checksum) VALUES ($1, $2, $3)`,
-          [file.version, file.name, checksum]
-        );
-        await client.query("COMMIT");
-      } catch (err) {
-        await client.query("ROLLBACK");
-        throw new Error(`Fallo en ${file.name}: ${err.message}`, { cause: err });
+        console.log(`Aplicando ${file.name}...`);
+        try {
+          await client.query("BEGIN");
+          await client.query(sql);
+          await client.query(
+            `INSERT INTO ${MIGRATIONS_TABLE} (version, name, checksum) VALUES ($1, $2, $3)`,
+            [file.version, file.name, checksum]
+          );
+          await client.query("COMMIT");
+        } catch (err) {
+          await client.query("ROLLBACK");
+          throw new Error(`Fallo en ${file.name}: ${err.message}`, { cause: err });
+        }
       }
+      console.log("Migraciones al día.");
+    } finally {
+      await client.query("SELECT pg_advisory_unlock(72401)");
     }
-    console.log("Migraciones al día.");
   } finally {
     await client.end();
   }

@@ -40,12 +40,19 @@ export async function POST(req: NextRequest) {
   const name = body.name?.trim();
   if (!name) return jsonError("name es obligatorio");
 
+  const clientId = body.client_id !== undefined && body.client_id !== null ? body.client_id.trim() : null;
+  if (clientId && !parseUuid(clientId)) return jsonError("client_id inválido");
+
   try {
+    if (clientId) {
+      const exists = await pool.query(`SELECT id FROM clients WHERE id = $1`, [clientId]);
+      if (exists.rows.length === 0) return jsonError("cliente no encontrado", 404);
+    }
     const { rows } = await pool.query(
       `INSERT INTO locations (client_id, name, address, city, site_contact, active)
        VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id, client_id, name, address, city, site_contact, active`,
-      [body.client_id ? parseUuid(body.client_id) : null, name, body.address?.trim() ?? null, body.city?.trim() ?? null, body.site_contact?.trim() ?? null, body.active ?? true]
+      [clientId, name, body.address?.trim() ?? null, body.city?.trim() ?? null, body.site_contact?.trim() ?? null, body.active ?? true]
     );
     return jsonOk({ location: rows[0] }, 201);
   } catch (err) {
@@ -53,6 +60,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-function parseUuid(id: string): string {
-  return id;
+function parseUuid(id: string): string | null {
+  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  return uuidRe.test(id) ? id : null;
 }

@@ -65,23 +65,31 @@ export default function TicketsPage() {
         <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
       )}
 
-      <div className="mt-4 flex flex-wrap items-center gap-3">
-        <TextInput value={search} onChange={setSearch} placeholder="Buscar por título, código o cliente…" className="w-80" />
-        <Select
-          value={statusFilter}
-          onChange={setStatusFilter}
-          placeholder="Todos los estados"
-          options={STATUS_OPTIONS.map((s) => ({ value: s, label: ticketStatusLabel(s) }))}
-        />
-        <Select
-          value={typeFilter}
-          onChange={setTypeFilter}
-          placeholder="Todos los tipos"
-          options={[
-            { value: "external", label: "Externo (cliente)" },
-            { value: "internal", label: "Interno" },
-          ]}
-        />
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="w-96">
+            <TextInput value={search} onChange={setSearch} placeholder="Buscar por título, código o cliente…" />
+          </div>
+          <div className="w-56">
+            <Select
+              value={statusFilter}
+              onChange={setStatusFilter}
+              placeholder="Todos los estados"
+              options={STATUS_OPTIONS.map((s) => ({ value: s, label: ticketStatusLabel(s) }))}
+            />
+          </div>
+        </div>
+        <div className="w-48">
+          <Select
+            value={typeFilter}
+            onChange={setTypeFilter}
+            placeholder="Todos los tipos"
+            options={[
+              { value: "external", label: "Externo (cliente)" },
+              { value: "internal", label: "Interno" },
+            ]}
+          />
+        </div>
       </div>
 
       <div className="mt-4">
@@ -139,6 +147,7 @@ function NewTicketModal({ onClose, onSaved }: { onClose: () => void; onSaved: ()
   const [channels, setChannels] = useState<CatalogItem[]>([]);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [ticketType, setTicketType] = useState<"external" | "internal">("external");
   const [clientId, setClientId] = useState("");
   const [priorityId, setPriorityId] = useState("");
   const [channelId, setChannelId] = useState("");
@@ -164,6 +173,16 @@ function NewTicketModal({ onClose, onSaved }: { onClose: () => void; onSaved: ()
     };
   }, []);
 
+  useEffect(() => {
+    if (ticketType !== "internal") return;
+    const rgb = clients.find((client) => client.name.trim().toLowerCase() === "rgb");
+    if (rgb) {
+      // Sincroniza el cliente fijo de los tickets internos después de cargar el catálogo.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setClientId(rgb.id);
+    }
+  }, [clients, ticketType]);
+
   async function submit() {
     setSaving(true);
     setErr(null);
@@ -173,7 +192,7 @@ function NewTicketModal({ onClose, onSaved }: { onClose: () => void; onSaved: ()
         body: JSON.stringify({
           title,
           description,
-          ticket_type: "external",
+          ticket_type: ticketType,
           client_id: clientId || undefined,
           priority_id: priorityId || undefined,
           channel_id: channelId || undefined,
@@ -205,9 +224,23 @@ function NewTicketModal({ onClose, onSaved }: { onClose: () => void; onSaved: ()
         <Field label="Descripción">
           <Textarea value={description} onChange={setDescription} rows={3} placeholder="Detalles del ticket" />
         </Field>
+        <Field label="Tipo de ticket">
+          <Select
+            value={ticketType}
+            onChange={(value) => setTicketType(value as "external" | "internal")}
+            options={[
+              { value: "external", label: "Externo (cliente)" },
+              { value: "internal", label: "Interno (RGB)" },
+            ]}
+          />
+        </Field>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Cliente">
-            <Select value={clientId} onChange={setClientId} placeholder="Seleccionar cliente…" options={clients.map((c) => ({ value: c.id, label: c.name }))} />
+            {ticketType === "internal" ? (
+              <TextInput value="RGB" onChange={() => {}} disabled />
+            ) : (
+              <Select value={clientId} onChange={setClientId} placeholder="Seleccionar cliente…" options={clients.map((c) => ({ value: c.id, label: c.name }))} />
+            )}
           </Field>
           <Field label="Prioridad">
             <Select value={priorityId} onChange={setPriorityId} placeholder="— Sin prioridad —" options={priorities.map((p) => ({ value: p.id, label: p.name }))} />

@@ -193,6 +193,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     next_action_date?: string | null;
     reason?: string;
     actor_id?: string;
+    // Solicitud de eliminación
+    request_deletion?: boolean;
+    cancel_deletion?: boolean;
+    deletion_reason?: string;
   } & PhasePatch & ClosurePatch & ScreensPatch;
   try {
     body = await req.json();
@@ -269,6 +273,28 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         `INSERT INTO status_history (entity_type, entity_id, from_status, to_status, changed_by, reason)
          VALUES ('project', $1, $2, $3, $4, $5)`,
         [id, fromStatus, body.status, actorId, body.reason || null]
+      );
+    }
+
+    // Solicitud de eliminación
+    if (body.request_deletion) {
+      await client.query(
+        `UPDATE projects SET
+           deletion_requested_at = now(),
+           deletion_requested_by = $2,
+           deletion_reason       = $3
+         WHERE id = $1`,
+        [id, actorId, body.deletion_reason?.trim() || null]
+      );
+    }
+    if (body.cancel_deletion) {
+      await client.query(
+        `UPDATE projects SET
+           deletion_requested_at = NULL,
+           deletion_requested_by = NULL,
+           deletion_reason       = NULL
+         WHERE id = $1`,
+        [id]
       );
     }
 

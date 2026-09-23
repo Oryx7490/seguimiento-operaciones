@@ -23,7 +23,7 @@ export async function updateActivityStatus(
   try {
     await client.query("BEGIN");
     const previous = await client.query<{ status: string }>(
-      `SELECT status FROM activities WHERE id = $1`,
+      `SELECT status FROM activities WHERE id = $1 FOR UPDATE`,
       [id]
     );
     if (previous.rows.length === 0) throw new ServiceError("actividad no encontrada", 404);

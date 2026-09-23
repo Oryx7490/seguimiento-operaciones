@@ -119,7 +119,16 @@ export default function ProjectDetailPage() {
       <div className="flex flex-wrap gap-2">
         <StatusChanger detail={detail} onSaved={reload} />
         <HealthChanger detail={detail} onSaved={reload} />
+        <DeletionRequest detail={detail} onSaved={reload} />
       </div>
+
+      {/* Alerta: eliminación pendiente */}
+      {p.deletion_requested_at && (
+        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+          <strong>Eliminación solicitada</strong> — pendiente de aprobación por administrador.
+          {p.deletion_reason && <span className="ml-2 text-red-700">Motivo: {p.deletion_reason}</span>}
+        </div>
+      )}
 
       {/* Phases */}
       <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
@@ -1199,6 +1208,98 @@ function EditProjectName({ projectId, currentName, onSaved }: { projectId: strin
           <div className="space-y-4">
             <Field label="Nombre del proyecto">
               <TextInput value={name} onChange={setName} placeholder="Nombre del proyecto" />
+            </Field>
+            {err && <p className="text-xs text-red-600">{err}</p>}
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+}
+
+/* ── Solicitar / cancelar eliminación ───────────────── */
+
+function DeletionRequest({ detail, onSaved }: { detail: ProjectDetail; onSaved: () => void }) {
+  const p = detail.project;
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const pending = Boolean(p.deletion_requested_at);
+
+  async function request() {
+    if (!reason.trim()) { setErr("El motivo es obligatorio"); return; }
+    setSaving(true); setErr(null);
+    try {
+      await fetchJson(`/api/projects/${p.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ request_deletion: true, deletion_reason: reason.trim() }),
+      });
+      setOpen(false);
+      onSaved();
+    } catch (e) { setErr(String(e)); }
+    finally { setSaving(false); }
+  }
+
+  async function cancel() {
+    if (!confirm("¿Cancelar la solicitud de eliminación?")) return;
+    setSaving(true);
+    try {
+      await fetchJson(`/api/projects/${p.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ cancel_deletion: true }),
+      });
+      onSaved();
+    } catch (e) { alert(String(e)); }
+    finally { setSaving(false); }
+  }
+
+  if (pending) {
+    return (
+      <button
+        onClick={cancel}
+        disabled={saving}
+        className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 hover:bg-red-100"
+      >
+        Cancelar solicitud de eliminación
+      </button>
+    );
+  }
+
+  return (
+    <>
+      <button
+        onClick={() => { setReason(""); setErr(null); setOpen(true); }}
+        className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-50"
+      >
+        Solicitar eliminación
+      </button>
+      {open && (
+        <Modal
+          open={true}
+          onClose={() => setOpen(false)}
+          title="Solicitar eliminación del proyecto"
+          footer={
+            <>
+              <SecondaryButton onClick={() => setOpen(false)}>Cancelar</SecondaryButton>
+              <PrimaryButton onClick={request} disabled={saving} className="bg-red-600 hover:bg-red-700 border-red-600">
+                {saving ? "Enviando…" : "Solicitar eliminación"}
+              </PrimaryButton>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-zinc-600">
+              La solicitud quedará pendiente hasta que un <strong>administrador la apruebe</strong>.
+              El proyecto no se eliminará hasta entonces.
+            </p>
+            <Field label="Motivo (obligatorio)">
+              <Textarea
+                value={reason}
+                onChange={setReason}
+                rows={3}
+                placeholder="Explica por qué debe eliminarse este proyecto…"
+              />
             </Field>
             {err && <p className="text-xs text-red-600">{err}</p>}
           </div>

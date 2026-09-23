@@ -239,9 +239,13 @@ export default function PendientesView() {
             >
               {data.actividades_vencidas.map((a) => (
                 <li key={a.id} className="px-4 py-3">
-                  <p className="text-sm font-medium text-zinc-800">
+                  <Link
+                    href={`/?activity=${a.id}&date=${a.date}`}
+                    className="text-sm font-medium text-zinc-800 hover:underline"
+                    title="Abrir la actividad para actualizar su estado"
+                  >
                     {a.description ?? a.ticket_title ?? "Actividad"}
-                  </p>
+                  </Link>
                   <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
                     <MoveTag label="Día">{formatDate(a.date)}</MoveTag>
                     <MoveTag label="Horas planeadas">{a.planned_hours}</MoveTag>
@@ -256,6 +260,12 @@ export default function PendientesView() {
                       <MoveTag label="Técnicos">{a.technicians.join(", ")}</MoveTag>
                     )}
                   </div>
+                  <Link
+                    href={`/?activity=${a.id}&date=${a.date}`}
+                    className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-sky-600 hover:underline"
+                  >
+                    Abrir y actualizar estado →
+                  </Link>
                 </li>
               ))}
             </Section>

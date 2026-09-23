@@ -42,6 +42,14 @@ export async function createTicket(
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    let clientId = input.client_id || null;
+    if (type === "internal") {
+      const rgb = await client.query<{ id: string }>(
+        `SELECT id FROM clients WHERE lower(trim(name)) = 'rgb' ORDER BY created_at LIMIT 1`
+      );
+      if (rgb.rows.length === 0) throw new ServiceError("No existe el cliente RGB para tickets internos");
+      clientId = rgb.rows[0].id;
+    }
     const codeRes = await client.query(
       `SELECT 'TK-' || lpad(nextval('ticket_code_seq')::text, 3, '0') AS code`
     );
@@ -55,7 +63,7 @@ export async function createTicket(
         title,
         description,
         type,
-        input.client_id || null,
+        clientId,
         input.location_id || null,
         input.priority_id || null,
         input.coordinator_id || null,

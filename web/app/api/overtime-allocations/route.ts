@@ -25,6 +25,12 @@ export async function PATCH(req: NextRequest) {
   try {
     await client.query("BEGIN");
 
+    const tech = await client.query(`SELECT id FROM technicians WHERE id = $1`, [body.technician_id]);
+    if (tech.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return jsonError("técnico no encontrado", 404);
+    }
+
     if (body.reset) {
       await client.query(
         `DELETE FROM overtime_allocations WHERE technician_id = $1 AND date = $2`,
@@ -57,6 +63,11 @@ export async function PATCH(req: NextRequest) {
       if (isNaN(percent) || percent < 0 || percent > 100) {
         await client.query("ROLLBACK");
         return jsonError("percent debe estar entre 0 y 100");
+      }
+      const activity = await client.query(`SELECT id FROM activities WHERE id = $1`, [a.activity_id]);
+      if (activity.rows.length === 0) {
+        await client.query("ROLLBACK");
+        return jsonError("actividad no encontrada", 404);
       }
       await client.query(
         `INSERT INTO overtime_allocations (technician_id, date, activity_id, percent, hours)

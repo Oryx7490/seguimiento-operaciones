@@ -3,11 +3,12 @@
 import { useEffect, useState, type DragEvent as ReactDragEvent } from "react";
 import Link from "next/link";
 import { useResource, fetchJson } from "@/app/lib/client";
-import { mondayOfWeek, weekDays, formatShortDate, isToday, WEEKDAY_SHORT } from "@/app/lib/prototype-data";
+import { mondayOfWeek, weekDays, formatShortDate, isToday } from "@/app/lib/prototype-data";
 import {
   Field,
   Modal,
   PrimaryButton,
+  SearchableSelect,
   SecondaryButton,
   Select,
   Spinner,
@@ -53,6 +54,11 @@ function isoDate(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+function dayShort(d: Date): string {
+  const byJsDay = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
+  return byJsDay[d.getDay()];
+}
+
 function activityEnd(a: Activity): string {
   return a.end_date && a.end_date > a.date ? a.end_date : a.date;
 }
@@ -83,11 +89,22 @@ const STATUS_CYCLE: Record<Activity["status"], Activity["status"]> = {
   cancelled: "planned",
 };
 
+function deepLinkParams(): { activityId: string; date: string; monday: Date } | null {
+  if (typeof window === "undefined") return null;
+  const sp = new URLSearchParams(window.location.search);
+  const activityId = sp.get("activity");
+  const dateParam = sp.get("date");
+  if (!activityId) return null;
+  const ref = dateParam && !Number.isNaN(new Date(`${dateParam}T00:00:00`).getTime()) ? new Date(`${dateParam}T00:00:00`) : new Date();
+  return { activityId, date: isoDate(ref), monday: mondayOfWeek(ref) };
+}
+
 export default function WeekAgenda() {
-  const [monday, setMonday] = useState(() => mondayOfWeek(new Date()));
-  const [view, setView] = useState<"week" | "day">("week");
+  const link = deepLinkParams();
+  const [monday, setMonday] = useState<Date>(() => link?.monday ?? mondayOfWeek(new Date()));
+  const [view, setView] = useState<"week" | "day">(() => (link ? "day" : "week"));
   const [compact, setCompact] = useState(false);
-  const [day, setDay] = useState<string>(() => isoDate(new Date()));
+  const [day, setDay] = useState<string>(() => link?.date ?? isoDate(new Date()));
   const [kind, setKind] = useState<string>("");
   const [techId, setTechId] = useState<string>("");
   const [status, setStatus] = useState<string>("");
@@ -97,6 +114,7 @@ export default function WeekAgenda() {
   const [draggingId, setDraggingId] = useState<string | null>(null);
   const [dropIso, setDropIso] = useState<string | null>(null);
   const [moveErr, setMoveErr] = useState<string | null>(null);
+  const [pendingActivityId, setPendingActivityId] = useState<string | null>(() => link?.activityId ?? null);
 
   const days = weekDays(monday);
   const showDays = compact ? days.slice(0, 5) : days;
@@ -118,9 +136,15 @@ export default function WeekAgenda() {
 
   const activities = act.data?.activities ?? [];
   const technicians = (techs.data?.technicians ?? []).filter((t) => t.technician_active);
+  const sortedTechnicians = [...technicians].sort((a, b) => {
+    const aHas = activities.some((act) => act.technicians.some((t) => t.technician_id === a.id));
+    const bHas = activities.some((act) => act.technicians.some((t) => t.technician_id === b.id));
+    if (aHas !== bHas) return aHas ? -1 : 1;
+    return a.display_name.localeCompare(b.display_name, "es-MX", { sensitivity: "base" });
+  });
   const visibleDayTechs = compact
-    ? technicians.filter((t) => activities.some((a) => covers(a, day) && a.technicians.some((x) => x.technician_id === t.id)))
-    : technicians;
+    ? sortedTechnicians.filter((t) => activities.some((a) => covers(a, day) && a.technicians.some((x) => x.technician_id === t.id)))
+    : sortedTechnicians;
   const loading = !act.data && !act.error;
 
   function shift(delta: number) {
@@ -132,6 +156,12 @@ export default function WeekAgenda() {
     }
     const next = new Date(monday);
     next.setDate(next.getDate() + delta * 7);
+    setMonday(next);
+  }
+
+  function shiftDay(delta: number) {
+    const next = new Date(monday);
+    next.setDate(next.getDate() + delta);
     setMonday(next);
   }
 
@@ -178,6 +208,31 @@ export default function WeekAgenda() {
       setMoveErr(String(e));
     }
   }
+
+  function cycleTechnician() {
+    if (technicians.length === 0) return;
+    if (!techId) {
+      setTechId(technicians[0].id);
+      return;
+    }
+    const idx = technicians.findIndex((t) => t.id === techId);
+    const next = technicians[(idx + 1) % technicians.length];
+    setTechId(next.id);
+  }
+
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.get("activity")) {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+  }, []);
+
+  const deepActivity = pendingActivityId && act.data ? act.data.activities.find((x) => x.id === pendingActivityId) ?? null : null;
+  const modalActivity = selected ?? deepActivity;
+  const closeActivityModal = () => {
+    setSelected(null);
+    setPendingActivityId(null);
+  };
 
   function cardDragProps(a: Activity) {
     return {
@@ -265,13 +320,25 @@ export default function WeekAgenda() {
         </div>
 
         <div className="mt-2 flex items-center gap-2">
-          <div className="min-w-0 flex-1">
-            <Select
-              value={techId}
-              onChange={setTechId}
-              placeholder="Técnicos"
-              options={technicians.map((t) => ({ value: t.id, label: t.display_name }))}
-            />
+          <div className="flex min-w-0 flex-1 items-center gap-1">
+            <div className="min-w-0 flex-1">
+              <SearchableSelect
+                value={techId}
+                onChange={setTechId}
+                placeholder="Técnicos"
+                options={technicians.map((t) => ({ value: t.id, label: t.display_name, frequency: t.activity_count }))}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={cycleTechnician}
+              title="Siguiente técnico (tareas del día)"
+              className={`flex h-[34px] w-9 shrink-0 items-center justify-center rounded-md border text-sm transition ${
+                techId ? "border-zinc-900 bg-zinc-900 text-white hover:bg-zinc-700" : "border-zinc-300 bg-white text-zinc-600 hover:bg-zinc-50"
+              }`}
+            >
+              <span className="mb-0.5">▶</span>
+            </button>
           </div>
           <div className="min-w-0 flex-1">
             <Select
@@ -287,11 +354,11 @@ export default function WeekAgenda() {
             />
           </div>
           <div className="min-w-0 flex-1">
-            <Select
+            <SearchableSelect
               value={clientId}
               onChange={setClientId}
               placeholder="Clientes"
-              options={clients.data?.clients.map((c) => ({ value: c.id, label: c.name })) ?? []}
+              options={(clients.data?.clients ?? []).map((c) => ({ value: c.id, label: c.name, frequency: c.activity_count }))}
             />
           </div>
         </div>
@@ -314,14 +381,14 @@ export default function WeekAgenda() {
         {view === "week" && compact ? (
           <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm">
             <div className="min-w-[760px]">
-              <div className="grid grid-cols-5 border-b border-zinc-200 bg-zinc-50">
-                {showDays.map((d, i) => (
-                  <div key={i} className={`border-r border-zinc-200 px-1 py-2 text-center last:border-r-0 ${isToday(d) ? "bg-sky-50" : ""}`}>
-                    <p className={`text-sm font-semibold ${isToday(d) ? "text-sky-700" : "text-zinc-700"}`}>{WEEKDAY_SHORT[i]}</p>
-                    <p className={`text-xs ${isToday(d) ? "text-sky-600" : "text-zinc-400"}`}>{formatShortDate(d)}</p>
-                  </div>
-                ))}
-              </div>
+<div className="grid grid-cols-5 border-b border-zinc-200 bg-zinc-50">
+                  {showDays.map((d, i) => (
+                    <div key={i} className={`border-r border-zinc-200 px-1 py-2 text-center last:border-r-0 ${isToday(d) ? "bg-sky-50" : ""}`}>
+                      <p className={`text-sm font-semibold ${isToday(d) ? "text-sky-700" : "text-zinc-700"}`}>{dayShort(d)}</p>
+                      <p className={`text-xs ${isToday(d) ? "text-sky-600" : "text-zinc-400"}`}>{formatShortDate(d)}</p>
+                    </div>
+                  ))}
+                </div>
               {loading ? (
                 <div className="p-8"><Spinner /></div>
               ) : (
@@ -352,14 +419,30 @@ export default function WeekAgenda() {
         ) : view === "week" ? (
           <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm">
             <div className="min-w-[980px]">
-              <div className="grid grid-cols-[150px_repeat(7,1fr)] border-b border-zinc-200 bg-zinc-50">
+              <div className="grid grid-cols-[150px_28px_repeat(7,1fr)_28px] border-b border-zinc-200 bg-zinc-50">
                 <div className="px-3 py-2 text-xs font-medium uppercase tracking-wide text-zinc-500">Técnico</div>
+                <button
+                  type="button"
+                  onClick={() => shiftDay(-1)}
+                  title="Un día atrás"
+                  className="flex items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-200 hover:text-zinc-800"
+                >
+                  ←
+                </button>
                 {days.map((d, i) => (
                   <div key={i} className={`px-1 py-2 text-center ${isToday(d) ? "bg-sky-50" : ""}`}>
-                    <p className={`text-xs font-semibold ${isToday(d) ? "text-sky-700" : "text-zinc-700"}`}>{WEEKDAY_SHORT[i]}</p>
+                    <p className={`text-xs font-semibold ${isToday(d) ? "text-sky-700" : "text-zinc-700"}`}>{dayShort(d)}</p>
                     <p className={`text-xs ${isToday(d) ? "text-sky-600" : "text-zinc-400"}`}>{formatShortDate(d)}</p>
                   </div>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => shiftDay(1)}
+                  title="Un día adelante"
+                  className="flex items-center justify-center rounded-md text-zinc-500 hover:bg-zinc-200 hover:text-zinc-800"
+                >
+                  →
+                </button>
               </div>
 
               {loading ? (
@@ -367,14 +450,15 @@ export default function WeekAgenda() {
               ) : technicians.length === 0 ? (
                 <p className="p-6 text-sm text-zinc-400">No hay técnicos activos. Crea técnicos desde Configuración.</p>
               ) : (
-                technicians.map((tech) => (
-                  <div key={tech.id} className="grid grid-cols-[150px_repeat(7,1fr)] border-b border-zinc-100 last:border-b-0">
+                sortedTechnicians.map((tech) => (
+                  <div key={tech.id} className="grid grid-cols-[150px_28px_repeat(7,1fr)_28px] border-b border-zinc-100 last:border-b-0">
                     <div className="flex items-center gap-2 border-r border-zinc-100 px-2 py-2">
                       <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-[10px] font-semibold text-white">
                         {initials(tech.display_name)}
                       </span>
                       <span className="truncate text-xs font-medium text-zinc-700">{tech.display_name}</span>
                     </div>
+                    <div className="border-r border-zinc-100" />
                     {days.map((d, i) => {
                       const iso = isoDate(d);
                       const cellActs = activities.filter((a) => covers(a, iso) && a.technicians.some((t) => t.technician_id === tech.id));
@@ -394,6 +478,7 @@ export default function WeekAgenda() {
                         </div>
                       );
                     })}
+                    <div />
                   </div>
                 ))
               )}
@@ -412,7 +497,7 @@ export default function WeekAgenda() {
                   const planned = techActs.reduce((s, a) => s + Number(a.planned_hours), 0);
                   const worked = techActs.reduce((s, a) => s + Number(a.worked_hours), 0);
                   return (
-                    <div key={tech.id} className={`flex shrink-0 flex-col border-r border-zinc-100 last:border-r-0 ${compact ? "w-96" : "w-80"}`}>
+                    <div key={tech.id} className={`flex shrink-0 flex-col border-r border-zinc-100 last:border-r-0 ${compact ? "w-[219px]" : "w-[192px]"}`}>
                       <div className="flex items-center gap-2 border-b border-zinc-200 bg-zinc-50 px-3 py-2">
                         <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-zinc-800 text-[11px] font-semibold text-white">
                           {initials(tech.display_name)}
@@ -453,11 +538,11 @@ export default function WeekAgenda() {
         </p>
       </main>
 
-      {selected && (
+      {modalActivity && (
         <ActivityDetailModal
-          activity={selected}
+          activity={modalActivity}
           technicians={technicians}
-          onClose={() => setSelected(null)}
+          onClose={closeActivityModal}
           onSaved={() => act.reload()}
         />
       )}
@@ -501,13 +586,19 @@ function ActivityCard({ activity, onClick, large, showTechs, variant, draggable,
   dragging?: boolean;
 }) {
   const meta = STATUS_META[activity.status];
+  const statusTextCls: Record<string, string> = {
+    "bg-emerald-500": "text-emerald-600",
+    "bg-amber-500": "text-amber-600",
+    "bg-zinc-400": "text-zinc-400",
+    "bg-zinc-300": "text-zinc-300",
+  };
   const kind = KIND_META[activity.kind];
   const code = activity.kind === "project" ? activity.projects[0]?.project_code
     : activity.kind === "ticket" ? activity.ticket_code
     : activity.internal_activity_type_name?.slice(0, 10);
   const hours = activity.worked_hours > 0
-    ? `${activity.worked_hours}h / ${activity.planned_hours}h plan`
-    : `${activity.planned_hours}h plan`;
+    ? `${activity.worked_hours}h / ${activity.planned_hours}h`
+    : `${activity.planned_hours}h`;
   const overdue = activityEnd(activity) < isoDate(new Date()) && (activity.status === "planned" || activity.status === "in_progress");
   const multi = activity.end_date !== null && activity.end_date > activity.date;
   const dayMain = activity.kind === "project"
@@ -533,6 +624,7 @@ function ActivityCard({ activity, onClick, large, showTechs, variant, draggable,
     >
       <div className="flex items-center justify-between gap-1">
         <span className={`max-w-[80%] truncate rounded px-1 text-[10px] font-semibold ${kind.chip}`}>{code}</span>
+        <span className={`whitespace-nowrap text-[9px] font-medium ${statusTextCls[meta.dot] ?? "text-zinc-400"}`}>{meta.label}</span>
         <button
           type="button"
           title={`${meta.label} · clic para cambiar estado`}
@@ -544,13 +636,19 @@ function ActivityCard({ activity, onClick, large, showTechs, variant, draggable,
       </div>
       {variant === "day" ? (
         <>
-          <p className="truncate text-sm font-semibold leading-tight text-zinc-900">{dayMain}</p>
+          <div className="flex items-center justify-between gap-1">
+            <p className="truncate text-sm font-semibold leading-tight text-zinc-900">{dayMain}</p>
+            <span className="whitespace-nowrap text-[10px] font-medium text-zinc-600">{hours}</span>
+          </div>
           <p className="min-w-0 break-words text-[11px] leading-tight text-zinc-500 [overflow-wrap:anywhere]">{activity.description}</p>
           {daySub && <p className="truncate text-[10px] text-zinc-500">{daySub}</p>}
         </>
       ) : (
         <>
-          <p className="truncate text-sm text-zinc-500">{activity.client_name ?? "—"}</p>
+          <div className="flex items-center justify-between gap-1">
+            <p className="truncate text-sm text-zinc-500">{activity.client_name ?? "—"}</p>
+            <span className="whitespace-nowrap text-[10px] font-medium text-zinc-600">{hours}</span>
+          </div>
           {activity.kind === "project" && activity.projects[0] && (
             <p className="truncate text-sm font-medium text-zinc-700">{activity.projects[0].project_name}</p>
           )}
@@ -565,8 +663,7 @@ function ActivityCard({ activity, onClick, large, showTechs, variant, draggable,
       {showTechs && (
         <p className="truncate text-[11px] font-medium text-zinc-600">{activity.technicians.map((t) => t.technician_name).join(", ")}</p>
       )}
-      <div className="flex items-center justify-between text-[10px] text-zinc-600">
-        <span>{hours}</span>
+      <div className="flex items-center justify-end text-[10px] text-zinc-600">
         {overdue && <span className="text-rose-600">Vencido</span>}
       </div>
     </div>

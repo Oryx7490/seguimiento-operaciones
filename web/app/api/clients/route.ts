@@ -8,7 +8,12 @@ export async function GET() {
       `SELECT c.id, c.name, c.contact_name, c.contact_email, c.contact_phone, c.active,
               (SELECT count(*) FROM locations l WHERE l.client_id = c.id AND l.active) AS location_count,
               (SELECT count(*) FROM client_contacts cc WHERE cc.client_id = c.id AND cc.active) AS contacts_count,
-              (SELECT count(*) FROM comments cm WHERE cm.client_id = c.id) AS comments_count
+              (SELECT count(*) FROM comments cm WHERE cm.client_id = c.id) AS comments_count,
+              (SELECT count(DISTINCT a.id) FROM activities a
+                 LEFT JOIN activity_projects ap ON ap.activity_id = a.id
+                 LEFT JOIN projects p ON p.id = ap.project_id
+                 LEFT JOIN tickets t ON t.id = a.ticket_id
+                WHERE p.client_id = c.id OR t.client_id = c.id) AS activity_count
        FROM clients c ORDER BY c.name`
     );
     return jsonOk({ clients: rows });
