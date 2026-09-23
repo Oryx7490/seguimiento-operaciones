@@ -43,9 +43,10 @@ export async function GET(req: NextRequest) {
                     (SELECT max(ph2.planned_end_date)   FROM project_phases ph2 WHERE ph2.project_id = p.id) AS max_phase_end,
                     (SELECT COALESCE(SUM(ps.quantity), 0)::int
                        FROM project_screens ps WHERE ps.project_id = p.id) AS screen_count,
-                    (SELECT COALESCE(SUM(CASE WHEN ps.is_irregular THEN COALESCE(ps.area_m2, 0)
-                                              ELSE COALESCE(ps.width_m, 0) * COALESCE(ps.height_m, 0) END
-                                              * ps.quantity), 0)::float8
+                    (SELECT COALESCE(SUM((CASE WHEN ps.is_irregular
+                                              THEN COALESCE(ps.area_m2, 0)
+                                              ELSE COALESCE(ps.width_m, 0) * COALESCE(ps.height_m, 0)
+                                          END) * ps.quantity), 0)::float8
                        FROM project_screens ps WHERE ps.project_id = p.id) AS screen_m2_total,
                     (SELECT bool_and(ph2.status IN ('completed', 'not_applicable')) FROM project_phases ph2 WHERE ph2.project_id = p.id) AS all_phases_completed
              FROM projects p

@@ -110,11 +110,11 @@ export default function AdminDashboard() {
               <p className="mt-1 text-xs text-zinc-500">Estimación de metros a instalar por mes</p>
             </Link>
             <Link
-              href="/admin/proyectos"
+              href="/admin/archivo"
               className="rounded-lg border border-red-200 bg-red-50 p-4 shadow-sm transition hover:border-red-300 hover:shadow"
             >
-              <p className="text-sm font-medium text-red-800">Solicitudes de eliminación</p>
-              <p className="mt-1 text-xs text-red-500">Revisar y aprobar eliminaciones de proyectos</p>
+              <p className="text-sm font-medium text-red-800">Archivo</p>
+              <p className="mt-1 text-xs text-red-500">Eliminar proyectos, restaurar cerrados, reabrir tickets</p>
             </Link>
           </div>
         </div>
