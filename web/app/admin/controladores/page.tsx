@@ -37,8 +37,22 @@ interface CatalogController {
 export default function ControllersPage() {
   const { data, error, reload } = useResource<{ controllers: CatalogController[] }>("/api/controllers");
   const [editing, setEditing] = useState<{ item: CatalogController | null } | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
 
   const controllers = data?.controllers ?? [];
+
+  async function handleDelete(c: CatalogController) {
+    if (!window.confirm(`¿Eliminar el controlador "${c.name}"? Esta acción desactivará el registro.`)) return;
+    setDeleting(c.id);
+    try {
+      await fetchJson(`/api/controllers/${c.id}`, { method: "DELETE" });
+      reload();
+    } catch (e) {
+      alert(String(e));
+    } finally {
+      setDeleting(null);
+    }
+  }
 
   return (
     <div className="p-6">
@@ -101,6 +115,13 @@ export default function ControllersPage() {
                         className="rounded border border-zinc-200 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
                       >
                         {c.active ? "Desactivar" : "Activar"}
+                      </button>
+                      <button
+                        onClick={() => handleDelete(c)}
+                        className="rounded border border-red-200 bg-red-50 px-2 py-1 text-xs text-red-700 hover:bg-red-100"
+                        disabled={deleting === c.id}
+                      >
+                        {deleting === c.id ? "…" : "Eliminar"}
                       </button>
                     </div>
                   </td>
