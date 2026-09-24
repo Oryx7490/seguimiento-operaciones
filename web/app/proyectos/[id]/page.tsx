@@ -20,6 +20,7 @@ import CommentSection from "@/app/components/comment-section";
 import AttachmentsSection from "@/app/components/attachments-section";
 import ProjectClosure from "@/app/components/project-closure";
 import type {
+  Controller,
   ProjectAttachment,
   ProjectDetail,
   ProjectPhase,
@@ -271,6 +272,8 @@ export default function ProjectDetailPage() {
         status={detail.project.status}
         closure={detail.closure as never}
         attachments={detail.attachments}
+        screens={detail.screens.map((s) => ({ id: s.id, screen_type: s.screen_type }))}
+        closureControllers={detail.closure_controllers}
         onChanged={reload}
       />
 
@@ -765,11 +768,13 @@ interface ScreenPatchInput {
   is_irregular: boolean;
   area_m2: number | null;
   pitch_mm: number | null;
+  controllers?: Array<{ controller_id: string; quantity: number }>;
   _deleted?: boolean;
 }
 
 function ScreensSection({ projectId, detail, onSaved }: { projectId: string; detail: ProjectDetail; onSaved: () => void }) {
   const [editing, setEditing] = useState<ProjectScreen | "new" | null>(null);
+  const [ctlEditing, setCtlEditing] = useState<ProjectScreen | null>(null);
 
   function buildPayload(update?: { id: string; patch: Omit<ScreenPatchInput, "id" | "_deleted"> }): ScreenPatchInput[] {
     return detail.screens.map((s): ScreenPatchInput =>
@@ -791,6 +796,40 @@ function ScreensSection({ projectId, detail, onSaved }: { projectId: string; det
 
   async function save(screen: ProjectScreen | null, patch: Omit<ScreenPatchInput, "id" | "_deleted">) {
     const screens = screen ? buildPayload({ id: screen.id, patch }) : [...buildPayload(), { ...patch }];
+    await fetchJson(`/api/projects/${projectId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ screens }),
+    });
+    onSaved();
+  }
+
+  async function saveControllers(screen: ProjectScreen, list: Array<{ controller_id: string; quantity: number }>) {
+    const screens = detail.screens.map((s): ScreenPatchInput =>
+      s.id === screen.id
+        ? {
+            id: s.id,
+            screen_type: s.screen_type,
+            environment: s.environment,
+            quantity: s.quantity,
+            width_m: s.width_m,
+            height_m: s.height_m,
+            is_irregular: s.is_irregular,
+            area_m2: s.area_m2,
+            pitch_mm: s.pitch_mm,
+            controllers: list,
+          }
+        : {
+            id: s.id,
+            screen_type: s.screen_type,
+            environment: s.environment,
+            quantity: s.quantity,
+            width_m: s.width_m,
+            height_m: s.height_m,
+            is_irregular: s.is_irregular,
+            area_m2: s.area_m2,
+            pitch_mm: s.pitch_mm,
+          }
+    );
     await fetchJson(`/api/projects/${projectId}`, {
       method: "PATCH",
       body: JSON.stringify({ screens }),
@@ -833,6 +872,7 @@ function ScreensSection({ projectId, detail, onSaved }: { projectId: string; det
                 <th className="px-3 py-2 text-left">Dimensiones</th>
                 <th className="px-3 py-2 text-right">Pitch (mm)</th>
                 <th className="px-3 py-2 text-right">m² (total)</th>
+                <th className="px-3 py-2 text-left">Controladores</th>
                 <th className="px-3 py-2 text-left">Ficha PDF</th>
                 <th className="px-3 py-2 text-right">Acciones</th>
               </tr>
@@ -869,6 +909,9 @@ function ScreensSection({ projectId, detail, onSaved }: { projectId: string; det
                     {s.m2 > 0 ? `${formatNum(s.m2 * s.quantity)} m²` : "—"}
                   </td>
                   <td className="px-3 py-2">
+                    <ScreenControllersCell screen={s} onEdit={() => setCtlEditing(s)} />
+                  </td>
+                  <td className="px-3 py-2">
                     <ScreenPdf screen={s} onChanged={onSaved} />
                   </td>
                   <td className="px-3 py-2 text-right">
@@ -892,6 +935,17 @@ function ScreensSection({ projectId, detail, onSaved }: { projectId: string; det
             </tbody>
           </table>
         </div>
+      )}
+
+      {ctlEditing && (
+        <ScreenControllersModal
+          screen={ctlEditing}
+          onClose={() => setCtlEditing(null)}
+          onSaved={async (list) => {
+            await saveControllers(ctlEditing, list);
+            setCtlEditing(null);
+          }}
+        />
       )}
     </section>
   );
@@ -1072,6 +1126,176 @@ function ScreenModal({
         <Field label="Pitch (mm)">
           <TextInput value={pitch} onChange={setPitch} type="number" placeholder="P. ej. 1.5" />
         </Field>
+        {err && <p className="text-xs text-red-600">{err}</p>}
+      </div>
+    </Modal>
+  );
+}
+
+/* ── Controladores por pantalla (equipos de la cotización) ── */
+
+const OWNERSHIP_LABEL: Record<string, string> = {
+  propio: "Propio",
+  cliente: "Del cliente",
+  tercero: "De terceros",
+};
+
+function ScreenControllersCell({ screen, onEdit }: { screen: ProjectScreen; onEdit: () => void }) {
+  return (
+    <div className="flex flex-col items-start gap-1">
+      {screen.controllers.length === 0 ? (
+        <span className="text-xs text-zinc-400">Sin controladores</span>
+      ) : (
+        <div className="flex flex-wrap gap-1">
+          {screen.controllers.map((c) => (
+            <span
+              key={c.id}
+              className="inline-block rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-700"
+            >
+              {c.brand ? `${c.brand} ` : ""}{c.name} ×{c.quantity}
+            </span>
+          ))}
+        </div>
+      )}
+      <button
+        onClick={onEdit}
+        className="rounded border border-zinc-200 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
+      >
+        {screen.controllers.length === 0 ? "Configurar" : "Editar"}
+      </button>
+    </div>
+  );
+}
+
+function ScreenControllersModal({
+  screen,
+  onClose,
+  onSaved,
+}: {
+  screen: ProjectScreen;
+  onClose: () => void;
+  onSaved: (list: Array<{ controller_id: string; quantity: number }>) => Promise<void>;
+}) {
+  const catalog = useResource<{ controllers: Controller[] }>("/api/controllers");
+  const [list, setList] = useState<Array<{ controller_id: string; quantity: number }>>(
+    screen.controllers.map((c) => ({ controller_id: c.controller_id, quantity: c.quantity }))
+  );
+  const [addId, setAddId] = useState("");
+  const [qty, setQty] = useState("1");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const activeControllers = (catalog.data?.controllers ?? []).filter((c) => c.active);
+  const addedIds = new Set(list.map((i) => i.controller_id));
+  const inCatalog = (id: string) => activeControllers.find((c) => c.id === id);
+
+  function add() {
+    if (!addId || !inCatalog(addId)) return;
+    if (addedIds.has(addId)) return;
+    const n = Number(qty);
+    if (!Number.isFinite(n) || n <= 0) {
+      setErr("Cantidad debe ser > 0");
+      return;
+    }
+    setList([...list, { controller_id: addId, quantity: n }]);
+    setAddId("");
+    setQty("1");
+    setErr(null);
+  }
+
+  function changeQty(controller_id: string, value: string) {
+    const n = Number(value);
+    setList(
+      list.map((i) =>
+        i.controller_id === controller_id
+          ? { ...i, quantity: Number.isFinite(n) ? n : i.quantity }
+          : i
+      )
+    );
+  }
+
+  async function submit() {
+    setSaving(true);
+    setErr(null);
+    try {
+      await onSaved(list);
+    } catch (e) {
+      setErr(String(e));
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      open={true}
+      onClose={onClose}
+      title={`Controladores — ${screen.screen_type}`}
+      footer={
+        <>
+          <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
+          <PrimaryButton onClick={submit} disabled={saving}>{saving ? "Guardando…" : "Guardar"}</PrimaryButton>
+        </>
+      }
+    >
+      {catalog.error && <p className="text-xs text-red-600">{catalog.error}</p>}
+      <div className="space-y-4">
+        <div className="flex gap-2">
+          <select
+            value={addId}
+            onChange={(e) => setAddId(e.target.value)}
+            className="flex-1 rounded-md border border-zinc-300 bg-white px-2.5 py-1.5 text-sm text-zinc-800"
+          >
+            <option value="">Selecciona un controlador…</option>
+            {activeControllers.map((c) => (
+              <option key={c.id} value={c.id} disabled={addedIds.has(c.id)}>
+                {c.brand ? `${c.brand} ` : ""}{c.name} · {OWNERSHIP_LABEL[c.ownership] ?? c.ownership}
+              </option>
+            ))}
+          </select>
+          <input
+            type="number"
+            min={1}
+            value={qty}
+            onChange={(e) => setQty(e.target.value)}
+            className="w-20 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-800"
+          />
+          <SecondaryButton onClick={add} className="text-xs px-2 py-1">Agregar</SecondaryButton>
+        </div>
+
+        {list.length === 0 ? (
+          <p className="text-sm text-zinc-400">
+            No hay controladores de cotización para esta pantalla.
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {list.map((i) => {
+              const c = inCatalog(i.controller_id);
+              return (
+                <li key={i.controller_id} className="flex items-center justify-between gap-2 text-sm text-zinc-700">
+                  <span className="min-w-0 truncate">
+                    {c ? `${c.brand ? c.brand + " " : ""}${c.name}` : "—"}
+                  </span>
+                  <span className="flex shrink-0 items-center gap-2">
+                    <input
+                      type="number"
+                      min={1}
+                      value={i.quantity}
+                      onChange={(e) => changeQty(i.controller_id, e.target.value)}
+                      className="w-20 rounded-md border border-zinc-300 bg-white px-2 py-1 text-sm text-zinc-800"
+                    />
+                    <button
+                      onClick={() => setList(list.filter((x) => x.controller_id !== i.controller_id))}
+                      className="rounded border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                    >
+                      Quitar
+                    </button>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
         {err && <p className="text-xs text-red-600">{err}</p>}
       </div>
     </Modal>

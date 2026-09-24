@@ -90,3 +90,10 @@ export function phaseStatusLabel(status: string): string {
   };
   return map[status] ?? status;
 }
+
+export function formatCurrency(amount: number | string | null | undefined): string {
+  if (amount === null || amount === undefined) return "—";
+  const n = typeof amount === "string" ? Number(amount) : amount;
+  if (Number.isNaN(n)) return "—";
+  return n.toLocaleString("es-MX", { style: "currency", currency: "MXN" });
+}

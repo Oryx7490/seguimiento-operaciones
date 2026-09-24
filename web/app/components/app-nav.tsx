@@ -25,6 +25,8 @@ const ADMIN_SUB = [
   { href: "/admin/catalogos", label: "Catálogos" },
   { href: "/admin/especialidades", label: "Especialidades" },
   { href: "/admin/calendario", label: "Calendario" },
+  { href: "/admin/controladores", label: "Controladores" },
+  { href: "/admin/cierre", label: "Cierre" },
   { href: "/admin/horas-extra", label: "Horas extra" },
   { href: "/admin/notificaciones", label: "Notificaciones" },
   { href: "/admin/agentes", label: "Agentes CLI" },

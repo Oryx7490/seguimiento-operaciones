@@ -117,16 +117,30 @@ export default function AdminDashboard() {
               <p className="mt-1 text-xs text-zinc-500">m² a instalar en corto, mediano y largo plazo</p>
             </Link>
             <Link
+              href="/admin/cierre"
+              className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 shadow-sm transition hover:border-emerald-300 hover:shadow"
+            >
+              <p className="text-sm font-medium text-emerald-800">Cierre de proyectos</p>
+              <p className="mt-1 text-xs text-emerald-600">Pre-cierre, cobros, facturación y evidencias</p>
+            </Link>
+            <Link
               href="/admin/archivo"
               className="rounded-lg border border-red-200 bg-red-50 p-4 shadow-sm transition hover:border-red-300 hover:shadow"
             >
               <p className="text-sm font-medium text-red-800">Archivo</p>
               <p className="mt-1 text-xs text-red-500">Eliminar proyectos, restaurar cerrados, reabrir tickets</p>
             </Link>
+<Link
+              href="/admin/controladores"
+              className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-zinc-300 hover:shadow"
+            >
+              <p className="text-sm font-medium text-zinc-800">Controladores</p>
+              <p className="mt-1 text-xs text-zinc-500">Equipos de pantalla propios, del cliente o terceros</p>
+            </Link>
           </div>
         </div>
-<div className="mt-8">
-          <h2 className="mb-3 text-sm font-semibold text-zinc-700">Comunicaciones</h2>
+      <div className="mt-8">
+        <h2 className="mb-3 text-sm font-semibold text-zinc-700">Comunicaciones</h2>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Link
               href="/admin/notificaciones"

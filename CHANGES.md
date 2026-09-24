@@ -26,8 +26,14 @@
 - Menú lateral reordenado: Agenda, Gantt, Proyectos, Tickets, resto.
 - Versión leída desde `package.json` en el nav (v0.3.0).
 
-### Pendiente
-- Migración `034_project_admin_closure.sql` (tabla `project_admin_closure` para checklist admin de cierre) aplicada; la sección de Cierre de proyectos aún no se construye.
+- Versión leída desde `package.json` en el nav (v0.3.0).
+
+### Nuevas características (v0.3.0 continuación)
+- **Controladores de pantalla (catálogo)**: migración `035_controllers.sql` con tabla `controller_catalog`, `screen_controllers` (equipos de cotización por pantalla) y `project_closure_controllers` (equipos definitivos con números de serie). Seed inicial con Novastar/Colorlight/Brompton.
+- **Admin → Controladores**: página `/admin/controladores` con CRUD completo (modelo, marca, procedencia propio/cliente/tercero) y links en dashboard y menú lateral.
+- **Pantallas por proyecto**: columna "Controladores" en tabla de pantallas con editor por pantalla para seleccionar equipos de cotización desde el catálogo y su cantidad. Se guarda junto con la pantalla.
+- **Cierre de proyecto**: sección de "Equipos definitivos instalados" con números de serie por pantalla; puede diferir de la cotización. Persistido en `project_closure_controllers` y visible en modo cerrado.
+- **Cierre administrativo**: endpoints y UI para tickets con cobro (pipeline de cierre + facturación/ID de factura), y enlace a `/admin/cierre` con pestañas Proyectos/Tickets.
 
 ## 0.2.1 — Archivo administrativo + borrado en dos pasos + m² report (2026-09-23)
 

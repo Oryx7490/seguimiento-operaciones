@@ -375,6 +375,33 @@ export interface ProjectAttachment {
   created_at: string;
 }
 
+export interface Controller {
+  id: string;
+  name: string;
+  brand: string | null;
+  ownership: "propio" | "cliente" | "tercero";
+  active: boolean;
+  created_at: string;
+}
+
+export interface ScreenController {
+  id: string;
+  controller_id: string;
+  name: string;
+  brand: string | null;
+  ownership: string;
+  quantity: number;
+}
+
+export interface ClosureController {
+  id?: string;
+  screen_id: string | null;
+  controller_id: string | null;
+  controller_name: string;
+  quantity: number;
+  serial_numbers: string | null;
+}
+
 export interface ProjectScreen {
   id: string;
   project_id: string;
@@ -389,6 +416,7 @@ export interface ProjectScreen {
   m2: number;
   created_at: string;
   attachment: ProjectAttachment[];
+  controllers: ScreenController[];
 }
 
 export interface ProjectDetail {
@@ -400,6 +428,7 @@ export interface ProjectDetail {
   attachments: Attachment[];
   screens: ProjectScreen[];
   closure: unknown | null;
+  closure_controllers: ClosureController[];
 }
 
 export interface ProjectsResponse {

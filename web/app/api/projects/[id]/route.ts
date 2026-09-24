@@ -44,7 +44,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     );
     if (project.rows.length === 0) return jsonError("proyecto no encontrado", 404);
 
-    const [phases, assignments, comments, history, attachments, screens, screenAttachments] = await Promise.all([
+    const [phases, assignments, comments, history, attachments, screens, screenAttachments, screenControllers] = await Promise.all([
       pool.query(
         `SELECT ph.*, u.name AS owner_name FROM project_phases ph
          LEFT JOIN users u ON u.id = ph.owner_id
@@ -96,6 +96,15 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
          ORDER BY at.created_at`,
         [id]
       ),
+      pool.query(
+        `SELECT sc.id, sc.screen_id, sc.controller_id, sc.quantity,
+                cc.name, cc.brand, cc.ownership
+         FROM screen_controllers sc
+         JOIN controller_catalog cc ON cc.id = sc.controller_id
+         WHERE sc.screen_id IN (SELECT id FROM project_screens WHERE project_id = $1)
+         ORDER BY cc.name`,
+        [id]
+      ),
     ]);
 
     const closure = await pool.query(
@@ -103,9 +112,19 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       [id]
     );
 
+    const closureControllers = await pool.query(
+      `SELECT pcc.id, pcc.screen_id, pcc.controller_id, pcc.controller_name,
+              pcc.quantity, pcc.serial_numbers
+       FROM project_closure_controllers pcc
+       WHERE pcc.project_id = $1
+       ORDER BY pcc.created_at`,
+      [id]
+    );
+
     const screenRows = screens.rows.map((s) => ({
       ...s,
       attachment: screenAttachments.rows.filter((a) => a.screen_id === s.id),
+      controllers: screenControllers.rows.filter((c) => c.screen_id === s.id),
     }));
 
     return jsonOk({
@@ -117,6 +136,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       attachments: attachments.rows,
       screens: screenRows,
       closure: closure.rows[0] ?? null,
+      closure_controllers: closureControllers.rows,
     });
   } catch (err) {
     return jsonError("No se pudo leer el proyecto", 500, String(err));
@@ -156,6 +176,15 @@ interface ClosurePatch {
     final_note?: string | null;
   };
   close_project?: boolean;
+  closure_controllers?: Array<{
+    id?: string;
+    screen_id?: string | null;
+    controller_id?: string | null;
+    controller_name?: string;
+    quantity?: number;
+    serial_numbers?: string | null;
+    _deleted?: boolean;
+  }>;
 }
 
 interface ScreensPatch {
@@ -169,6 +198,7 @@ interface ScreensPatch {
     is_irregular?: boolean;
     area_m2?: number | null;
     pitch_mm?: number | null;
+    controllers?: Array<{ controller_id: string; quantity: number }>;
     _deleted?: boolean;
   }>;
 }
@@ -403,6 +433,34 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             return jsonError("quantity debe ser > 0");
           }
 
+          // Validar controladores antes de tocar la BD
+          let screenId: string | null = sc.id ?? null;
+          if (Array.isArray(sc.controllers)) {
+            if (sc.controllers.length === 0) {
+              // Lista vacía = sin controladores: se limpia abajo.
+              void 0;
+            } else {
+              for (const c of sc.controllers) {
+                if (!c.controller_id || !parseId(c.controller_id)) {
+                  await client.query("ROLLBACK");
+                  return jsonError("controller_id inválido en controladores");
+                }
+                if (!Number.isFinite(Number(c.quantity)) || Number(c.quantity) <= 0) {
+                  await client.query("ROLLBACK");
+                  return jsonError("cantidad de controlador debe ser > 0");
+                }
+                const { rows: exist } = await client.query(
+                  `SELECT id FROM controller_catalog WHERE id = $1`,
+                  [c.controller_id]
+                );
+                if (exist.length === 0) {
+                  await client.query("ROLLBACK");
+                  return jsonError("Controlador no encontrado en el catálogo");
+                }
+              }
+            }
+          }
+
           const num = (v: number | null | undefined): number | null =>
             v === null || v === undefined ? null : Number.isFinite(Number(v)) ? Number(v) : null;
           if (sc.id) {
@@ -427,11 +485,26 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
               );
             }
           } else if (sType) {
-            await client.query(
+            const { rows: inserted } = await client.query(
               `INSERT INTO project_screens (project_id, screen_type, environment, quantity, width_m, height_m, is_irregular, area_m2, pitch_mm)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
               [id, sType, environment ?? null, sc.quantity ?? 1, num(sc.width_m), num(sc.height_m), sc.is_irregular ?? false, num(sc.area_m2), num(sc.pitch_mm)]
             );
+            screenId = inserted[0]?.id ?? null;
+          }
+
+          // Reemplazar controladores de la pantalla (equipos de la cotización)
+          if (screenId && Array.isArray(sc.controllers)) {
+            await client.query(`DELETE FROM screen_controllers WHERE screen_id = $1`, [screenId]);
+            if (sc.controllers.length > 0) {
+              for (const c of sc.controllers) {
+                await client.query(
+                  `INSERT INTO screen_controllers (screen_id, controller_id, quantity)
+                   VALUES ($1, $2, $3)`,
+                  [screenId, c.controller_id, c.quantity]
+                );
+              }
+            }
           }
         }
       }
@@ -462,6 +535,47 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
            ON CONFLICT (project_id) DO UPDATE SET ${cols.map((col) => `${col} = EXCLUDED.${col}`).join(", ")}`,
           [id, ...vals]
         );
+      }
+    }
+
+    // Equipos definitivos utilizados en la instalación (con números de serie).
+    if (Array.isArray(body.closure_controllers)) {
+      // Validar antes de reemplazar.
+      for (const cc of body.closure_controllers) {
+        const name = cc.controller_name?.trim();
+        if (cc.controller_id && !parseId(cc.controller_id)) {
+          await client.query("ROLLBACK");
+          return jsonError("controller_id inválido en equipos del cierre");
+        }
+        if (!name) {
+          await client.query("ROLLBACK");
+          return jsonError("Cada equipo definitivo requiere un nombre/modelo");
+        }
+        if (!Number.isFinite(Number(cc.quantity)) || Number(cc.quantity) <= 0) {
+          await client.query("ROLLBACK");
+          return jsonError("La cantidad de cada equipo definitivo debe ser > 0");
+        }
+      }
+      if (body.closure_controllers.length === 0) {
+        // Se usa -1 para que DELETE no colisione en parametrización vacía.
+        await client.query(`DELETE FROM project_closure_controllers WHERE project_id = $1`, [id]);
+      } else {
+        await client.query(`DELETE FROM project_closure_controllers WHERE project_id = $1`, [id]);
+        for (const cc of body.closure_controllers) {
+          await client.query(
+            `INSERT INTO project_closure_controllers (
+               project_id, screen_id, controller_id, controller_name, quantity, serial_numbers
+             ) VALUES ($1, $2, $3, $4, $5, $6)`,
+            [
+              id,
+              cc.screen_id && parseId(cc.screen_id) ? cc.screen_id : null,
+              cc.controller_id || null,
+              cc.controller_name!.trim(),
+              cc.quantity ?? 1,
+              cc.serial_numbers?.trim() || null,
+            ]
+          );
+        }
       }
     }
 
