@@ -61,6 +61,7 @@ export default function ProjectDetailPage() {
     m2total: false,
   });
   const [showColMenu, setShowColMenu] = useState(false);
+  const [showNotApplicable, setShowNotApplicable] = useState(false);
 
   function togglePhaseCol(key: string) {
     setPhaseCols((c) => ({ ...c, [key]: !c[key] }));
@@ -70,6 +71,15 @@ export default function ProjectDetailPage() {
   const p = detail.project;
 
   const totalM2 = detail.screens.reduce((sum, s) => sum + (s.m2 || 0) * (s.quantity || 0), 0);
+
+  const notApplicableCount = detail.phases.filter((ph) => ph.status === "not_applicable").length;
+  const visiblePhases = [...detail.phases]
+    .sort(
+      (a, b) =>
+        (a.status === "not_applicable" ? 1 : 0) - (b.status === "not_applicable" ? 1 : 0) ||
+        a.sort_order - b.sort_order,
+    )
+    .filter((ph) => showNotApplicable || ph.status !== "not_applicable");
 
   return (
     <div className="max-w-5xl space-y-6 p-6">
@@ -138,6 +148,14 @@ export default function ProjectDetailPage() {
           <div className="flex gap-2">
             <NotApplicableChecklist detail={detail} onSaved={reload} />
             <AddPhase detail={detail} onSaved={reload} />
+            <SecondaryButton
+              onClick={() => setShowNotApplicable((s) => !s)}
+              className="px-2 py-1 text-xs"
+            >
+              {showNotApplicable
+                ? "Ocultar no aplican"
+                : `Mostrar no aplican (${notApplicableCount})`}
+            </SecondaryButton>
             <div className="relative">
               <button
                 onClick={() => setShowColMenu((s) => !s)}
@@ -189,7 +207,7 @@ export default function ProjectDetailPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-100">
-                {detail.phases.map((ph) => (
+                {visiblePhases.map((ph) => (
                   <tr key={ph.id} className={ph.status === "not_applicable" ? "opacity-50" : "hover:bg-zinc-50"}>
                     <td className="px-3 py-2 font-medium text-zinc-800">{ph.name}</td>
                     {phaseCols.estado && <td className="px-3 py-2"><StatusBadge status={ph.status} kind="phase" /></td>}
@@ -209,6 +227,19 @@ export default function ProjectDetailPage() {
                     </td>
                   </tr>
                 ))}
+                {!showNotApplicable && notApplicableCount > 0 && (
+                  <tr>
+                    <td className="px-3 py-3 text-sm text-zinc-400">
+                      {notApplicableCount} {notApplicableCount === 1 ? "etapa marcada como" : "etapas marcadas como"} &ldquo;No aplica&rdquo;.{" "}
+                      <button
+                        onClick={() => setShowNotApplicable(true)}
+                        className="font-medium text-zinc-600 underline hover:text-zinc-900"
+                      >
+                        Mostrar
+                      </button>
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
