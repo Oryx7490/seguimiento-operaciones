@@ -80,7 +80,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         [id]
       ),
       pool.query(
-        `SELECT ps.id, ps.project_id, ps.screen_type, ps.quantity,
+        `SELECT ps.id, ps.project_id, ps.screen_type, ps.environment, ps.quantity,
                 ps.width_m, ps.height_m, ps.is_irregular, ps.area_m2, ps.pitch_mm, ps.created_at,
                 CASE WHEN ps.is_irregular THEN COALESCE(ps.area_m2, 0)
                      ELSE COALESCE(ps.width_m, 0) * COALESCE(ps.height_m, 0) END AS m2
@@ -162,6 +162,7 @@ interface ScreensPatch {
   screens?: Array<{
     id?: string;
     screen_type?: string;
+    environment?: string | null;
     quantity?: number;
     width_m?: number | null;
     height_m?: number | null;
@@ -358,6 +359,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         }
         if (
           sc.screen_type !== undefined ||
+          sc.environment !== undefined ||
           sc.quantity !== undefined ||
           sc.width_m !== undefined ||
           sc.height_m !== undefined ||
@@ -371,6 +373,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           const h = sc.height_m;
           const irregular = sc.is_irregular;
           const area = sc.area_m2;
+
+          let environment: string | null | undefined = sc.environment;
+          if (environment !== undefined && environment !== null) {
+            const env = String(environment).trim().toLowerCase();
+            if (env !== "exterior" && env !== "interior" && env !== "semi_exterior" && env !== "interior_flexible") {
+              await client.query("ROLLBACK");
+              return jsonError("environment debe ser 'exterior', 'interior', 'semi_exterior' o 'interior_flexible'");
+            }
+            environment = env;
+          }
 
           // Validar coherencia de dimensiones
           const willBeIrregular = irregular ?? (sc.id ? false : false); // si no se envía, asume regular
@@ -401,6 +413,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
               vals.push(val);
             };
             if (sType !== undefined) setPush("screen_type", sType);
+            if (environment !== undefined) setPush("environment", environment);
             if (sc.quantity !== undefined) setPush("quantity", sc.quantity);
             if (sc.width_m !== undefined) setPush("width_m", num(sc.width_m));
             if (sc.height_m !== undefined) setPush("height_m", num(sc.height_m));
@@ -415,9 +428,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             }
           } else if (sType) {
             await client.query(
-              `INSERT INTO project_screens (project_id, screen_type, quantity, width_m, height_m, is_irregular, area_m2, pitch_mm)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-              [id, sType, sc.quantity ?? 1, num(sc.width_m), num(sc.height_m), sc.is_irregular ?? false, num(sc.area_m2), num(sc.pitch_mm)]
+              `INSERT INTO project_screens (project_id, screen_type, environment, quantity, width_m, height_m, is_irregular, area_m2, pitch_mm)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+              [id, sType, environment ?? null, sc.quantity ?? 1, num(sc.width_m), num(sc.height_m), sc.is_irregular ?? false, num(sc.area_m2), num(sc.pitch_mm)]
             );
           }
         }

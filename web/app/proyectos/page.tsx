@@ -16,12 +16,31 @@ import {
   StatusBadge,
   TextInput,
 } from "@/app/components/ui";
+import { ColumnSelector } from "@/app/components/column-selector";
 import type { CatalogItem, CatalogsResponse, Client, ClientsResponse, Project, ProjectsResponse } from "@/app/lib/types";
+
+const PROJECT_COLUMNS = [
+  { key: "codigo", label: "Código" },
+  { key: "nombre", label: "Nombre" },
+  { key: "cliente", label: "Cliente" },
+  { key: "estado", label: "Estado" },
+  { key: "salud", label: "Salud" },
+  { key: "inicio", label: "Inicio plan." },
+  { key: "actividad", label: "Última actividad" },
+  { key: "pantallas", label: "Pantallas" },
+  { key: "m2", label: "m² totales" },
+] as const;
+const DEFAULT_PROJECT_COLS: Record<string, boolean> = Object.fromEntries(
+  PROJECT_COLUMNS.map((c) => [c.key, true])
+);
 
 export default function ProjectsPage() {
   const [statusFilter, setStatusFilter] = useState("");
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
+  const [cols, setCols] = useState<Record<string, boolean>>(DEFAULT_PROJECT_COLS);
+
+  const toggleCol = (key: string) => setCols((prev) => ({ ...prev, [key]: !prev[key] }));
 
   const params = new URLSearchParams();
   if (statusFilter) params.set("status", statusFilter);
@@ -67,6 +86,9 @@ export default function ProjectsPage() {
             { value: "cancelled", label: "Cancelado" },
           ]}
         />
+        <div className="ml-auto">
+          <ColumnSelector columns={PROJECT_COLUMNS} visible={cols} onToggle={toggleCol} />
+        </div>
       </div>
 
       <div className="mt-4">
@@ -79,37 +101,43 @@ export default function ProjectsPage() {
             <table className="min-w-full text-sm">
               <thead className="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500">
                 <tr>
-                  <th className="px-4 py-3 text-left">Código</th>
-                  <th className="px-4 py-3 text-left">Nombre</th>
-                  <th className="px-4 py-3 text-left">Cliente</th>
-                  <th className="px-4 py-3 text-left">Estado</th>
-                  <th className="px-4 py-3 text-left">Salud</th>
-                  <th className="px-4 py-3 text-left">Inicio plan.</th>
-                  <th className="px-4 py-3 text-left">Última actividad</th>
-                  <th className="px-4 py-3 text-right">Pantallas</th>
-                  <th className="px-4 py-3 text-right">m² totales</th>
+                  {cols.codigo && <th className="px-4 py-3 text-left">Código</th>}
+                  {cols.nombre && <th className="px-4 py-3 text-left">Nombre</th>}
+                  {cols.cliente && <th className="px-4 py-3 text-left">Cliente</th>}
+                  {cols.estado && <th className="px-4 py-3 text-left">Estado</th>}
+                  {cols.salud && <th className="px-4 py-3 text-left">Salud</th>}
+                  {cols.inicio && <th className="px-4 py-3 text-left">Inicio plan.</th>}
+                  {cols.actividad && <th className="px-4 py-3 text-left">Última actividad</th>}
+                  {cols.pantallas && <th className="px-4 py-3 text-right">Pantallas</th>}
+                  {cols.m2 && <th className="px-4 py-3 text-right">m² totales</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-100">
                 {projects.map((p) => (
                   <tr key={p.id} className="hover:bg-zinc-50">
-                    <td className="px-4 py-3">
-                      <Link href={`/proyectos/${p.id}`} className="font-semibold text-sky-700 hover:underline">
-                        {p.code}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3 font-medium text-zinc-800">{p.name}</td>
-                    <td className="px-4 py-3 text-zinc-600">{p.client_name ?? "—"}</td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={p.status} kind="project" />
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={p.health_status} kind="health" />
-                    </td>
-                    <td className="px-4 py-3 text-zinc-500">{formatDate(p.planned_start_date)}</td>
-                    <td className="px-4 py-3 text-zinc-500">{formatDate(p.last_activity_at)}</td>
-                    <td className="px-4 py-3 text-right">{p.screen_count > 0 ? p.screen_count.toLocaleString("es-MX") : "—"}</td>
-                    <td className="px-4 py-3 text-right">{p.screen_m2_total > 0 ? `${p.screen_m2_total.toLocaleString("es-MX", { maximumFractionDigits: 2 })} m²` : "—"}</td>
+                    {cols.codigo && (
+                      <td className="px-4 py-3">
+                        <Link href={`/proyectos/${p.id}`} className="font-semibold text-sky-700 hover:underline">
+                          {p.code}
+                        </Link>
+                      </td>
+                    )}
+                    {cols.nombre && <td className="px-4 py-3 font-medium text-zinc-800">{p.name}</td>}
+                    {cols.cliente && <td className="px-4 py-3 text-zinc-600">{p.client_name ?? "—"}</td>}
+                    {cols.estado && (
+                      <td className="px-4 py-3">
+                        <StatusBadge status={p.status} kind="project" />
+                      </td>
+                    )}
+                    {cols.salud && (
+                      <td className="px-4 py-3">
+                        <StatusBadge status={p.health_status} kind="health" />
+                      </td>
+                    )}
+                    {cols.inicio && <td className="px-4 py-3 text-zinc-500">{formatDate(p.planned_start_date)}</td>}
+                    {cols.actividad && <td className="px-4 py-3 text-zinc-500">{formatDate(p.last_activity_at)}</td>}
+                    {cols.pantallas && <td className="px-4 py-3 text-right">{p.screen_count > 0 ? p.screen_count.toLocaleString("es-MX") : "—"}</td>}
+                    {cols.m2 && <td className="px-4 py-3 text-right">{p.screen_m2_total > 0 ? `${p.screen_m2_total.toLocaleString("es-MX", { maximumFractionDigits: 2 })} m²` : "—"}</td>}
                   </tr>
                 ))}
               </tbody>

@@ -101,6 +101,14 @@ export default function TicketDetailPage() {
         <div className="flex flex-wrap gap-2">
           <TicketStatusChanger detail={detail} onSaved={reload} />
           <EditTicket detail={detail} onSaved={reload} />
+          <TicketDeletionRequest detail={detail} onSaved={reload} />
+        </div>
+      )}
+
+      {t.deletion_requested_at && (
+        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+          <strong>Solicitud de eliminación pendiente:</strong>{" "}
+          {t.deletion_reason || "Sin motivo indicado"}. A la espera de la autorización de un administrador.
         </div>
       )}
 
@@ -384,6 +392,97 @@ function AddAssignment({ ticketId, onSaved }: { ticketId: string; onSaved: () =>
             />
           </Field>
           {err && <p className="text-xs text-red-600">{err}</p>}
+        </Modal>
+      )}
+    </>
+  );
+}
+
+/* ── Solicitud de eliminación del ticket ──────────── */
+function TicketDeletionRequest({ detail, onSaved }: { detail: TicketDetail; onSaved: () => void }) {
+  const t = detail.ticket;
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const pending = Boolean(t.deletion_requested_at);
+
+  async function request() {
+    if (!reason.trim()) { setErr("El motivo es obligatorio"); return; }
+    setSaving(true); setErr(null);
+    try {
+      await fetchJson(`/api/tickets/${t.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ request_deletion: true, deletion_reason: reason.trim() }),
+      });
+      setOpen(false);
+      onSaved();
+    } catch (e) { setErr(String(e)); }
+    finally { setSaving(false); }
+  }
+
+  async function cancel() {
+    if (!confirm("¿Cancelar la solicitud de eliminación?")) return;
+    setSaving(true);
+    try {
+      await fetchJson(`/api/tickets/${t.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ cancel_deletion: true }),
+      });
+      onSaved();
+    } catch (e) { alert(String(e)); }
+    finally { setSaving(false); }
+  }
+
+  if (pending) {
+    return (
+      <button
+        onClick={cancel}
+        disabled={saving}
+        className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-700 hover:bg-red-100"
+      >
+        Cancelar solicitud de eliminación
+      </button>
+    );
+  }
+
+  return (
+    <>
+      <button
+        onClick={() => { setReason(""); setErr(null); setOpen(true); }}
+        className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-50"
+      >
+        Solicitar eliminación
+      </button>
+      {open && (
+        <Modal
+          open={true}
+          onClose={() => setOpen(false)}
+          title={`Solicitar eliminación del ticket ${t.code}`}
+          footer={
+            <>
+              <SecondaryButton onClick={() => setOpen(false)}>Cancelar</SecondaryButton>
+              <PrimaryButton onClick={request} disabled={saving} className="bg-red-600 hover:bg-red-700 border-red-600">
+                {saving ? "Enviando…" : "Solicitar eliminación"}
+              </PrimaryButton>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-zinc-600">
+              La solicitud quedará pendiente hasta que un <strong>administrador la apruebe</strong>.
+              El ticket no se eliminará hasta entonces.
+            </p>
+            <Field label="Motivo (obligatorio)">
+              <Textarea
+                value={reason}
+                onChange={setReason}
+                rows={3}
+                placeholder="Explica por qué debe eliminarse este ticket…"
+              />
+            </Field>
+            {err && <p className="text-xs text-red-600">{err}</p>}
+          </div>
         </Modal>
       )}
     </>

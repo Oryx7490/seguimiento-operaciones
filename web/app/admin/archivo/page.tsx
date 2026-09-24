@@ -11,6 +11,11 @@ interface PendingProject {
   client_name: string | null; requested_by_name: string | null;
   deletion_requested_at: string; deletion_reason: string | null;
 }
+interface PendingTicket {
+  id: string; code: string; title: string; status: string; ticket_type: string;
+  client_name: string | null; requested_by_name: string | null;
+  deletion_requested_at: string; deletion_reason: string | null;
+}
 interface ClosedProject {
   id: string; code: string; name: string;
   client_name: string | null; coordinator_name: string | null;
@@ -25,7 +30,7 @@ interface ClosedTicket {
 }
 
 /* ── Tab component ───────────────────────────────── */
-type Tab = "eliminar" | "proyectos" | "tickets";
+type Tab = "eliminar" | "proyectos" | "tickets" | "tickets-eliminar";
 
 function TabBtn({ active, onClick, children, count }: { active: boolean; onClick: () => void; children: React.ReactNode; count?: number }) {
   return (
@@ -52,6 +57,7 @@ export default function ArchivoPage() {
   const [tab, setTab] = useState<Tab>("eliminar");
 
   const pendingRes  = useResource<{ projects: PendingProject[] }>("/api/admin/projects/pending-deletion");
+  const pendingTkRes = useResource<{ tickets: PendingTicket[] }>("/api/admin/tickets/pending-deletion");
   const closedPrRes = useResource<{ projects: ClosedProject[] }>("/api/admin/projects/closed");
   const closedTkRes = useResource<{ tickets: ClosedTicket[] }>("/api/admin/tickets/closed");
 
@@ -103,7 +109,30 @@ export default function ArchivoPage() {
     finally { setBusy(null); }
   }
 
+  async function permanentDeleteTicket(p: PendingTicket) {
+    if (!confirm(`¿Eliminar definitivamente el ticket "${p.code}"?\nEsta acción no se puede deshacer.`)) return;
+    setBusy(p.id); setMsg(null);
+    try {
+      await fetchJson(`/api/admin/tickets/${p.id}/delete`, { method: "POST" });
+      setMsg({ text: `Ticket ${p.code} eliminado definitivamente.` });
+      pendingTkRes.reload();
+    } catch (e) { setMsg({ text: String(e), error: true }); }
+    finally { setBusy(null); }
+  }
+
+  async function rejectTicketDeletion(p: PendingTicket) {
+    if (!confirm(`¿Rechazar la solicitud de "${p.code}"? El ticket se conservará.`)) return;
+    setBusy(p.id); setMsg(null);
+    try {
+      await fetchJson(`/api/admin/tickets/${p.id}/delete`, { method: "DELETE" });
+      setMsg({ text: `Solicitud de ${p.code} rechazada. El ticket se conserva.` });
+      pendingTkRes.reload();
+    } catch (e) { setMsg({ text: String(e), error: true }); }
+    finally { setBusy(null); }
+  }
+
   const pendingCount = pendingRes.data?.projects.length ?? 0;
+  const pendingTkCount = pendingTkRes.data?.tickets.length ?? 0;
   const closedPrCount = closedPrRes.data?.projects.length ?? 0;
   const closedTkCount = closedTkRes.data?.tickets.length ?? 0;
 
@@ -138,6 +167,9 @@ export default function ArchivoPage() {
         <TabBtn active={tab === "tickets"} onClick={() => setTab("tickets")} count={closedTkCount}>
           🎫 Tickets cerrados
         </TabBtn>
+        <TabBtn active={tab === "tickets-eliminar"} onClick={() => setTab("tickets-eliminar")} count={pendingTkCount}>
+          🗑 Tickets a eliminar
+        </TabBtn>
       </div>
 
       {/* ── Tab: Solicitudes de eliminación ── */}
@@ -162,6 +194,42 @@ export default function ArchivoPage() {
                     <div className="flex justify-end gap-2">
                       <Btn onClick={() => rejectDeletion(p)} disabled={busy === p.id} tone="neutral">Rechazar</Btn>
                       <Btn onClick={() => permanentDelete(p)} disabled={busy === p.id} tone="danger">
+                        {busy === p.id ? "…" : "Eliminar definitivamente"}
+                      </Btn>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </Table>
+          )}
+        </div>
+      )}
+
+      {/* ── Tab: Tickets a eliminar ── */}
+      {tab === "tickets-eliminar" && (
+        <div className="mt-4">
+          {!pendingTkRes.data && !pendingTkRes.error ? <Spinner /> :
+           pendingTkCount === 0 ? (
+            <Empty texto="No hay solicitudes de eliminación de tickets pendientes." />
+          ) : (
+            <Table headers={["Ticket", "Cliente", "Estado actual", "Solicitado por", "Fecha", "Motivo", "Acciones"]}>
+              {pendingTkRes.data!.tickets.map(p => (
+                <tr key={p.id} className="hover:bg-zinc-50">
+                  <td className="px-4 py-3">
+                    <Link href={`/tickets/${p.id}`} className="hover:underline">
+                      <span className="font-mono text-xs text-sky-700">{p.code}</span>
+                      <span className="ml-1 text-zinc-800 font-medium">{p.title}</span>
+                    </Link>
+                  </td>
+                  <td className="px-3 py-3 text-zinc-600">{p.client_name ?? "—"}</td>
+                  <td className="px-3 py-3"><Badge className="bg-zinc-100 text-zinc-600">{p.status}</Badge></td>
+                  <td className="px-3 py-3 text-zinc-600">{p.requested_by_name ?? "—"}</td>
+                  <td className="px-3 py-3 text-xs text-zinc-500">{p.deletion_requested_at.slice(0, 10)}</td>
+                  <td className="px-3 py-3 text-xs text-zinc-600 max-w-xs truncate" title={p.deletion_reason ?? ""}>{p.deletion_reason ?? "—"}</td>
+                  <td className="px-3 py-3 text-right">
+                    <div className="flex justify-end gap-2">
+                      <Btn onClick={() => rejectTicketDeletion(p)} disabled={busy === p.id} tone="neutral">Rechazar</Btn>
+                      <Btn onClick={() => permanentDeleteTicket(p)} disabled={busy === p.id} tone="danger">
                         {busy === p.id ? "…" : "Eliminar definitivamente"}
                       </Btn>
                     </div>

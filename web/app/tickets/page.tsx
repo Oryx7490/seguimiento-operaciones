@@ -17,6 +17,7 @@ import {
   TextInput,
   Textarea,
 } from "@/app/components/ui";
+import { ColumnSelector } from "@/app/components/column-selector";
 import type { CatalogItem, CatalogsResponse, Client, ClientsResponse, Ticket, TicketsResponse } from "@/app/lib/types";
 
 const STATUS_OPTIONS = [
@@ -33,11 +34,28 @@ const STATUS_OPTIONS = [
   "cancelled",
 ];
 
+const TICKET_COLUMNS = [
+  { key: "codigo", label: "Código" },
+  { key: "titulo", label: "Título" },
+  { key: "cliente", label: "Cliente" },
+  { key: "estado", label: "Estado" },
+  { key: "prioridad", label: "Prioridad" },
+  { key: "coordinador", label: "Coordinador" },
+  { key: "abierto", label: "Abierto" },
+] as const;
+export type TicketColumnKey = (typeof TICKET_COLUMNS)[number]["key"];
+const DEFAULT_TICKET_COLS: Record<string, boolean> = Object.fromEntries(
+  TICKET_COLUMNS.map((c) => [c.key, true])
+);
+
 export default function TicketsPage() {
   const [statusFilter, setStatusFilter] = useState("");
   const [typeFilter, setTypeFilter] = useState("");
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
+  const [cols, setCols] = useState<Record<string, boolean>>(DEFAULT_TICKET_COLS);
+
+  const toggleCol = (key: string) => setCols((prev) => ({ ...prev, [key]: !prev[key] }));
 
   const params = new URLSearchParams();
   if (statusFilter) params.set("status", statusFilter);
@@ -90,6 +108,7 @@ export default function TicketsPage() {
             ]}
           />
         </div>
+        <ColumnSelector columns={TICKET_COLUMNS} visible={cols} onToggle={toggleCol} />
       </div>
 
       <div className="mt-4">
@@ -102,31 +121,35 @@ export default function TicketsPage() {
             <table className="min-w-full text-sm">
               <thead className="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500">
                 <tr>
-                  <th className="px-4 py-3 text-left">Código</th>
-                  <th className="px-4 py-3 text-left">Título</th>
-                  <th className="px-4 py-3 text-left">Cliente</th>
-                  <th className="px-4 py-3 text-left">Estado</th>
-                  <th className="px-4 py-3 text-left">Prioridad</th>
-                  <th className="px-4 py-3 text-left">Coordinador</th>
-                  <th className="px-4 py-3 text-left">Abierto</th>
+                  {cols.codigo && <th className="px-4 py-3 text-left">Código</th>}
+                  {cols.titulo && <th className="px-4 py-3 text-left">Título</th>}
+                  {cols.cliente && <th className="px-4 py-3 text-left">Cliente</th>}
+                  {cols.estado && <th className="px-4 py-3 text-left">Estado</th>}
+                  {cols.prioridad && <th className="px-4 py-3 text-left">Prioridad</th>}
+                  {cols.coordinador && <th className="px-4 py-3 text-left">Coordinador</th>}
+                  {cols.abierto && <th className="px-4 py-3 text-left">Abierto</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-100">
                 {tickets.map((t) => (
                   <tr key={t.id} className="hover:bg-zinc-50">
-                    <td className="px-4 py-3">
-                      <Link href={`/tickets/${t.id}`} className="font-semibold text-sky-700 hover:underline">
-                        {t.code}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3 font-medium text-zinc-800">{t.title}</td>
-                    <td className="px-4 py-3 text-zinc-600">{t.client_name ?? "—"}</td>
-                    <td className="px-4 py-3">
-                      <StatusBadge status={t.status} kind="ticket" />
-                    </td>
-                    <td className="px-4 py-3 text-zinc-600">{t.priority_name ?? "—"}</td>
-                    <td className="px-4 py-3 text-zinc-600">{t.coordinator_name ?? "—"}</td>
-                    <td className="px-4 py-3 text-zinc-500" title={t.opened_at}>{formatRelative(t.opened_at)}</td>
+                    {cols.codigo && (
+                      <td className="px-4 py-3">
+                        <Link href={`/tickets/${t.id}`} className="font-semibold text-sky-700 hover:underline">
+                          {t.code}
+                        </Link>
+                      </td>
+                    )}
+                    {cols.titulo && <td className="px-4 py-3 font-medium text-zinc-800">{t.title}</td>}
+                    {cols.cliente && <td className="px-4 py-3 text-zinc-600">{t.client_name ?? "—"}</td>}
+                    {cols.estado && (
+                      <td className="px-4 py-3">
+                        <StatusBadge status={t.status} kind="ticket" />
+                      </td>
+                    )}
+                    {cols.prioridad && <td className="px-4 py-3 text-zinc-600">{t.priority_name ?? "—"}</td>}
+                    {cols.coordinador && <td className="px-4 py-3 text-zinc-600">{t.coordinator_name ?? "—"}</td>}
+                    {cols.abierto && <td className="px-4 py-3 text-zinc-500" title={t.opened_at}>{formatRelative(t.opened_at)}</td>}
                   </tr>
                 ))}
               </tbody>

@@ -1,5 +1,34 @@
 # Constraints & Decisions Log
 
+## 0.3.0 — Cierre resuelto por cliente, borrado de tickets, tipo de pantalla y Proyección (2026-09-24)
+
+### Cierre de tickets "resuelto por el cliente"
+- Migración `029_ticket_closure_client_resolved.sql`: `client_resolved` en `ticket_closures` + CHECK (exclusivo con warranty/billable).
+- UI: radio "Tipo de servicio" (Visita pagada / Garantía / Resuelto por el cliente / Sin cargo) con nota contextual; vista de solo lectura.
+
+### Borrado de tickets en dos pasos
+- Migración `030_ticket_deletion_request.sql`: `deletion_requested_at/by`, `deletion_reason` en `tickets`.
+- Usuario en `/tickets/[id]`: "Solicitar eliminación" (PATCH `request_deletion`, motivo obligatorio) → alerta roja pendiente + "Cancelar solicitud" (PATCH `cancel_deletion`).
+- Admin en `/admin/archivo` → pestaña **"Tickets a eliminar"**: aprobar (POST `[id]/delete` = DELETE definitivo, CASCADE comentarios/cierre/asignaciones; `activities` quedan con `ticket_id = NULL` por `ON DELETE SET NULL`) o rechazar (DELETE `[id]/delete`).
+- Se registra `status_history` con `from_status=<actual>` → `to_status='deleted'` (auditoría conservada) antes de eliminar.
+
+### Tipo de pantalla en proyectos
+- Migraciones `031_screen_environment.sql`, `032_screen_environment_semi_exterior.sql`, `033_screen_environment_interior_flexible.sql`: columna `environment` con CHECK.
+- Modal y tabla de pantallas: **Tipo** = dropdown (Exterior / Interior / Semi Exterior / Interior Flexible, obligatorio) y texto libre renombrado a **Descripción**; columna Cantidad centrada; badges por tipo.
+- Filtro de pitch en Proyección (chips), validación server.
+
+### Proyección de m² a instalar (admin)
+- `/admin/proyeccion`: m² por tipo agrupados en corto/mediano/largo plazo, cards resumen, tabla tipo×horizonte y detalle expandible; API `/api/reports/screen-projection` con filtro por pitch.
+
+### Misc
+- Gantt: línea "Hoy" centrada y orden por defecto (hoy/futuro arriba, pasado/sin fechas abajo).
+- Selector de columnas en listas de tickets y proyectos.
+- Menú lateral reordenado: Agenda, Gantt, Proyectos, Tickets, resto.
+- Versión leída desde `package.json` en el nav (v0.3.0).
+
+### Pendiente
+- Migración `034_project_admin_closure.sql` (tabla `project_admin_closure` para checklist admin de cierre) aplicada; la sección de Cierre de proyectos aún no se construye.
+
 ## 0.2.1 — Archivo administrativo + borrado en dos pasos + m² report (2026-09-23)
 
 ### Borrado de proyectos en dos pasos

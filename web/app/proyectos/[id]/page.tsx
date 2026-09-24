@@ -758,6 +758,7 @@ function AddAssignment({ projectId, onSaved }: { projectId: string; onSaved: () 
 interface ScreenPatchInput {
   id?: string;
   screen_type: string;
+  environment: string | null;
   quantity: number;
   width_m: number | null;
   height_m: number | null;
@@ -777,6 +778,7 @@ function ScreensSection({ projectId, detail, onSaved }: { projectId: string; det
         : {
             id: s.id,
             screen_type: s.screen_type,
+            environment: s.environment,
             quantity: s.quantity,
             width_m: s.width_m,
             height_m: s.height_m,
@@ -826,7 +828,8 @@ function ScreensSection({ projectId, detail, onSaved }: { projectId: string; det
             <thead className="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500">
               <tr>
                 <th className="px-3 py-2 text-left">Tipo</th>
-                <th className="px-3 py-2 text-right">Cantidad</th>
+                <th className="px-3 py-2 text-left">Descripción</th>
+                <th className="px-3 py-2 text-center">Cantidad</th>
                 <th className="px-3 py-2 text-left">Dimensiones</th>
                 <th className="px-3 py-2 text-right">Pitch (mm)</th>
                 <th className="px-3 py-2 text-right">m² (total)</th>
@@ -837,8 +840,21 @@ function ScreensSection({ projectId, detail, onSaved }: { projectId: string; det
             <tbody className="divide-y divide-zinc-100">
               {detail.screens.map((s) => (
                 <tr key={s.id} className="hover:bg-zinc-50 align-top">
+                  <td className="px-3 py-2">
+                    {s.environment === "exterior" ? (
+                      <span className="inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">Exterior</span>
+                    ) : s.environment === "interior" ? (
+                      <span className="inline-block rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-700">Interior</span>
+                    ) : s.environment === "semi_exterior" ? (
+                      <span className="inline-block rounded-full bg-teal-100 px-2 py-0.5 text-xs font-medium text-teal-700">Semi Exterior</span>
+                    ) : s.environment === "interior_flexible" ? (
+                      <span className="inline-block rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700">Interior Flexible</span>
+                    ) : (
+                      <span className="text-xs text-zinc-400">—</span>
+                    )}
+                  </td>
                   <td className="px-3 py-2 font-medium text-zinc-800">{s.screen_type}</td>
-                  <td className="px-3 py-2 text-right text-zinc-700">{s.quantity}</td>
+                  <td className="px-3 py-2 text-center text-zinc-700">{s.quantity}</td>
                   <td className="px-3 py-2 text-zinc-600">
                     {s.is_irregular
                       ? (s.area_m2 ? `${formatNum(s.area_m2)} m²` : "Irregular —")
@@ -919,6 +935,7 @@ function ScreenModal({
   onSaved: (screen: ProjectScreen | null, patch: Omit<ScreenPatchInput, "id" | "_deleted">) => Promise<void>;
 }) {
   const [screenType, setScreenType] = useState(editing === "new" ? "" : editing.screen_type);
+  const [environment, setEnvironment] = useState(editing === "new" ? "" : editing.environment ?? "");
   const [quantity, setQuantity] = useState(editing === "new" ? "1" : String(editing.quantity));
   const [irregular, setIrregular] = useState<boolean>(editing !== "new" && editing.is_irregular);
   const [width, setWidth] = useState(editing === "new" ? "" : editing.width_m ? String(editing.width_m) : "");
@@ -929,8 +946,12 @@ function ScreenModal({
   const [err, setErr] = useState<string | null>(null);
 
   async function submit() {
+    if (environment !== "exterior" && environment !== "interior" && environment !== "semi_exterior" && environment !== "interior_flexible") {
+      setErr("Selecciona el tipo: Exterior, Interior, Semi Exterior o Interior Flexible");
+      return;
+    }
     if (!screenType.trim()) {
-      setErr("Indica el tipo de pantalla");
+      setErr("Indica la descripción de la pantalla");
       return;
     }
     const qty = Number(quantity);
@@ -940,6 +961,7 @@ function ScreenModal({
     }
     const patch: Omit<ScreenPatchInput, "id" | "_deleted"> = {
       screen_type: screenType.trim(),
+      environment: environment === "exterior" || environment === "interior" ? environment : null,
       quantity: qty,
       width_m: null,
       height_m: null,
@@ -994,7 +1016,20 @@ function ScreenModal({
       }
     >
       <div className="space-y-4">
-        <Field label="Tipo de pantalla">
+        <Field label="Tipo">
+          <Select
+            value={environment}
+            onChange={setEnvironment}
+            placeholder="Selecciona…"
+            options={[
+              { value: "exterior", label: "Exterior" },
+              { value: "interior", label: "Interior" },
+              { value: "semi_exterior", label: "Semi Exterior" },
+              { value: "interior_flexible", label: "Interior Flexible" },
+            ]}
+          />
+        </Field>
+        <Field label="Descripción">
           <TextInput value={screenType} onChange={setScreenType} placeholder="P. ej. LED interior" />
         </Field>
         <div className="grid grid-cols-2 gap-3">

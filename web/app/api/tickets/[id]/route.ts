@@ -83,7 +83,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         [id]
       ),
       pool.query(
-        `SELECT tc.repair_note, tc.billing_authorized, tc.billable, tc.warranty,
+        `SELECT tc.repair_note, tc.billing_authorized, tc.billable, tc.warranty, tc.client_resolved,
                 tc.charge_amount, tc.charge_description, tc.authorized_by, tc.authorized_at,
                 tc.invoice_generated, tc.invoice_id, tc.notes
          FROM ticket_closures tc WHERE tc.ticket_id = $1`,
@@ -126,6 +126,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     closed_at?: string | null;
     reason?: string;
     actor_id?: string;
+    // Solicitud de eliminación
+    request_deletion?: boolean;
+    cancel_deletion?: boolean;
+    deletion_reason?: string;
     // Closure fields
     close_ticket?: boolean;
     closure?: {
@@ -133,6 +137,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       billing_authorized?: boolean;
       billable?: boolean;
       warranty?: boolean;
+      client_resolved?: boolean;
       charge_amount?: number | null;
       charge_description?: string | null;
       notes?: string | null;
@@ -246,6 +251,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (cl.billing_authorized !== undefined) clPush("billing_authorized", cl.billing_authorized);
       if (cl.billable !== undefined) clPush("billable", cl.billable);
       if (cl.warranty !== undefined) clPush("warranty", cl.warranty);
+      if (cl.client_resolved !== undefined) clPush("client_resolved", cl.client_resolved);
       if (cl.charge_amount !== undefined) clPush("charge_amount", cl.charge_amount ?? null);
       if (cl.charge_description !== undefined) clPush("charge_description", cl.charge_description ?? null);
       if (cl.notes !== undefined) clPush("notes", cl.notes ?? null);
@@ -273,11 +279,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         await client.query("ROLLBACK");
         return jsonError("La nota de reparación es obligatoria para cerrar.");
       }
-      if (cl?.billable && !cl?.billing_authorized) {
+      if (cl?.client_resolved && (cl?.warranty || cl?.billable)) {
+        await client.query("ROLLBACK");
+        return jsonError("'Resuelto por el cliente' no puede combinarse con garantía o facturación.");
+      }
+      if (cl?.billable && !cl?.client_resolved && !cl?.billing_authorized) {
         await client.query("ROLLBACK");
         return jsonError("Debe autorizar la facturación si el ticket es facturable.");
       }
-      if (cl?.billable && ((cl?.charge_amount ?? null) === null || (cl?.charge_amount ?? 0) <= 0)) {
+      if (cl?.billable && !cl?.client_resolved && ((cl?.charge_amount ?? null) === null || (cl?.charge_amount ?? 0) <= 0)) {
         await client.query("ROLLBACK");
         return jsonError("Debe indicar el monto a cobrar si el ticket es facturable.");
       }
@@ -300,6 +310,33 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         `INSERT INTO status_history (entity_type, entity_id, from_status, to_status, changed_by, reason)
          VALUES ('ticket', $1, $2, $3, $4, $5)`,
         [id, fromStatus, body.status, actorId, body.reason || null]
+      );
+    }
+
+    // Solicitud de eliminación
+    if (body.request_deletion) {
+      const reason = body.deletion_reason?.trim();
+      if (!reason) {
+        await client.query("ROLLBACK");
+        return jsonError("El motivo es obligatorio para solicitar la eliminación.");
+      }
+      await client.query(
+        `UPDATE tickets SET
+           deletion_requested_at = now(),
+           deletion_requested_by = $2,
+           deletion_reason       = $3
+         WHERE id = $1`,
+        [id, actorId, reason]
+      );
+    }
+    if (body.cancel_deletion) {
+      await client.query(
+        `UPDATE tickets SET
+           deletion_requested_at = NULL,
+           deletion_requested_by = NULL,
+           deletion_reason       = NULL
+         WHERE id = $1`,
+        [id]
       );
     }
 

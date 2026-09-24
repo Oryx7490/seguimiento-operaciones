@@ -289,6 +289,9 @@ export interface Ticket {
   version: number;
   created_at: string;
   updated_at: string;
+  deletion_requested_at: string | null;
+  deletion_requested_by: string | null;
+  deletion_reason: string | null;
 }
 
 export interface ActivityTechnician {
@@ -351,6 +354,7 @@ export interface Closure {
   billing_authorized: boolean | null;
   billable: boolean | null;
   warranty: boolean | null;
+  client_resolved: boolean | null;
   charge_amount: number | null;
   charge_description: string | null;
   authorized_by: string | null;
@@ -375,6 +379,7 @@ export interface ProjectScreen {
   id: string;
   project_id: string;
   screen_type: string;
+  environment: string | null;
   quantity: number;
   width_m: number | null;
   height_m: number | null;

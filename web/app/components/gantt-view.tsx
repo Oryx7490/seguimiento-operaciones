@@ -223,14 +223,58 @@ export default function GanttView() {
       });
     const cmpText = (a: string | null, b: string | null) =>
       (a ?? "").localeCompare(b ?? "", "es", { sensitivity: "base" });
+
+    const todayIso = isoToday();
+    const diffFrom = (ph: GanttPhase): number | null => {
+      const s = toDateIso(ph.planned_start_date);
+      if (!s) return null;
+      return diffDays(from, s);
+    };
+    // Tier de ordenación por defecto:
+    //   0 → actividades que cubren el día de hoy
+    //   1 → actividades futuras (inician después de hoy)
+    //   2 → solo actividades pasadas
+    //   3 → sin fechas programadas
+    const tierOf = (p: (typeof list)[number]): number => {
+      if (
+        p.visible.some((ph) => {
+          const s = toDateIso(ph.planned_start_date);
+          if (!s) return false;
+          const e = toDateIso(ph.planned_end_date) || s;
+          return s <= todayIso && e >= todayIso;
+        })
+      )
+        return 0;
+      if (p.visible.some((ph) => (toDateIso(ph.planned_start_date) || "") > todayIso)) return 1;
+      if (p.visible.some((ph) => ph.planned_start_date)) return 2;
+      return 3;
+    };
+    const minStart = (p: (typeof list)[number]): number | null => {
+      const starts = p.visible.map(diffFrom).filter((n): n is number => n !== null);
+      return starts.length > 0 ? Math.min(...starts) : null;
+    };
+
     list.sort((a, b) => {
       if (a.hasDates !== b.hasDates) return a.hasDates ? -1 : 1;
+      if (sortKey === "default") {
+        const ta = tierOf(a);
+        const tb = tierOf(b);
+        if (ta !== tb) return ta - tb;
+        const sa = minStart(a);
+        const sb = minStart(b);
+        if (sa !== null && sb !== null) {
+          return ta >= 2 ? sb - sa : sa - sb;
+        }
+        if (sa !== null) return -1;
+        if (sb !== null) return 1;
+        return 0;
+      }
       if (sortKey === "name") return cmpText(a.name, b.name) || cmpText(a.code, b.code);
       if (sortKey === "client") return cmpText(a.client_name, b.client_name) || cmpText(a.name, b.name);
       return 0;
     });
     return list;
-  }, [data, activeKinds, sortKey, search]);
+  }, [data, activeKinds, sortKey, search, from]);
 
   async function saveDates(start: string | null, end: string | null) {
     if (!edit) return;
@@ -466,7 +510,7 @@ export default function GanttView() {
                       {todayIdx >= 0 && todayIdx < scale.days && (
                         <div
                           className="pointer-events-none absolute top-0 bottom-0 border-l-2 border-dashed border-rose-400"
-                          style={{ left: todayIdx * scale.px }}
+                          style={{ left: todayIdx * scale.px + scale.px / 2 }}
                           title="Hoy"
                         />
                       )}

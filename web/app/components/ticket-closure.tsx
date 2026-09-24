@@ -31,6 +31,7 @@ export default function TicketClosure({
     billing_authorized: closure?.billing_authorized ?? false,
     billable: closure?.billable ?? true,
     warranty: closure?.warranty ?? false,
+    client_resolved: closure?.client_resolved ?? false,
     charge_amount: closure?.charge_amount ?? null,
     charge_description: closure?.charge_description ?? "",
     authorized_by: closure?.authorized_by ?? null,
@@ -46,22 +47,26 @@ export default function TicketClosure({
 
   const isClosed = status === "closed";
 
-  // Warranty implica no billable
-  function handleWarrantyChange(checked: boolean) {
-    setC((prev) => ({
-      ...prev,
-      warranty: checked,
-      billable: checked ? false : prev.billable,
-      billing_authorized: checked ? false : prev.billing_authorized,
-    }));
-  }
+  type ServiceType = "warranty" | "billable" | "client_resolved" | "none";
 
-  function handleBillableChange(checked: boolean) {
-    setC((prev) => ({
-      ...prev,
-      billable: checked,
-      warranty: checked ? false : prev.warranty,
-    }));
+  const serviceType: ServiceType = c.warranty
+    ? "warranty"
+    : c.client_resolved
+      ? "client_resolved"
+      : c.billable
+        ? "billable"
+        : "none";
+
+  function setServiceType(type: ServiceType) {
+    setC({
+      ...c,
+      warranty: type === "warranty",
+      billable: type === "billable",
+      client_resolved: type === "client_resolved",
+      billing_authorized: type === "billable" ? c.billing_authorized : false,
+      charge_amount: type === "billable" ? c.charge_amount : null,
+      charge_description: type === "billable" ? c.charge_description : "",
+    });
   }
 
   async function save() {
@@ -77,6 +82,7 @@ export default function TicketClosure({
             billing_authorized: c.billing_authorized,
             billable: c.billable,
             warranty: c.warranty,
+            client_resolved: c.client_resolved,
             charge_amount: c.charge_amount,
             charge_description: c.charge_description,
             notes: c.notes,
@@ -98,11 +104,11 @@ export default function TicketClosure({
       setErr("La nota de reparación es obligatoria para cerrar.");
       return;
     }
-    if (c.billable && !c.billing_authorized) {
+    if (c.billable && !c.client_resolved && !c.billing_authorized) {
       setErr("Debe autorizar la facturación si el ticket es facturable.");
       return;
     }
-    if (c.billable && (c.charge_amount === null || c.charge_amount <= 0)) {
+    if (c.billable && !c.client_resolved && (c.charge_amount === null || c.charge_amount <= 0)) {
       setErr("Debe indicar el monto a cobrar si el ticket es facturable.");
       return;
     }
@@ -120,6 +126,7 @@ export default function TicketClosure({
             billing_authorized: c.billing_authorized,
             billable: c.billable,
             warranty: c.warranty,
+            client_resolved: c.client_resolved,
             charge_amount: c.charge_amount,
             charge_description: c.charge_description,
             notes: c.notes,
@@ -149,12 +156,21 @@ export default function TicketClosure({
               <strong>Reparación:</strong> {c.repair_note || "—"}
             </p>
             <p>
-              Facturación:{" "}
+              Servicio:{" "}
               <strong>
-                {c.warranty ? "Garantía (sin cargo)" : c.billable ? "Facturable" : "No facturable"}
+                {c.warranty
+                  ? "Garantía (sin cargo)"
+                  : c.client_resolved
+                    ? "Resuelto por el cliente (sin visita)"
+                    : c.billable
+                      ? "Facturable / Visita pagada"
+                      : "No facturable"}
               </strong>
             </p>
-            {c.billable && !c.warranty && (
+            {c.client_resolved && (
+              <p className="text-amber-700">Ya no se requiere visita al sitio.</p>
+            )}
+            {c.billable && !c.warranty && !c.client_resolved && (
               <>
                 <p>
                   Monto: <strong>{c.charge_amount ? `${Number(c.charge_amount).toLocaleString()} MXN` : "—"}</strong>
@@ -169,50 +185,70 @@ export default function TicketClosure({
         ) : (
           <>
             <div className="space-y-3">
-              <Field label="Nota de reparación (obligatoria)" hint="Qué se reparó o resolvió">
+              <Field label={c.client_resolved ? "Nota del cierre (obligatoria)" : "Nota de reparación (obligatoria)"} hint={c.client_resolved ? "Qué resolvió el cliente o por qué ya no se visita" : "Qué se reparó o resolvió"}>
                 <Textarea
                   value={c.repair_note ?? ""}
                   onChange={(v) => setC({ ...c, repair_note: v })}
-                  placeholder="Describe la reparación realizada..."
+                  placeholder={c.client_resolved ? "Ej. El cliente lo resolvió por sí mismo..." : "Describe la reparación realizada..."}
                   rows={3}
                 />
               </Field>
 
               <div className="space-y-2 rounded-md border border-zinc-200 p-3 bg-zinc-50">
-                <p className="text-xs font-medium text-zinc-600">Facturación</p>
-                <div className="space-y-2">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={!!c.warranty}
-                      onChange={(e) => handleWarrantyChange(e.target.checked)}
-                      className="rounded border-zinc-300"
-                    />
-                    <span className="text-sm text-zinc-700">Garantía (sin cargo — desactiva facturación)</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={!!c.billable}
-                      onChange={(e) => handleBillableChange(e.target.checked)}
-                      disabled={!!c.warranty}
-                      className="rounded border-zinc-300"
-                    />
-                    <span className="text-sm text-zinc-700">Facturable / Generar cobro</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={!!c.billing_authorized}
-                      onChange={(e) => setC({ ...c, billing_authorized: e.target.checked })}
-                      disabled={!c.billable || !!c.warranty}
-                      className="rounded border-zinc-300"
-                    />
-                    <span className="text-sm text-zinc-700">Autorizo facturación</span>
-                  </label>
-                </div>
+                <p className="text-xs font-medium text-zinc-600">Tipo de servicio</p>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="serviceType"
+                    checked={serviceType === "billable"}
+                    onChange={() => setServiceType("billable")}
+                    className="rounded-full border-zinc-300"
+                  />
+                  <span className="text-sm text-zinc-700">Visita pagada / Facturable (generar cobro)</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="serviceType"
+                    checked={serviceType === "warranty"}
+                    onChange={() => setServiceType("warranty")}
+                    className="rounded-full border-zinc-300"
+                  />
+                  <span className="text-sm text-zinc-700">Garantía (sin cargo)</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="serviceType"
+                    checked={serviceType === "client_resolved"}
+                    onChange={() => setServiceType("client_resolved")}
+                    className="rounded-full border-zinc-300"
+                  />
+                  <span className="text-sm text-zinc-700">Resuelto por el cliente (ya no se requiere visita)</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="serviceType"
+                    checked={serviceType === "none"}
+                    onChange={() => setServiceType("none")}
+                    className="rounded-full border-zinc-300"
+                  />
+                  <span className="text-sm text-zinc-700">Sin cargo / no facturable</span>
+                </label>
 
-                {!c.warranty && c.billable && (
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={!!c.billing_authorized}
+                    onChange={(e) => setC({ ...c, billing_authorized: e.target.checked })}
+                    disabled={serviceType !== "billable"}
+                    className="rounded border-zinc-300"
+                  />
+                  <span className="text-sm text-zinc-700">Autorizo facturación</span>
+                </label>
+
+                {serviceType === "billable" && (
                   <div className="grid gap-3 sm:grid-cols-2 pt-2 border-t border-zinc-200">
                     <Field label="Monto a cobrar (MXN)">
                       <TextInput

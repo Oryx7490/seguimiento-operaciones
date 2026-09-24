@@ -3,15 +3,16 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
+import pkg from "../../package.json";
 
 const NAV = [
   { href: "/", label: "Agenda" },
   { href: "/gantt", label: "Gantt" },
+  { href: "/proyectos", label: "Proyectos" },
+  { href: "/tickets", label: "Tickets" },
   { href: "/pendientes", label: "Pendientes" },
   { href: "/notificaciones", label: "Notificaciones" },
   { href: "/tecnico", label: "Mi agenda móvil" },
-  { href: "/proyectos", label: "Proyectos" },
-  { href: "/tickets", label: "Tickets" },
   { href: "/ayuda", label: "Ayuda" },
   { href: "/admin", label: "Configuración" },
 ] as const;
@@ -113,7 +114,7 @@ export default function AppNav() {
       </nav>
 
       <div className="border-t border-zinc-100 px-4 py-3 text-[10px] text-zinc-400">
-        v0.1.0
+        v{pkg.version}
       </div>
     </div>
   );
