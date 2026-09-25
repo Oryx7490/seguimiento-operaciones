@@ -904,7 +904,7 @@ function ScreensSection({ projectId, detail, onSaved }: { projectId: string; det
                 <th className="px-3 py-2 text-right">Pitch (mm)</th>
                 <th className="px-3 py-2 text-right">m² (total)</th>
                 <th className="px-3 py-2 text-left">Controladores</th>
-                <th className="px-3 py-2 text-left">Ficha PDF</th>
+                <th className="px-3 py-2 text-left">Fichas</th>
                 <th className="px-3 py-2 text-right">Acciones</th>
               </tr>
             </thead>
@@ -1343,9 +1343,23 @@ function ScreenPdf({ screen, onChanged }: { screen: ProjectScreen; onChanged: ()
 
   const MAX_BYTES = 25 * 1024 * 1024;
 
+  const ALLOWED_EXT = [".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg", ".dwg"];
+  const ALLOWED_MIME = [
+    "application/pdf",
+    "image/png",
+    "image/jpeg",
+    "image/gif",
+    "image/webp",
+    "image/bmp",
+    "image/svg+xml",
+  ];
+
   async function upload(file: File) {
-    if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
-      setErr("Solo se permiten archivos PDF");
+    const ext = file.name.includes(".") ? "." + file.name.toLowerCase().split(".").pop() : "";
+    const isAllowed =
+      ALLOWED_MIME.includes(file.type.toLowerCase()) || ALLOWED_EXT.includes(ext);
+    if (!isAllowed) {
+      setErr("Solo se permiten archivos PDF, imágenes y DWG");
       return;
     }
     if (file.size > MAX_BYTES) {
@@ -1385,7 +1399,7 @@ function ScreenPdf({ screen, onChanged }: { screen: ProjectScreen; onChanged: ()
           onClick={() => inputRef.current?.click()}
           className="rounded border border-dashed border-zinc-300 px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-50"
         >
-          {uploading ? "Subiendo…" : "+ Ficha PDF"}
+          {uploading ? "Subiendo…" : "+ Ficha (PDF/imagen/DWG)"}
         </button>
       ) : (
         <ul className="space-y-1">
@@ -1412,7 +1426,7 @@ function ScreenPdf({ screen, onChanged }: { screen: ProjectScreen; onChanged: ()
               onClick={() => inputRef.current?.click()}
               className="text-xs text-sky-700 hover:underline"
             >
-              {uploading ? "Subiendo…" : "+ Adjuntar PDF"}
+              {uploading ? "Subiendo…" : "+ Adjuntar archivo"}
             </button>
           </li>
         </ul>
@@ -1420,7 +1434,7 @@ function ScreenPdf({ screen, onChanged }: { screen: ProjectScreen; onChanged: ()
       <input
         ref={inputRef}
         type="file"
-        accept="application/pdf,.pdf"
+        accept="application/pdf,.pdf,image/*,.dwg"
         className="hidden"
         onChange={(e) => {
           const f = e.target.files?.[0];

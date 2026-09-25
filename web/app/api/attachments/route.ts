@@ -17,6 +17,9 @@ const ATTACHMENT_TYPES = [
 
 const MAX_BYTES = 25 * 1024 * 1024;
 
+const ALLOWED_EXT = /\.(pdf|png|jpe?g|gif|webp|bmp|svg|dwg)$/i;
+const ALLOWED_MIME = /^(application\/pdf|image\/png|image\/jpe?g|image\/gif|image\/webp|image\/bmp|image\/svg\+xml)$/i;
+
 function formString(form: FormData, key: string): string | null {
   const v = form.get(key);
   return typeof v === "string" && v.trim() ? v.trim() : null;
@@ -51,6 +54,15 @@ export async function POST(req: NextRequest) {
 
   const attachmentType = formString(form, "attachment_type") ?? "other";
   if (!ATTACHMENT_TYPES.includes(attachmentType)) return jsonError("Tipo de adjunto inválido");
+
+  if (screenUuid) {
+    const ext = file.name.includes(".") ? file.name.split(".").pop()! : "";
+    const extOk = ALLOWED_EXT.test(`.${ext}`);
+    const mimeOk = ALLOWED_MIME.test(file.type || "");
+    if (!extOk && !mimeOk) {
+      return jsonError("Para pantallas solo se permiten archivos PDF, imágenes y DWG");
+    }
+  }
 
   const actorId = await getActorId(form.get("actor_id"));
   if (!actorId) return jsonError("Sin usuario registrado para la subida");
