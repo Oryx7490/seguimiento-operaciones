@@ -413,10 +413,45 @@ export interface ProjectScreen {
   is_irregular: boolean;
   area_m2: number | null;
   pitch_mm: number | null;
+  voltage: string | null;
   m2: number;
   created_at: string;
   attachment: ProjectAttachment[];
   controllers: ScreenController[];
+}
+
+export interface ClosureModuleLot {
+  id: string;
+  screen_id: string | null;
+  manufacturer_brand: string;
+  lot_number: string;
+  module_count: number | null;
+}
+
+export interface InventoryLot {
+  id: string;
+  manufacturer_brand: string;
+  lot_number: string;
+  module_count: number;
+  location: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface InventoryUsageEntry {
+  manufacturer_brand: string;
+  lot_number: string;
+  module_count: number;
+  project_id: string;
+  project_code: string;
+  project_name: string;
+  screen_id: string | null;
+  screen_type: string | null;
+}
+
+export interface InventoryResponse {
+  inventory: InventoryLot[];
+  usage: InventoryUsageEntry[];
 }
 
 export interface ProjectDetail {
@@ -429,6 +464,7 @@ export interface ProjectDetail {
   screens: ProjectScreen[];
   closure: unknown | null;
   closure_controllers: ClosureController[];
+  closure_module_lots: ClosureModuleLot[];
 }
 
 export interface ProjectsResponse {

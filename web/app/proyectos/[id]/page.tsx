@@ -305,6 +305,7 @@ export default function ProjectDetailPage() {
         attachments={detail.attachments}
         screens={detail.screens.map((s) => ({ id: s.id, screen_type: s.screen_type }))}
         closureControllers={detail.closure_controllers}
+        closureModuleLots={detail.closure_module_lots}
         onChanged={reload}
       />
 
@@ -799,6 +800,7 @@ interface ScreenPatchInput {
   is_irregular: boolean;
   area_m2: number | null;
   pitch_mm: number | null;
+  voltage: string | null;
   controllers?: Array<{ controller_id: string; quantity: number }>;
   _deleted?: boolean;
 }
@@ -821,6 +823,7 @@ function ScreensSection({ projectId, detail, onSaved }: { projectId: string; det
             is_irregular: s.is_irregular,
             area_m2: s.area_m2,
             pitch_mm: s.pitch_mm,
+            voltage: s.voltage,
           }
     );
   }
@@ -847,6 +850,7 @@ function ScreensSection({ projectId, detail, onSaved }: { projectId: string; det
             is_irregular: s.is_irregular,
             area_m2: s.area_m2,
             pitch_mm: s.pitch_mm,
+            voltage: s.voltage,
             controllers: list,
           }
         : {
@@ -859,6 +863,7 @@ function ScreensSection({ projectId, detail, onSaved }: { projectId: string; det
             is_irregular: s.is_irregular,
             area_m2: s.area_m2,
             pitch_mm: s.pitch_mm,
+            voltage: s.voltage,
           }
     );
     await fetchJson(`/api/projects/${projectId}`, {
@@ -923,6 +928,11 @@ function ScreensSection({ projectId, detail, onSaved }: { projectId: string; det
                     ) : (
                       <span className="text-xs text-zinc-400">—</span>
                     )}
+                    {s.voltage === "110ac" ? (
+                      <span className="mt-1 block w-fit rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">110V AC</span>
+                    ) : s.voltage === "220ac" ? (
+                      <span className="mt-1 block w-fit rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-700">220V AC</span>
+                    ) : null}
                   </td>
                   <td className="px-3 py-2 font-medium text-zinc-800">{s.screen_type}</td>
                   <td className="px-3 py-2 text-center text-zinc-700">{s.quantity}</td>
@@ -1027,6 +1037,7 @@ function ScreenModal({
   const [height, setHeight] = useState(editing === "new" ? "" : editing.height_m ? String(editing.height_m) : "");
   const [area, setArea] = useState(editing === "new" ? "" : editing.area_m2 ? String(editing.area_m2) : "");
   const [pitch, setPitch] = useState(editing === "new" ? "" : editing.pitch_mm ? String(editing.pitch_mm) : "");
+  const [voltage, setVoltage] = useState(editing === "new" ? "" : editing.voltage ?? "");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -1039,6 +1050,10 @@ function ScreenModal({
       setErr("Indica la descripción de la pantalla");
       return;
     }
+    if (voltage !== "110ac" && voltage !== "220ac") {
+      setErr("Selecciona el nivel de voltaje: 110V AC o 220V AC");
+      return;
+    }
     const qty = Number(quantity);
     if (!Number.isFinite(qty) || qty <= 0) {
       setErr("Cantidad debe ser un número > 0");
@@ -1046,13 +1061,14 @@ function ScreenModal({
     }
     const patch: Omit<ScreenPatchInput, "id" | "_deleted"> = {
       screen_type: screenType.trim(),
-      environment: environment === "exterior" || environment === "interior" ? environment : null,
+      environment: environment ? environment : null,
       quantity: qty,
       width_m: null,
       height_m: null,
       is_irregular: irregular,
       area_m2: null,
       pitch_mm: null,
+      voltage: voltage,
     };
     if (irregular) {
       const a = Number(area);
@@ -1136,6 +1152,24 @@ function ScreenModal({
                 className={`flex-1 px-2 py-1.5 ${irregular ? "bg-sky-600 text-white" : "bg-white text-zinc-600 hover:bg-zinc-50"}`}
               >
                 Irregular
+              </button>
+            </div>
+          </Field>
+          <Field label="Voltaje">
+            <div className="flex overflow-hidden rounded-md border border-zinc-300 text-sm">
+              <button
+                type="button"
+                onClick={() => setVoltage("110ac")}
+                className={`flex-1 px-2 py-1.5 ${voltage === "110ac" ? "bg-sky-600 text-white" : "bg-white text-zinc-600 hover:bg-zinc-50"}`}
+              >
+                110V AC
+              </button>
+              <button
+                type="button"
+                onClick={() => setVoltage("220ac")}
+                className={`flex-1 px-2 py-1.5 ${voltage === "220ac" ? "bg-sky-600 text-white" : "bg-white text-zinc-600 hover:bg-zinc-50"}`}
+              >
+                220V AC
               </button>
             </div>
           </Field>

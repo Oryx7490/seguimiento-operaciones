@@ -4,7 +4,7 @@ import { useState } from "react";
 import { fetchJson, useResource } from "@/app/lib/client";
 import { formatDate } from "@/app/lib/format";
 import { Field, PrimaryButton, SecondaryButton, TextInput } from "@/app/components/ui";
-import type { ClosureController, Controller } from "@/app/lib/types";
+import type { ClosureController, ClosureModuleLot, Controller } from "@/app/lib/types";
 
 interface Closure {
   installation_done: boolean;
@@ -40,6 +40,14 @@ interface Row {
   serial_numbers: string;
 }
 
+interface LotRow {
+  key: string;
+  screen_id: string;
+  manufacturer_brand: string;
+  lot_number: string;
+  module_count: string;
+}
+
 const REQUIREMENTS: Array<{ key: keyof Closure; label: string }> = [
   { key: "installation_done", label: "Instalación realizada" },
   { key: "mandatory_activities_completed", label: "Actividades obligatorias completadas" },
@@ -63,6 +71,16 @@ function toRows(initial: ClosureController[]): Row[] {
   }));
 }
 
+function toLotRows(initial: ClosureModuleLot[]): LotRow[] {
+  return initial.map((l) => ({
+    key: l.id ?? newKey(),
+    screen_id: l.screen_id ?? "",
+    manufacturer_brand: l.manufacturer_brand ?? "",
+    lot_number: l.lot_number ?? "",
+    module_count: l.module_count ? String(l.module_count) : "",
+  }));
+}
+
 export default function ProjectClosure({
   projectId,
   status,
@@ -70,6 +88,7 @@ export default function ProjectClosure({
   attachments,
   screens,
   closureControllers,
+  closureModuleLots,
   onChanged,
 }: {
   projectId: string;
@@ -78,6 +97,7 @@ export default function ProjectClosure({
   attachments: Att[];
   screens: ScreenRef[];
   closureControllers: ClosureController[];
+  closureModuleLots: ClosureModuleLot[];
   onChanged: () => void;
 }) {
   const [c, setC] = useState<Closure>({
@@ -94,6 +114,7 @@ export default function ProjectClosure({
     closed_at: closure?.closed_at ?? null,
   });
   const [rows, setRows] = useState<Row[]>(toRows(closureControllers ?? []));
+  const [lots, setLots] = useState<LotRow[]>(toLotRows(closureModuleLots ?? []));
   const [saving, setSaving] = useState(false);
   const [closing, setClosing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -118,6 +139,21 @@ export default function ProjectClosure({
 
   function removeRow(key: string) {
     setRows(rows.filter((r) => r.key !== key));
+  }
+
+  function addLotRow() {
+    setLots([
+      ...lots,
+      { key: newKey(), screen_id: "", manufacturer_brand: "", lot_number: "", module_count: "" },
+    ]);
+  }
+
+  function updateLotRow(key: string, patch: Partial<LotRow>) {
+    setLots(lots.map((l) => (l.key === key ? { ...l, ...patch } : l)));
+  }
+
+  function removeLotRow(key: string) {
+    setLots(lots.filter((l) => l.key !== key));
   }
 
   function resolvedName(r: Row): string {
@@ -158,6 +194,45 @@ export default function ProjectClosure({
     return out;
   }
 
+  function buildModuleLots():
+    | Array<{
+        screen_id: string | null;
+        manufacturer_brand: string;
+        lot_number: string;
+        module_count: number | null;
+      }>
+    | { __error: string } {
+    const out: Array<{
+      screen_id: string | null;
+      manufacturer_brand: string;
+      lot_number: string;
+      module_count: number | null;
+    }> = [];
+    for (const l of lots) {
+      const brand = l.manufacturer_brand.trim();
+      const lotNo = l.lot_number.trim();
+      const countStr = l.module_count.trim();
+      if (!brand && !lotNo && !l.screen_id && !countStr) continue; // fila vacía se ignora
+      if (!brand) return { __error: "Cada lote de módulos requiere la marca del fabricante" };
+      if (!lotNo) return { __error: `La marca "${brand}" requiere el número de lote` };
+      let moduleCount: number | null = null;
+      if (countStr) {
+        const n = Number(countStr);
+        if (!Number.isInteger(n) || n <= 0) {
+          return { __error: `El lote "${lotNo}" requiere una cantidad de módulos entera > 0` };
+        }
+        moduleCount = n;
+      }
+      out.push({
+        screen_id: l.screen_id || null,
+        manufacturer_brand: brand,
+        lot_number: lotNo,
+        module_count: moduleCount,
+      });
+    }
+    return out;
+  }
+
   async function save() {
     setSaving(true);
     setErr(null);
@@ -165,6 +240,12 @@ export default function ProjectClosure({
     const cc = buildClosureControllers();
     if ("__error" in cc) {
       setErr(cc.__error);
+      setSaving(false);
+      return;
+    }
+    const lotsData = buildModuleLots();
+    if ("__error" in lotsData) {
+      setErr(lotsData.__error);
       setSaving(false);
       return;
     }
@@ -189,6 +270,7 @@ export default function ProjectClosure({
             final_note: c.final_note,
           },
           closure_controllers: cc,
+          closure_module_lots: lotsData,
         }),
       });
       setOk("Checklist guardado.");
@@ -252,6 +334,22 @@ export default function ProjectClosure({
                       {r.serial_numbers && (
                         <span className="text-zinc-400"> · SN: {r.serial_numbers}</span>
                       )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div className="pt-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Lotes de módulos y fabricante</p>
+              {(closureModuleLots ?? []).length === 0 ? (
+                <p className="mt-1 text-xs text-zinc-400">Sin lotes registrados.</p>
+              ) : (
+                <ul className="mt-1 space-y-1">
+                  {(closureModuleLots ?? []).map((l) => (
+                    <li key={l.id} className="text-xs">
+                      <strong>{screenName(l.screen_id ?? "")}</strong> — {l.manufacturer_brand}
+                      {l.lot_number && <span className="text-zinc-400"> · Lote: {l.lot_number}</span>}
+                      {l.module_count != null && <span className="text-zinc-400"> · {l.module_count} módulos</span>}
                     </li>
                   ))}
                 </ul>
@@ -437,6 +535,96 @@ export default function ProjectClosure({
                           </tr>
                         );
                       })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            {/* Lotes de módulos y marca del fabricante (por pantalla o general) */}
+            <div className="border-t border-zinc-100 pt-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                  Lotes de módulos y marca del fabricante
+                </p>
+                <button
+                  type="button"
+                  onClick={addLotRow}
+                  className="rounded border border-zinc-300 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
+                >
+                  Agregar lote
+                </button>
+              </div>
+              <p className="mt-1 text-[11px] text-zinc-400">
+                Registra los lotes de módulos LED usados y su fabricante, por pantalla (o &ldquo;General&rdquo;). Se comparan contra el inventario inicial.
+              </p>
+
+              {lots.length === 0 ? (
+                <p className="mt-2 text-sm text-zinc-400">Sin lotes registrados.</p>
+              ) : (
+                <div className="mt-2 overflow-x-auto">
+                  <table className="min-w-full text-xs">
+                    <thead className="bg-zinc-50 text-[10px] uppercase tracking-wide text-zinc-500">
+                      <tr>
+                        <th className="px-2 py-1.5 text-left">Pantalla</th>
+                        <th className="px-2 py-1.5 text-left">Marca del fabricante</th>
+                        <th className="px-2 py-1.5 text-left">Lote</th>
+                        <th className="px-2 py-1.5 text-center">Cantidad de módulos</th>
+                        <th className="px-2 py-1.5"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-100">
+                      {lots.map((l) => (
+                        <tr key={l.key}>
+                          <td className="px-2 py-1.5">
+                            <select
+                              value={l.screen_id}
+                              onChange={(e) => updateLotRow(l.key, { screen_id: e.target.value })}
+                              className="rounded border border-zinc-300 bg-white px-1.5 py-1 text-xs text-zinc-800"
+                            >
+                              <option value="">General</option>
+                              {screens.map((s) => (
+                                <option key={s.id} value={s.id}>{s.screen_type}</option>
+                              ))}
+                            </select>
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <input
+                              value={l.manufacturer_brand}
+                              onChange={(e) => updateLotRow(l.key, { manufacturer_brand: e.target.value })}
+                              placeholder="P. ej. Novastar / ROE"
+                              className="w-44 rounded border border-zinc-300 bg-white px-1.5 py-1 text-xs text-zinc-800"
+                            />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <input
+                              value={l.lot_number}
+                              onChange={(e) => updateLotRow(l.key, { lot_number: e.target.value })}
+                              placeholder="P. ej. LOT-2024-01"
+                              className="w-44 rounded border border-zinc-300 bg-white px-1.5 py-1 text-xs text-zinc-800"
+                            />
+                          </td>
+                          <td className="px-2 py-1.5 text-center">
+                            <input
+                              type="number"
+                              min={1}
+                              value={l.module_count}
+                              onChange={(e) => updateLotRow(l.key, { module_count: e.target.value })}
+                              placeholder="—"
+                              className="w-20 rounded border border-zinc-300 bg-white px-1.5 py-1 text-center text-xs text-zinc-800"
+                            />
+                          </td>
+                          <td className="px-2 py-1.5 text-right">
+                            <button
+                              type="button"
+                              onClick={() => removeLotRow(l.key)}
+                              className="rounded border border-red-200 px-1.5 py-1 text-[11px] text-red-600 hover:bg-red-50"
+                            >
+                              Quitar
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>

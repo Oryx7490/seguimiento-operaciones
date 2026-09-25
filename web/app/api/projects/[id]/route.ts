@@ -81,7 +81,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       ),
       pool.query(
         `SELECT ps.id, ps.project_id, ps.screen_type, ps.environment, ps.quantity,
-                ps.width_m, ps.height_m, ps.is_irregular, ps.area_m2, ps.pitch_mm, ps.created_at,
+                ps.width_m, ps.height_m, ps.is_irregular, ps.area_m2, ps.pitch_mm, ps.voltage, ps.created_at,
                 CASE WHEN ps.is_irregular THEN COALESCE(ps.area_m2, 0)
                      ELSE COALESCE(ps.width_m, 0) * COALESCE(ps.height_m, 0) END AS m2
          FROM project_screens ps
@@ -121,6 +121,14 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       [id]
     );
 
+    const closureModuleLots = await pool.query(
+      `SELECT pml.id, pml.screen_id, pml.manufacturer_brand, pml.lot_number, pml.module_count
+       FROM project_closure_module_lots pml
+       WHERE pml.project_id = $1
+       ORDER BY pml.created_at`,
+      [id]
+    );
+
     const screenRows = screens.rows.map((s) => ({
       ...s,
       attachment: screenAttachments.rows.filter((a) => a.screen_id === s.id),
@@ -137,6 +145,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       screens: screenRows,
       closure: closure.rows[0] ?? null,
       closure_controllers: closureControllers.rows,
+      closure_module_lots: closureModuleLots.rows,
     });
   } catch (err) {
     return jsonError("No se pudo leer el proyecto", 500, String(err));
@@ -185,6 +194,14 @@ interface ClosurePatch {
     serial_numbers?: string | null;
     _deleted?: boolean;
   }>;
+  closure_module_lots?: Array<{
+    id?: string;
+    screen_id?: string | null;
+    manufacturer_brand?: string;
+    lot_number?: string;
+    module_count?: number | null;
+    _deleted?: boolean;
+  }>;
 }
 
 interface ScreensPatch {
@@ -198,6 +215,7 @@ interface ScreensPatch {
     is_irregular?: boolean;
     area_m2?: number | null;
     pitch_mm?: number | null;
+    voltage?: string | null;
     controllers?: Array<{ controller_id: string; quantity: number }>;
     _deleted?: boolean;
   }>;
@@ -395,7 +413,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           sc.height_m !== undefined ||
           sc.is_irregular !== undefined ||
           sc.area_m2 !== undefined ||
-          sc.pitch_mm !== undefined
+          sc.pitch_mm !== undefined ||
+          sc.voltage !== undefined
         ) {
           const sType = typeof sc.screen_type === "string" ? sc.screen_type.trim() : undefined;
           const qty = sc.quantity;
@@ -412,6 +431,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
               return jsonError("environment debe ser 'exterior', 'interior', 'semi_exterior' o 'interior_flexible'");
             }
             environment = env;
+          }
+
+          const voltage = (() => {
+            if (sc.voltage === undefined) return undefined;
+            if (sc.voltage === null) return null;
+            const v = String(sc.voltage).trim().toLowerCase();
+            if (v !== "110ac" && v !== "220ac") {
+              return "__invalid__";
+            }
+            return v;
+          })();
+          if (voltage === "__invalid__") {
+            await client.query("ROLLBACK");
+            return jsonError("voltage debe ser '110ac' o '220ac'");
           }
 
           // Validar coherencia de dimensiones
@@ -472,6 +505,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             };
             if (sType !== undefined) setPush("screen_type", sType);
             if (environment !== undefined) setPush("environment", environment);
+            if (voltage !== undefined) setPush("voltage", voltage);
             if (sc.quantity !== undefined) setPush("quantity", sc.quantity);
             if (sc.width_m !== undefined) setPush("width_m", num(sc.width_m));
             if (sc.height_m !== undefined) setPush("height_m", num(sc.height_m));
@@ -486,9 +520,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             }
           } else if (sType) {
             const { rows: inserted } = await client.query(
-              `INSERT INTO project_screens (project_id, screen_type, environment, quantity, width_m, height_m, is_irregular, area_m2, pitch_mm)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-              [id, sType, environment ?? null, sc.quantity ?? 1, num(sc.width_m), num(sc.height_m), sc.is_irregular ?? false, num(sc.area_m2), num(sc.pitch_mm)]
+              `INSERT INTO project_screens (project_id, screen_type, environment, quantity, width_m, height_m, is_irregular, area_m2, pitch_mm, voltage)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
+              [id, sType, environment ?? null, sc.quantity ?? 1, num(sc.width_m), num(sc.height_m), sc.is_irregular ?? false, num(sc.area_m2), num(sc.pitch_mm), voltage ?? null]
             );
             screenId = inserted[0]?.id ?? null;
           }
@@ -579,6 +613,51 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
     }
 
+    // Lotes de módulos LED y marca del fabricante (por pantalla o general).
+    if (Array.isArray(body.closure_module_lots)) {
+      for (const lot of body.closure_module_lots) {
+        const brand = lot.manufacturer_brand?.trim();
+        const lotNo = lot.lot_number?.trim();
+        if (!brand) {
+          await client.query("ROLLBACK");
+          return jsonError("Cada lote de módulos requiere la marca del fabricante");
+        }
+        if (!lotNo) {
+          await client.query("ROLLBACK");
+          return jsonError("Cada lote de módulos requiere el número de lote");
+        }
+        if (lot.screen_id && !parseId(lot.screen_id)) {
+          await client.query("ROLLBACK");
+          return jsonError("screen_id inválido en lotes de módulos");
+        }
+        if (lot.module_count !== undefined && lot.module_count !== null) {
+          const n = Number(lot.module_count);
+          if (!Number.isInteger(n) || n <= 0) {
+            await client.query("ROLLBACK");
+            return jsonError("La cantidad de módulos debe ser un entero > 0");
+          }
+        }
+      }
+      if (body.closure_module_lots.length === 0) {
+        await client.query(`DELETE FROM project_closure_module_lots WHERE project_id = $1`, [id]);
+      } else {
+        await client.query(`DELETE FROM project_closure_module_lots WHERE project_id = $1`, [id]);
+        for (const lot of body.closure_module_lots) {
+          await client.query(
+            `INSERT INTO project_closure_module_lots (project_id, screen_id, manufacturer_brand, lot_number, module_count)
+             VALUES ($1, $2, $3, $4, $5)`,
+            [
+              id,
+              lot.screen_id && parseId(lot.screen_id) ? lot.screen_id : null,
+              lot.manufacturer_brand!.trim(),
+              lot.lot_number!.trim(),
+              lot.module_count ? Number(lot.module_count) : null,
+            ]
+          );
+        }
+      }
+    }
+
     if (body.close_project) {
       const { rows: closureRows } = await client.query(
         `SELECT * FROM project_closures WHERE project_id = $1`,
@@ -603,6 +682,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         if (!c.receiver_name) missing.push("Nombre de quien recibe");
         if (!c.reception_date) missing.push("Fecha de recepción");
       }
+      const { rows: lotRows } = await client.query(
+        `SELECT id FROM project_closure_module_lots WHERE project_id = $1 LIMIT 1`,
+        [id]
+      );
+      if (lotRows.length === 0) missing.push("Lote de módulos y marca del fabricante");
       if (missing.length > 0) {
         await client.query("ROLLBACK");
         return jsonError(`El proyecto no se cierra: falta ${missing.join("; ")}`);

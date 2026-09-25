@@ -137,6 +137,13 @@ export default function AdminDashboard() {
               <p className="text-sm font-medium text-zinc-800">Controladores</p>
               <p className="mt-1 text-xs text-zinc-500">Equipos de pantalla propios, del cliente o terceros</p>
             </Link>
+            <Link
+              href="/admin/inventario"
+              className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-zinc-300 hover:shadow"
+            >
+              <p className="text-sm font-medium text-zinc-800">Inventario de módulos</p>
+              <p className="mt-1 text-xs text-zinc-500">Lotes iniciales vs usados: faltantes y sobrantes</p>
+            </Link>
           </div>
         </div>
       <div className="mt-8">
