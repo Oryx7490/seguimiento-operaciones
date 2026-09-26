@@ -1,6 +1,7 @@
 # Secretos y entorno
 .env
 .env.local
+.api-test.env
 *.pem
 
 # Node

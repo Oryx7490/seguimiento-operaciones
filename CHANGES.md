@@ -1,5 +1,30 @@
 # Constraints & Decisions Log
 
+## 0.3.1 — Gantt: menú por proyecto, enfoque de un proyecto y fecha editable de actividad (2026-09-26)
+
+### Menú contextual por proyecto en el Gantt
+- Botón **⋮** en cada renglón de `/gantt` con tres acciones: enfocar/quitar enfoque, **Agregar etapa** y ver el detalle del proyecto.
+- El menú se posiciona en `fixed` con `getBoundingClientRect` del botón para que el `overflow-x-auto` de la tabla no lo recorte; cierra al hacer clic fuera, con `Esc` o al hacer scroll.
+- Solo un menú abierto a la vez (estado `menu` en `GanttView`).
+
+### Enfoque de un proyecto a la vez
+- Estado `focusId`: el Gantt muestra únicamente ese proyecto y lo resalta en azul, para analizarlo sin la información simultánea del resto.
+- Chip en la barra de herramientas con `Analizando <código> · <nombre>` y botón **Mostrar todos**; sin enfoque se muestra la pista de usar el menú ⋮.
+
+### Alta de etapas desde el Gantt
+- Modal **Agregar etapa** con nombre, tipo de etapa (catálogo `phase_catalog`, define el color de la barra) y fechas planificadas inicio/fin opcionales (fin vacío = fase abierta).
+- Valida nombre obligatorio y que el fin no sea anterior al inicio.
+- Reusa el `PATCH /api/projects/[id]` con `phases: [{...}]` sin `id` (rama INSERT existente); no requirió cambios de backend.
+- El `sort_order` enviado es `fases del proyecto + 1` para que la etapa nueva quede al final.
+
+### Agenda: fecha editable y búsqueda de proyectos/tickets
+- **Nueva actividad**: la fecha pasa de texto de solo lectura a `TextInput type="date"` con estado propio `activityDate`, inicializada con el día clicado; se envía en el `POST /api/activities`. Validación de fecha obligatoria en cliente.
+- **Buscador en nueva actividad**: proyectos y tickets usan `SearchableSelect` con `topN={5}` y orden por recencia (`last_activity_at`/`updated_at`); excluye tickets cancelados y mantiene el filtro de proyectos en curso salvo "mostrar también proyectos cerrados".
+
+### Misc
+- Versión leída desde `package.json` en el nav (v0.3.1).
+- `compose.yaml` corre `npm run build && npm start`: tras editar el código hay que reconstruir con `docker compose up -d --force-recreate web` (un `up -d` no recompila si el contenedor ya está arriba).
+
 ## 0.3.0 — Cierre resuelto por cliente, borrado de tickets, tipo de pantalla y Proyección (2026-09-24)
 
 ### Cierre de tickets "resuelto por el cliente"

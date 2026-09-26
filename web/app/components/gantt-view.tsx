@@ -1,9 +1,9 @@
 "use client";
 
-import { useMemo, useState, useRef, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useState, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import Link from "next/link";
 import { fetchJson, useResource } from "@/app/lib/client";
-import { Modal, Field, TextInput, PrimaryButton, SecondaryButton } from "@/app/components/ui";
+import { Modal, Field, TextInput, Select, PrimaryButton, SecondaryButton } from "@/app/components/ui";
 
 type GanttKind =
   | "planning"
@@ -180,6 +180,9 @@ export default function GanttView() {
   const [search, setSearch] = useState("");
   const [dayOffset, setDayOffset] = useState(0);
   const [edit, setEdit] = useState<{ projectId: string; phase: GanttPhase } | null>(null);
+  const [focusId, setFocusId] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{ project: GanttProject; rect: DOMRect } | null>(null);
+  const [newPhaseFor, setNewPhaseFor] = useState<GanttProject | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveErr, setSaveErr] = useState<string | null>(null);
 
@@ -203,6 +206,15 @@ export default function GanttView() {
     );
   }
 
+  const focusProject = useMemo(
+    () => (data?.projects ?? []).find((p) => p.id === focusId) ?? null,
+    [data, focusId]
+  );
+
+  function toggleFocus(id: string) {
+    setFocusId((prev) => (prev === id ? null : id));
+  }
+
   const visibleProjects = useMemo(() => {
     const query = search.trim().toLocaleLowerCase("es");
     const filter = (ph: GanttPhase): boolean => {
@@ -215,6 +227,7 @@ export default function GanttView() {
       return (text ?? "").toLocaleLowerCase("es").includes(query);
     };
     const list = (data?.projects ?? [])
+      .filter((p) => (focusId === null ? true : p.id === focusId))
       .filter((p) => matches(p.code) || matches(p.name) || matches(p.client_name))
       .map((p) => {
         const visible = p.phases.filter(filter);
@@ -274,7 +287,7 @@ export default function GanttView() {
       return 0;
     });
     return list;
-  }, [data, activeKinds, sortKey, search, from]);
+  }, [data, activeKinds, sortKey, search, from, focusId]);
 
   async function saveDates(start: string | null, end: string | null) {
     if (!edit) return;
@@ -366,6 +379,23 @@ export default function GanttView() {
             placeholder="Buscar proyecto…"
             className="w-48 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm text-zinc-700 focus:border-zinc-500 focus:outline-none"
           />
+          {focusProject ? (
+            <span className="flex items-center gap-2 rounded-md border border-zinc-900 bg-zinc-900 px-2.5 py-1.5 text-xs font-medium text-white">
+              <span className="max-w-[220px] truncate">
+                Analizando <span className="font-mono">{focusProject.code}</span> · {focusProject.name}
+              </span>
+              <button
+                onClick={() => setFocusId(null)}
+                className="rounded bg-white/15 px-2 py-0.5 font-semibold hover:bg-white/30"
+              >
+                Mostrar todos
+              </button>
+            </span>
+          ) : (
+            <span className="text-xs text-zinc-500">
+              Usa el menú <span className="font-semibold text-zinc-600">⋮</span> de un proyecto para aislarlo.
+            </span>
+          )}
           <span className="text-xs text-zinc-500">Escala:</span>
           {(Object.keys(SCALES) as ScaleKey[]).map((key) => (
             <button
@@ -481,15 +511,30 @@ export default function GanttView() {
                   <div
                     key={p.id}
                     className={`flex border-b border-zinc-100 last:border-b-0 ${
-                      hasDates ? "" : "opacity-40"
-                    }`}
+                      focusId === p.id ? "bg-sky-50" : ""
+                    } ${hasDates ? "" : "opacity-40"}`}
                   >
-                    <div className="flex w-[260px] shrink-0 flex-col justify-center gap-1 border-r border-zinc-100 px-4 py-2.5">
-                      <Link href={`/proyectos/${p.id}`} title={`Abrir ${p.code}`} className="min-w-0 rounded hover:underline">
-                        <p className="truncate text-sm font-medium text-zinc-800">
-                          <span className="font-mono text-xs text-sky-700">{p.code}</span> {p.name}
-                        </p>
-                      </Link>
+                    <div className="flex w-[260px] shrink-0 flex-col justify-center gap-1 border-r border-zinc-100 py-2.5 pl-4 pr-2">
+                      <div className="flex items-start gap-1">
+                        <Link href={`/proyectos/${p.id}`} title={`Abrir ${p.code}`} className="min-w-0 flex-1 rounded hover:underline">
+                          <p className="truncate text-sm font-medium text-zinc-800">
+                            <span className="font-mono text-xs text-sky-700">{p.code}</span> {p.name}
+                          </p>
+                        </Link>
+                        <button
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setMenu(menu?.project.id === p.id ? null : { project: p, rect: e.currentTarget.getBoundingClientRect() });
+                          }}
+                          aria-label={`Acciones de ${p.code}`}
+                          aria-haspopup="menu"
+                          aria-expanded={menu?.project.id === p.id}
+                          className="shrink-0 rounded-md px-1.5 text-base leading-5 text-zinc-400 hover:bg-zinc-200 hover:text-zinc-700"
+                        >
+                          ⋮
+                        </button>
+                      </div>
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <span
                           className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
@@ -538,6 +583,8 @@ export default function GanttView() {
           Solo se dibujan fases con fecha planificada; las marcadas como “no aplica” no aparecen.
           Arrastra una barra para moverla, o sus bordes para cambiar inicio y fin; al soltar se guarda.
           Toca una barra sin moverla para editar sus fechas con precisión. El rango del proyecto se deriva de sus fases.
+          El menú <span className="font-semibold text-zinc-600">⋮</span> de cada proyecto aísla el proyecto para analizarlo
+          sin distracción y permite agregar etapas sin salir del Gantt.
         </p>
       </main>
 
@@ -548,6 +595,25 @@ export default function GanttView() {
           err={saveErr}
           onSave={saveDates}
           onClose={() => setEdit(null)}
+        />
+      )}
+
+      {menu && (
+        <RowMenu
+          project={menu.project}
+          rect={menu.rect}
+          isFocused={focusId === menu.project.id}
+          onClose={() => setMenu(null)}
+          onToggleFocus={() => toggleFocus(menu.project.id)}
+          onAddPhase={() => setNewPhaseFor(menu.project)}
+        />
+      )}
+
+      {newPhaseFor && (
+        <NewPhaseModal
+          project={newPhaseFor}
+          onClose={() => setNewPhaseFor(null)}
+          onSaved={reload}
         />
       )}
     </div>
@@ -738,6 +804,190 @@ function PhaseEditModal({
             <TextInput type="date" value={end} onChange={setEnd} />
           </Field>
         )}
+        {err && <p className="text-[11px] text-red-600">{err}</p>}
+      </div>
+    </Modal>
+  );
+}
+
+function RowMenu({
+  project,
+  rect,
+  isFocused,
+  onClose,
+  onToggleFocus,
+  onAddPhase,
+}: {
+  project: GanttProject;
+  rect: DOMRect;
+  isFocused: boolean;
+  onClose: () => void;
+  onToggleFocus: () => void;
+  onAddPhase: () => void;
+}) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    function dismiss() {
+      onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", dismiss, true);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", dismiss, true);
+    };
+  }, [onClose]);
+
+  const width = 212;
+  const left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8));
+  const itemCls = "block w-full px-3 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-100";
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose} aria-hidden />
+      <div
+        role="menu"
+        aria-label={`Acciones de ${project.code}`}
+        style={{ top: rect.bottom + 4, left, width }}
+        className="fixed z-50 overflow-hidden rounded-md border border-zinc-200 bg-white py-1 shadow-xl"
+      >
+        <p className="px-3 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
+          {project.code}
+        </p>
+        <button
+          role="menuitem"
+          className={itemCls}
+          onClick={() => {
+            onToggleFocus();
+            onClose();
+          }}
+        >
+          {isFocused ? "Quitar enfoque" : "Enfocar este proyecto"}
+        </button>
+        <button
+          role="menuitem"
+          className={itemCls}
+          onClick={() => {
+            onAddPhase();
+            onClose();
+          }}
+        >
+          Agregar etapa
+        </button>
+        <Link
+          role="menuitem"
+          href={`/proyectos/${project.id}`}
+          className={itemCls}
+          onClick={onClose}
+        >
+          Ver detalle del proyecto
+        </Link>
+      </div>
+    </>
+  );
+}
+
+function NewPhaseModal({
+  project,
+  onClose,
+  onSaved,
+}: {
+  project: GanttProject;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [name, setName] = useState("");
+  const [catalogId, setCatalogId] = useState("");
+  const [start, setStart] = useState("");
+  const [end, setEnd] = useState("");
+  const [catalog, setCatalog] = useState<{ id: string; name: string; active?: boolean }[]>([]);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchJson<{ phases: { id: string; name: string; active?: boolean }[] }>("/api/catalogs")
+      .then((r) => {
+        if (cancelled) return;
+        setCatalog((r.phases ?? []).filter((c) => c.active !== false));
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function submit() {
+    if (!name.trim()) {
+      setErr("El nombre de la etapa es obligatorio");
+      return;
+    }
+    if (start && end && end < start) {
+      setErr("La fecha de fin no puede ser anterior al inicio");
+      return;
+    }
+    setSaving(true);
+    setErr(null);
+    try {
+      await fetchJson(`/api/projects/${project.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          phases: [
+            {
+              name: name.trim(),
+              catalog_phase_id: catalogId || null,
+              sort_order: project.phases.length + 1,
+              planned_start_date: start || null,
+              planned_end_date: end || null,
+            },
+          ],
+        }),
+      });
+      onSaved();
+      onClose();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      open={true}
+      onClose={onClose}
+      title={`Agregar etapa · ${project.code}`}
+      footer={
+        <>
+          <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
+          <PrimaryButton onClick={submit} disabled={saving}>
+            {saving ? "Guardando…" : "Agregar etapa"}
+          </PrimaryButton>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <Field label="Nombre de la etapa">
+          <TextInput value={name} onChange={setName} placeholder="P. ej. Armado en planta" />
+        </Field>
+        <Field label="Tipo de etapa" hint="Define el color de la barra en el Gantt">
+          <Select
+            value={catalogId}
+            onChange={setCatalogId}
+            options={[
+              { value: "", label: "Sin tipo (genérica)" },
+              ...catalog.map((c) => ({ value: c.id, label: c.name })),
+            ]}
+          />
+        </Field>
+        <Field label="Fecha de inicio planificada">
+          <TextInput type="date" value={start} onChange={setStart} />
+        </Field>
+        <Field label="Fecha de fin planificada" hint="Déjalo vacío si la fase sigue abierta">
+          <TextInput type="date" value={end} onChange={setEnd} />
+        </Field>
         {err && <p className="text-[11px] text-red-600">{err}</p>}
       </div>
     </Modal>

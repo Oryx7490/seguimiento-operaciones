@@ -47,6 +47,12 @@ const STATUS_META: Record<Activity["status"], { label: string; card: string; dot
   cancelled: { label: "Cancelada", card: "border-zinc-200 bg-zinc-50 opacity-60", dot: "bg-zinc-300" },
 };
 
+function recencyScore(iso: string | null | undefined): number {
+  if (!iso) return 0;
+  const t = new Date(iso).getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
 function isoDate(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
@@ -957,6 +963,7 @@ function NewActivityModal({ date, initialTechIds, technicians, onClose, onSaved 
   onClose: () => void;
   onSaved: () => void;
 }) {
+  const [activityDate, setActivityDate] = useState(date);
   const [description, setDescription] = useState("");
   const [kind, setKind] = useState<string>("project");
   const [projectId, setProjectId] = useState("");
@@ -995,6 +1002,10 @@ function NewActivityModal({ date, initialTechIds, technicians, onClose, onSaved 
   }
 
   async function submit() {
+    if (!activityDate) {
+      setErr("La fecha es obligatoria");
+      return;
+    }
     if (!description.trim()) {
       setErr("La descripción es obligatoria");
       return;
@@ -1021,7 +1032,7 @@ function NewActivityModal({ date, initialTechIds, technicians, onClose, onSaved 
       await fetchJson("/api/activities", {
         method: "POST",
         body: JSON.stringify({
-          date,
+          date: activityDate,
           description,
           planned_hours: Number(plannedHours) || 0,
           project_ids: kind === "project" ? [projectId] : [],
@@ -1049,9 +1060,9 @@ function NewActivityModal({ date, initialTechIds, technicians, onClose, onSaved 
       }
     >
       <div className="space-y-4">
-        <p className="rounded-md bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
-          Fecha: <strong className="text-zinc-800">{date}</strong>
-        </p>
+        <Field label="Fecha de la actividad">
+          <TextInput type="date" value={activityDate} onChange={setActivityDate} />
+        </Field>
         <Field label="Descripción de la actividad">
           <TextInput value={description} onChange={setDescription} placeholder="P. ej. Instalación de gabinetes" />
         </Field>
@@ -1064,13 +1075,18 @@ function NewActivityModal({ date, initialTechIds, technicians, onClose, onSaved 
         </Field>
         {kind === "project" && (
           <Field label="Proyecto (en curso)">
-            <Select
+            <SearchableSelect
               value={projectId}
               onChange={setProjectId}
-              placeholder="Selecciona un proyecto…"
+              placeholder="Buscar proyecto por código o nombre…"
+              topN={5}
               options={projects
                 .filter((p) => showAllProjects || ACTIVE_PROJECT_STATUS.has(p.status))
-                .map((p) => ({ value: p.id, label: `${p.code} · ${p.name}` }))}
+                .map((p) => ({
+                  value: p.id,
+                  label: `${p.code} · ${p.name}`,
+                  frequency: recencyScore(p.last_activity_at ?? p.updated_at),
+                }))}
             />
             <label className="mt-1.5 flex items-center gap-2 text-xs text-zinc-500">
               <input
@@ -1085,7 +1101,19 @@ function NewActivityModal({ date, initialTechIds, technicians, onClose, onSaved 
         )}
         {kind === "ticket" && (
           <Field label="Ticket">
-            <Select value={ticketId} onChange={setTicketId} placeholder="Selecciona un ticket…" options={tickets.filter((t) => t.status !== "cancelled").map((t) => ({ value: t.id, label: `${t.code} · ${t.title}` }))} />
+            <SearchableSelect
+              value={ticketId}
+              onChange={setTicketId}
+              placeholder="Buscar ticket por código o título…"
+              topN={5}
+              options={tickets
+                .filter((t) => t.status !== "cancelled")
+                .map((t) => ({
+                  value: t.id,
+                  label: `${t.code} · ${t.title}`,
+                  frequency: recencyScore(t.last_activity_at ?? t.updated_at),
+                }))}
+            />
           </Field>
         )}
         {kind === "internal" && (
