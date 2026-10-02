@@ -6,9 +6,9 @@ lee credenciales propias de `.env.local` (ignorado por Git).
 
 ## Ver en el navegador
 
-Abrir [http://127.0.0.1:18080](http://127.0.0.1:18080). Es una copia de
-Seguimiento lista para ser usada durante la implementación del diseñador LED.
-Los primeros dibujos LED aparecerán en la etapa E01.
+Abrir [http://100.68.83.67:18080/disenador](http://100.68.83.67:18080/disenador)
+desde un equipo conectado a la misma red Tailscale. La RC es la versión `0.0.1`.
+La página contiene el dibujo 2D del gabinete sintético de E01.
 
 ## Arranque y revisión
 
@@ -36,7 +36,7 @@ docker compose --env-file .env.local -p led-designer-dev \
 
 | Servicio | Dirección local |
 |---|---|
-| Seguimiento web | `127.0.0.1:18080` |
+| Diseñador LED | `100.68.83.67:18080/disenador` (Tailscale) |
 | PostgreSQL | `127.0.0.1:15433` |
 | MinIO S3 | `127.0.0.1:19010` |
 | Consola MinIO | `127.0.0.1:19011` |
@@ -54,8 +54,8 @@ worker montan el código de esta copia, no el directorio operativo. No ejecutar
   en seguimiento al iniciar el trabajo. No contiene `.env.local`.
 - Base de desarrollo: migraciones hasta `049`, 46 migraciones aplicadas,
   cero proyectos. No se importó una base ni un respaldo operativo.
-- Diseño LED: todavía no existe código de implementación. La etapa E01 añadirá
-  el primer dibujo interactivo de un gabinete en 2D.
+- Diseñador LED: E01 implementa una vista ortográfica 2D de un gabinete
+  sintético de 960 × 960 mm. Todavía no es editable ni un modelo comercial.
 
 ## Resultado de la comprobación E00
 
@@ -68,5 +68,4 @@ worker montan el código de esta copia, no el directorio operativo. No ejecutar
 - npm informó cinco avisos de seguridad de dependencias (cuatro moderados y
   uno crítico). Se deja para una tarea específica de mantenimiento, fuera de E00.
 
-El usuario debe abrir la dirección local, recorrer la página inicial y confirmar
-que puede continuar. Hasta entonces, E00 permanece «lista para probar».
+E00 quedó validada al continuar el usuario con la etapa E01.

@@ -11,6 +11,10 @@ out/
 dist/
 coverage/
 
+# Python
+__pycache__/
+*.py[cod]
+
 # Respaldos locales
 db/backup/*.dump
 db/backup/*.tar.gz

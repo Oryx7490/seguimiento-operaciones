@@ -11,6 +11,7 @@ const NAV = [
   { href: "/gantt", label: "Gantt" },
   { href: "/gantt-tickets", label: "Gantt tickets" },
   { href: "/proyectos", label: "Proyectos" },
+  { href: "/disenador", label: "Diseñador LED" },
   { href: "/tickets", label: "Tickets" },
   { href: "/pendientes", label: "Pendientes" },
   { href: "/notificaciones", label: "Notificaciones" },
