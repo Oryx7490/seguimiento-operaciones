@@ -41,6 +41,9 @@ def test_reference_single_cabinet():
         (3, 4, 12, 3_840, 2_880, 11_059_200, 11.0592),
         (12, 16, 192, 15_360, 11_520, 176_947_200, 176.9472),
         (20, 20, 400, 19_200, 19_200, 368_640_000, 368.64),
+        # Pantalla mayor registrada (35 × 13 m) cubierta con 960 mm: 37 × 14.
+        (14, 37, 518, 35_520, 13_440, 477_388_800, 477.3888),
+        (50, 100, 5_000, 96_000, 48_000, 4_608_000_000, 4_608.0),
     ],
 )
 def test_rectangle_acceptance(rows, columns, count, width, height, area_mm2, area_m2):
@@ -99,7 +102,8 @@ def test_unknown_depth_is_flagged():
 @pytest.mark.parametrize(
     ("payload", "field", "message"),
     [
-        ({"rows": 21, "columns": 4}, "Filas", "Debe ser menor o igual que 20."),
+        ({"rows": 101, "columns": 4}, "Filas", "Debe ser menor o igual que 100."),
+        ({"rows": 51, "columns": 100}, "", "La pantalla admite hasta 5,000 gabinetes; se pidieron 5,100."),
         ({"rows": 0, "columns": 4}, "Filas", "Debe ser mayor o igual que 1."),
         ({"rows": 3, "columns": 2.5}, "Columnas", "Debe ser un número entero."),
         ({"rows": 3}, "Columnas", "Falta este dato o no es numérico."),

@@ -89,7 +89,8 @@ function toDisplayError(reason: unknown): DisplayError {
   return { message: "Ocurrió un error inesperado.", issues: [] };
 }
 
-const SVG = { width: 1120, height: 1020, maxDrawingWidth: 640, maxDrawingHeight: 620 };
+// Margen derecho reservado para la cota vertical.
+const SVG = { width: 1120, height: 1020, maxDrawingWidth: 860, maxDrawingHeight: 620, rightMargin: 210 };
 
 export default function LedDesigner() {
   const [result, setResult] = useState<DesignResponse | null>(null);
@@ -144,12 +145,18 @@ export default function LedDesigner() {
     : 0;
   const drawingWidth = face ? face.width_mm * scale : 0;
   const drawingHeight = face ? face.height_mm * scale : 0;
-  const originX = (SVG.width - drawingWidth) / 2;
+  const originX = Math.max(30, (SVG.width - SVG.rightMargin - drawingWidth) / 2);
   const originY = 190 + (SVG.maxDrawingHeight + 10 - drawingHeight) / 2;
   const x = (value: number) => originX + value * scale;
   const y = (value: number) => originY + (face ? face.height_mm - value : 0) * scale;
   const dimensionText = (millimeters: number) => `${millimeters} mm  (${(millimeters / 1000).toFixed(2)} m)`;
   const params = document?.template.params;
+  // Escala gráfica con un valor redondo de aproximadamente 125 px.
+  const scaleBarMm = scale
+    ? [100, 200, 500, 1000, 2000, 5000, 10000, 20000].reduce((best, value) =>
+        Math.abs(value * scale - 125) < Math.abs(best * scale - 125) ? value : best,
+      )
+    : 1000;
 
   return (
     <div className="min-h-screen bg-[#f4f6f8] px-5 py-7 text-slate-900 sm:px-8">
@@ -219,12 +226,15 @@ export default function LedDesigner() {
                     const cabinetWidth = model.width_mm * scale;
                     const cabinetHeight = model.height_mm * scale;
                     const inset = Math.min(4, cabinetWidth / 12, cabinetHeight / 12);
+                    const stroke = Math.min(2.5, cabinetWidth / 8, cabinetHeight / 8);
+                    // Etiqueta sólo si cabe legible; el ID completo aparece al pasar el cursor.
+                    const labelSize = Math.min(17, cabinetHeight / 5, cabinetWidth / 6);
                     return (
                       <g key={placement.id}>
                         <title>{placement.id}</title>
-                        <rect x={cabinetX + inset} y={cabinetY + inset} width={cabinetWidth - inset * 2} height={cabinetHeight - inset * 2} rx="3" fill="url(#cabinet-face)" stroke="#0e7490" strokeWidth="2.5" />
-                        {placement.grid && (
-                          <text x={cabinetX + cabinetWidth / 2} y={cabinetY + cabinetHeight / 2 + 5} textAnchor="middle" fill="#155e75" fontSize={Math.min(17, cabinetHeight / 5)} fontWeight="600">R{placement.grid.row} · C{placement.grid.column}</text>
+                        <rect x={cabinetX + inset} y={cabinetY + inset} width={cabinetWidth - inset * 2} height={cabinetHeight - inset * 2} rx={Math.min(3, inset)} fill="url(#cabinet-face)" stroke="#0e7490" strokeWidth={stroke} />
+                        {placement.grid && labelSize >= 7 && (
+                          <text x={cabinetX + cabinetWidth / 2} y={cabinetY + cabinetHeight / 2 + labelSize * 0.35} textAnchor="middle" fill="#155e75" fontSize={labelSize} fontWeight="600">R{placement.grid.row} · C{placement.grid.column}</text>
                         )}
                       </g>
                     );
@@ -240,10 +250,10 @@ export default function LedDesigner() {
                   <rect x={originX + drawingWidth + 18} y={originY + drawingHeight / 2 - 17} width="178" height="34" rx="6" fill="white" />
                   <text x={originX + drawingWidth + 107} y={originY + drawingHeight / 2 + 7} textAnchor="middle" fill="#155e75" fontSize="17" fontWeight="700">{dimensionText(face.height_mm)}</text>
 
-                  <line x1="230" y1="930" x2="355" y2="930" stroke="#334155" strokeWidth="4" />
+                  <line x1="230" y1="930" x2={230 + scaleBarMm * scale} y2="930" stroke="#334155" strokeWidth="4" />
                   <line x1="230" y1="922" x2="230" y2="938" stroke="#334155" strokeWidth="2" />
-                  <line x1="355" y1="922" x2="355" y2="938" stroke="#334155" strokeWidth="2" />
-                  <text x="230" y="963" fill="#64748b" fontSize="15">{Math.round(125 / scale)} mm</text>
+                  <line x1={230 + scaleBarMm * scale} y1="922" x2={230 + scaleBarMm * scale} y2="938" stroke="#334155" strokeWidth="2" />
+                  <text x="230" y="963" fill="#64748b" fontSize="15">{scaleBarMm >= 1000 ? `${scaleBarMm / 1000} m` : `${scaleBarMm} mm`}</text>
                   <text x="560" y="990" textAnchor="middle" fill="#94a3b8" fontSize="14">Origen local: esquina inferior izquierda · unidad: mm</text>
                 </svg>
               )}
@@ -257,17 +267,17 @@ export default function LedDesigner() {
                 <div className="grid grid-cols-2 gap-3">
                   <label className="text-xs font-medium text-slate-600">
                     Columnas
-                    <input aria-label="Columnas" type="number" inputMode="numeric" min="1" max="20" step="1" value={draftColumns} onChange={(event) => setDraftColumns(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base font-semibold text-slate-900 outline-none focus:border-cyan-700 focus:ring-2 focus:ring-cyan-100" />
+                    <input aria-label="Columnas" type="number" inputMode="numeric" min="1" max="100" step="1" value={draftColumns} onChange={(event) => setDraftColumns(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base font-semibold text-slate-900 outline-none focus:border-cyan-700 focus:ring-2 focus:ring-cyan-100" />
                   </label>
                   <label className="text-xs font-medium text-slate-600">
                     Filas
-                    <input aria-label="Filas" type="number" inputMode="numeric" min="1" max="20" step="1" value={draftRows} onChange={(event) => setDraftRows(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base font-semibold text-slate-900 outline-none focus:border-cyan-700 focus:ring-2 focus:ring-cyan-100" />
+                    <input aria-label="Filas" type="number" inputMode="numeric" min="1" max="100" step="1" value={draftRows} onChange={(event) => setDraftRows(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base font-semibold text-slate-900 outline-none focus:border-cyan-700 focus:ring-2 focus:ring-cyan-100" />
                   </label>
                 </div>
                 <button type="submit" disabled={generating} className="w-full rounded-lg bg-cyan-800 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-cyan-900 disabled:cursor-wait disabled:opacity-60">
                   {generating ? "Generando…" : "Aplicar modulación"}
                 </button>
-                <p className="text-[11px] leading-4 text-slate-500">De 1 a 20 filas o columnas, con un máximo de 400 gabinetes. Si una propuesta es inválida, se conserva la pantalla actual.</p>
+                <p className="text-[11px] leading-4 text-slate-500">De 1 a 100 filas o columnas, con un máximo de 5,000 gabinetes. Si una propuesta es inválida, se conserva la pantalla actual.</p>
               </form>
             </section>
 

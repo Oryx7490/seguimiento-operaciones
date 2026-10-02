@@ -14,8 +14,10 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 ENGINE_VERSION = "0.2.0"
 SCHEMA_VERSION = 2
-MAX_GRID = 20
-MAX_CABINETS = 400
+# Pantalla más grande registrada: 35 m × 13 m. Con gabinetes de 500 mm son
+# 70 × 26 = 1,820 piezas; los límites dejan margen para casos mayores.
+MAX_GRID = 100
+MAX_CABINETS = 5_000
 AXIS_TOLERANCE = 1e-9
 
 Vector3 = tuple[float, float, float]
@@ -358,6 +360,12 @@ def build_rectangle(rows: int, columns: int, model_id: str = "demo-960x960") -> 
 class RectangleRequest(StrictModel):
     rows: int = Field(ge=1, le=MAX_GRID)
     columns: int = Field(ge=1, le=MAX_GRID)
+
+    @model_validator(mode="after")
+    def cabinet_limit(self) -> "RectangleRequest":
+        if self.rows * self.columns > MAX_CABINETS:
+            raise ValueError(f"La pantalla admite hasta {MAX_CABINETS:,} gabinetes; se pidieron {self.rows * self.columns:,}.")
+        return self
 
 
 # --------------------------------------------------------------------------
