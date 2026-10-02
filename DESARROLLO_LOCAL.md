@@ -58,6 +58,7 @@ worker montan el código de esta copia, no el directorio operativo. No ejecutar
 - Diseñador LED: E01 fue aceptada. E02 añade la pantalla rectangular
   parametrizable, listado y cálculo de área. El modelo sigue siendo sintético;
   todavía no es un gabinete comercial ni admite edición pieza por pieza.
+- Punto de recuperación de E02: `49d6eeb`.
 
 ## Resultado de la comprobación E00
 
