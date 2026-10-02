@@ -8,7 +8,8 @@ lee credenciales propias de `.env.local` (ignorado por Git).
 
 Abrir [http://100.68.83.67:18080/disenador](http://100.68.83.67:18080/disenador)
 desde un equipo conectado a la misma red Tailscale. La RC es la versión `0.0.1`.
-La página contiene el dibujo 2D del gabinete sintético de E01.
+E02 presenta una retícula rectangular inicial de 4 × 3 gabinetes sintéticos;
+puedes cambiar filas y columnas y consultar medidas, área y listado.
 
 ## Arranque y revisión
 
@@ -54,8 +55,9 @@ worker montan el código de esta copia, no el directorio operativo. No ejecutar
   en seguimiento al iniciar el trabajo. No contiene `.env.local`.
 - Base de desarrollo: migraciones hasta `049`, 46 migraciones aplicadas,
   cero proyectos. No se importó una base ni un respaldo operativo.
-- Diseñador LED: E01 implementa una vista ortográfica 2D de un gabinete
-  sintético de 960 × 960 mm. Todavía no es editable ni un modelo comercial.
+- Diseñador LED: E01 fue aceptada. E02 añade la pantalla rectangular
+  parametrizable, listado y cálculo de área. El modelo sigue siendo sintético;
+  todavía no es un gabinete comercial ni admite edición pieza por pieza.
 
 ## Resultado de la comprobación E00
 
@@ -69,3 +71,17 @@ worker montan el código de esta copia, no el directorio operativo. No ejecutar
   uno crítico). Se deja para una tarea específica de mantenimiento, fuera de E00.
 
 E00 quedó validada al continuar el usuario con la etapa E01.
+
+## Resultado de E01
+
+- Vista 2D ortográfica basada en el documento servido por FastAPI/Pydantic.
+- Gabinete sintético de 960 × 960 mm, área de 0.9216 m².
+- Next build, ESLint, ruta HTTP 200 y rechazo de datos inválidos con HTTP 422.
+- Punto de recuperación E01: `5fa2268`.
+
+## Comprobaciones E02
+
+- Motor Python: 4 × 3 → 12 gabinetes, 3840 × 2880 mm, 11.0592 m².
+- Motor Python: 16 × 12 → 192 gabinetes, 15360 × 11520 mm, 176.9472 m².
+- Entradas fuera de límite y campos desconocidos: HTTP 422.
+- Build Next y ESLint correctos; la revisión del usuario está pendiente.
