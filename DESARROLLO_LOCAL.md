@@ -1,6 +1,10 @@
 # Seguimiento aislado para el diseñador LED
 
-La rama `codex/led-designer-e00` es una copia local de trabajo independiente.
+La rama `codex/led-designer` es la copia local de trabajo del diseñador. Parte
+de seguimiento `v0.4.0` (`origin/master`, `d9418e9`) y sólo añade commits
+propios del diseñador. La rama anterior `codex/led-designer-e00` se conserva
+sin cambios como respaldo de E00–E02.
+
 La configuración de desarrollo usa el proyecto Compose `led-designer-dev` y
 lee credenciales propias de `.env.local` (ignorado por Git).
 
@@ -10,6 +14,10 @@ Abrir [http://100.68.83.67:18080/disenador](http://100.68.83.67:18080/disenador)
 desde un equipo conectado a la misma red Tailscale. La RC es la versión `0.0.1`.
 E02 presenta una retícula rectangular inicial de 4 × 3 gabinetes sintéticos;
 puedes cambiar filas y columnas y consultar medidas, área y listado.
+
+Seguimiento no tiene inicio de sesión todavía (README, «Fase 1»): cualquier
+equipo de la red Tailscale puede abrir esta copia. El motor Python no publica
+puertos; sólo la web lo alcanza por la red interna de Compose.
 
 ## Arranque y revisión
 
@@ -26,12 +34,59 @@ docker compose --env-file .env.local -p led-designer-dev \
   -f compose.yaml -f compose.led-dev.yaml logs --tail=50 web
 ```
 
+`web` compila al arrancar (`next build && next start`): tras cambiar código web
+basta `restart web`. El motor no recarga solo: tras cambiar `designer-engine/`
+ejecutar `restart designer-engine`.
+
 Para detener los contenedores sin borrar el almacenamiento local:
 
 ```bash
 docker compose --env-file .env.local -p led-designer-dev \
   -f compose.yaml -f compose.led-dev.yaml stop
 ```
+
+### Dependencias npm dentro del contenedor
+
+El contenedor web tiene `NODE_ENV=production`. Un `npm install` normal dentro
+de él elimina las dependencias de desarrollo (Tailwind, ESLint, TypeScript) y
+rompe el build. Usar siempre:
+
+```bash
+docker compose --env-file .env.local -p led-designer-dev \
+  -f compose.yaml -f compose.led-dev.yaml exec web npm ci --include=dev
+```
+
+## Pruebas
+
+Motor Python (pytest, casos de aceptación de cada etapa):
+
+```bash
+docker compose --env-file .env.local -p led-designer-dev \
+  -f compose.yaml -f compose.led-dev.yaml run --rm --no-deps designer-engine \
+  sh -c "pip install -q -r requirements-dev.txt && python -m pytest -q -p no:cacheprovider"
+```
+
+Web (lint y tipos del módulo):
+
+```bash
+docker compose --env-file .env.local -p led-designer-dev \
+  -f compose.yaml -f compose.led-dev.yaml exec web \
+  sh -c "npx eslint app/components/led-designer.tsx app/api/led-designer && npx tsc --noEmit -p ."
+```
+
+## Migraciones de la base de prueba
+
+Usar siempre el puerto de desarrollo `15433`, nunca `5433` (seguimiento
+operativo). Tomar usuario, clave y base de `.env.local`:
+
+```bash
+cd db/scripts
+DATABASE_URL="postgres://USUARIO:CLAVE@127.0.0.1:15433/BASE" node status.js
+DATABASE_URL="postgres://USUARIO:CLAVE@127.0.0.1:15433/BASE" node migrate.js
+```
+
+`.env.local` no se puede cargar con `source`: `SMTP_FROM` contiene `<…>` sin
+comillas. Compose sí lo lee correctamente.
 
 ## Puertos de desarrollo
 
@@ -47,42 +102,21 @@ PostgreSQL y MinIO usan volúmenes con prefijo `led-designer-dev`. La web y el
 worker montan el código de esta copia, no el directorio operativo. No ejecutar
 `down -v`: eliminaría la base y los archivos guardados en el entorno de prueba.
 
-## Punto de partida
+## Sincronización con seguimiento
 
-- Rama Git: `codex/led-designer-e00`.
-- Punto inicial recuperable: `1562c6e`.
-- Ese commit conserva el código rastreado y los cambios locales que ya estaban
-  en seguimiento al iniciar el trabajo. No contiene `.env.local`.
-- Base de desarrollo: migraciones hasta `049`, 46 migraciones aplicadas,
-  cero proyectos. No se importó una base ni un respaldo operativo.
-- Diseñador LED: E01 fue aceptada. E02 añade la pantalla rectangular
-  parametrizable, listado y cálculo de área. El modelo sigue siendo sintético;
-  todavía no es un gabinete comercial ni admite edición pieza por pieza.
-- Punto de recuperación de E02: `49d6eeb`.
+Ver «Integración con seguimiento» en `/home/saruman/disenador-led/ESTADO_IMPLEMENTACION.md`.
+Resumen: los cambios de `origin/master` se incorporan con `git merge` (nunca
+rebase de commits ya registrados) antes de comenzar cada etapa; el código del
+diseñador se mantiene en rutas propias para reducir conflictos.
 
-## Resultado de la comprobación E00
+## Historial del entorno
 
-- Compilación de la imagen web: correcta con los cambios locales capturados.
-- Solicitud HTTP local a `/` desde el contenedor web: 200.
-- Solicitud HTTP a `/api/projects` desde el contenedor web: 200, `projects: []`.
-- PostgreSQL y MinIO de desarrollo: saludables; almacenamiento independiente.
-- Compose revisado: puertos de desarrollo separados; no monta volúmenes
-  PostgreSQL, MinIO, Node o compilación de la instalación existente.
-- npm informó cinco avisos de seguridad de dependencias (cuatro moderados y
-  uno crítico). Se deja para una tarea específica de mantenimiento, fuera de E00.
-
-E00 quedó validada al continuar el usuario con la etapa E01.
-
-## Resultado de E01
-
-- Vista 2D ortográfica basada en el documento servido por FastAPI/Pydantic.
-- Gabinete sintético de 960 × 960 mm, área de 0.9216 m².
-- Next build, ESLint, ruta HTTP 200 y rechazo de datos inválidos con HTTP 422.
-- Punto de recuperación E01: `5fa2268`.
-
-## Comprobaciones E02
-
-- Motor Python: 4 × 3 → 12 gabinetes, 3840 × 2880 mm, 11.0592 m².
-- Motor Python: 16 × 12 → 192 gabinetes, 15360 × 11520 mm, 176.9472 m².
-- Entradas fuera de límite y campos desconocidos: HTTP 422.
-- Build Next y ESLint correctos; la revisión del usuario está pendiente.
+- E00: copia aislada `codex/led-designer-e00` desde una instantánea de
+  seguimiento con cambios locales (`1562c6e`). Base nueva, migraciones hasta
+  `049`, sin datos operativos.
+- E01: vista 2D ortográfica de un gabinete; FastAPI/Pydantic. Aceptada.
+- E02: modulación rectangular; recuperación original `49d6eeb`.
+- 2026-10-02: el diseñador se trasladó a `codex/led-designer` sobre
+  seguimiento `v0.4.0`. La base de prueba aplicó la migración `050`.
+- 2026-10-02: corrección de E02 (documento `schema_version` 2, resumen
+  calculado por el motor, errores por campo, pytest) y Next.js 16.3.8.
