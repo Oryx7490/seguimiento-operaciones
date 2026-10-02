@@ -1,7 +1,11 @@
 import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
 import { jsonError, jsonOk, parseId } from "@/app/lib/api";
-import { validateInventoryLot } from "@/app/lib/inventory";
+import { validateInventoryLot, type ValidLot } from "@/app/lib/inventory";
+
+function toParams(v: ValidLot) {
+  return [v.brand, v.lot, v.count, v.location, v.pitch, v.moduleType, v.ledType, v.observations, v.ic1, v.ic2, v.ic3, v.status, v.eta, v.widthMm, v.heightMm];
+}
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -15,15 +19,21 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
   const v = validateInventoryLot(body as never);
   if (!v.ok) return jsonError(v.error);
-  const { brand, lot, count, location } = v.lot;
+  const p = toParams(v.lot);
 
   try {
     const { rows } = await pool.query(
       `UPDATE inventory_lots
-       SET manufacturer_brand = $2, lot_number = $3, module_count = $4, location = $5
+       SET manufacturer_brand = $2, lot_number = $3, module_count = $4, location = $5,
+           pitch_mm = $6, module_type = $7, led_type = $8, observations = $9,
+           ic_serial_1 = $10, ic_serial_2 = $11, ic_serial_3 = $12,
+           status = $13, expected_arrival = $14, width_mm = $15, height_mm = $16
        WHERE id = $1
-       RETURNING id, manufacturer_brand, lot_number, module_count, location, created_at, updated_at`,
-      [id, brand, lot, count, location]
+       RETURNING id, manufacturer_brand, lot_number, module_count, location, pitch_mm, module_type,
+                 led_type, observations, ic_serial_1, ic_serial_2, ic_serial_3, status, expected_arrival,
+                 width_mm, height_mm,
+                 created_at, updated_at`,
+      [id, ...p]
     );
     if (rows.length === 0) return jsonError("lote no encontrado", 404);
     return jsonOk({ lot: rows[0] });

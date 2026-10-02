@@ -181,7 +181,7 @@ export default function AgentTokensPage() {
         )}
       </div>
 
-      <Modal
+      <Modal mark="W1"
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         title="Nuevo token de agente"
@@ -200,7 +200,7 @@ export default function AgentTokensPage() {
         {formError && <p className="mt-2 text-xs text-red-600">{formError}</p>}
       </Modal>
 
-      <Modal
+      <Modal mark="W2"
         open={newToken !== null}
         onClose={() => setNewToken(null)}
         title="Token creado"

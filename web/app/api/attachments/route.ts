@@ -7,6 +7,8 @@ import { deleteStorageObject, putStorageObject } from "@/app/lib/storage";
 const ATTACHMENT_TYPES = [
   "delivery_sheet",
   "photo",
+  "screen_photo",
+  "technical_file",
   "quote",
   "evidence",
   "digital_signature",
@@ -54,6 +56,12 @@ export async function POST(req: NextRequest) {
 
   const attachmentType = formString(form, "attachment_type") ?? "other";
   if (!ATTACHMENT_TYPES.includes(attachmentType)) return jsonError("Tipo de adjunto inválido");
+  if ((attachmentType === "screen_photo" || attachmentType === "technical_file") && !projectUuid) {
+    return jsonError("Este tipo de archivo requiere un proyecto");
+  }
+  if (attachmentType === "screen_photo" && !file.type.startsWith("image/")) {
+    return jsonError("Las fotos de la pantalla deben ser imágenes");
+  }
 
   if (screenUuid) {
     const ext = file.name.includes(".") ? file.name.split(".").pop()! : "";

@@ -227,7 +227,7 @@ function EditModal({
   };
 
   return (
-    <Modal
+    <Modal mark="W8"
       open={true}
       onClose={onClose}
       title="Editar habilidad"

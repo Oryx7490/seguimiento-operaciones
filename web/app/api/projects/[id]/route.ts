@@ -81,7 +81,8 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       ),
       pool.query(
         `SELECT ps.id, ps.project_id, ps.screen_type, ps.environment, ps.quantity,
-                ps.width_m, ps.height_m, ps.is_irregular, ps.area_m2, ps.pitch_mm, ps.voltage, ps.created_at,
+                ps.width_m, ps.height_m, ps.is_irregular, ps.area_m2, ps.pitch_mm, ps.voltage,
+                ps.installed, ps.cancelled, ps.cancel_reason, ps.created_at,
                 CASE WHEN ps.is_irregular THEN COALESCE(ps.area_m2, 0)
                      ELSE COALESCE(ps.width_m, 0) * COALESCE(ps.height_m, 0) END AS m2
          FROM project_screens ps
@@ -98,7 +99,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       ),
       pool.query(
         `SELECT sc.id, sc.screen_id, sc.controller_id, sc.quantity,
-                cc.name, cc.brand, cc.ownership
+                cc.name, cc.brand
          FROM screen_controllers sc
          JOIN controller_catalog cc ON cc.id = sc.controller_id
          WHERE sc.screen_id IN (SELECT id FROM project_screens WHERE project_id = $1)
@@ -216,6 +217,9 @@ interface ScreensPatch {
     area_m2?: number | null;
     pitch_mm?: number | null;
     voltage?: string | null;
+    installed?: boolean;
+    cancelled?: boolean;
+    cancel_reason?: string | null;
     controllers?: Array<{ controller_id: string; quantity: number }>;
     _deleted?: boolean;
   }>;
@@ -405,6 +409,55 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           await client.query(`DELETE FROM project_screens WHERE id = $1 AND project_id = $2`, [sc.id, id]);
           continue;
         }
+        const statusOnly =
+          Boolean(sc.id) &&
+          (sc.installed !== undefined || sc.cancelled !== undefined || sc.cancel_reason !== undefined) &&
+          sc.screen_type === undefined &&
+          sc.environment === undefined &&
+          sc.quantity === undefined &&
+          sc.width_m === undefined &&
+          sc.height_m === undefined &&
+          sc.is_irregular === undefined &&
+          sc.area_m2 === undefined &&
+          sc.pitch_mm === undefined &&
+          sc.voltage === undefined &&
+          sc.controllers === undefined;
+        if (statusOnly && sc.id) {
+          if (sc.cancelled === true) {
+            const reason = typeof sc.cancel_reason === "string" ? sc.cancel_reason.trim() : "";
+            if (!reason) {
+              await client.query("ROLLBACK");
+              return jsonError("Indica el motivo de la cancelación");
+            }
+            await client.query(
+              `UPDATE project_screens
+                  SET cancelled = true, installed = false, cancel_reason = $3
+                WHERE id = $1 AND project_id = $2`,
+              [sc.id, id, reason]
+            );
+          } else if (sc.cancelled === false) {
+            await client.query(
+              `UPDATE project_screens
+                  SET cancelled = false, cancel_reason = NULL
+                WHERE id = $1 AND project_id = $2`,
+              [sc.id, id]
+            );
+          }
+          if (sc.installed === true) {
+            await client.query(
+              `UPDATE project_screens
+                  SET installed = true, cancelled = false, cancel_reason = NULL
+                WHERE id = $1 AND project_id = $2`,
+              [sc.id, id]
+            );
+          } else if (sc.installed === false && sc.cancelled === undefined) {
+            await client.query(
+              `UPDATE project_screens SET installed = false WHERE id = $1 AND project_id = $2`,
+              [sc.id, id]
+            );
+          }
+          continue;
+        }
         if (
           sc.screen_type !== undefined ||
           sc.environment !== undefined ||
@@ -552,6 +605,21 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         vals.push(val);
       };
       const c = body.closure;
+      if (c.delivery_sheet_attachment_id) {
+        if (!parseId(c.delivery_sheet_attachment_id)) {
+          await client.query("ROLLBACK");
+          return jsonError("Hoja de entrega inválida");
+        }
+        const sheet = await client.query(
+          `SELECT id FROM attachments
+           WHERE id = $1 AND project_id = $2 AND attachment_type = 'delivery_sheet'`,
+          [c.delivery_sheet_attachment_id, id]
+        );
+        if (sheet.rows.length === 0) {
+          await client.query("ROLLBACK");
+          return jsonError("La hoja de entrega debe ser un archivo de este proyecto");
+        }
+      }
       if (typeof c.installation_done === "boolean") cpush("installation_done", c.installation_done);
       if (typeof c.mandatory_activities_completed === "boolean") cpush("mandatory_activities_completed", c.mandatory_activities_completed);
       if (typeof c.hours_justified === "boolean") cpush("hours_justified", c.hours_justified);
@@ -613,7 +681,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
     }
 
-    // Lotes de módulos LED y marca del fabricante (por pantalla o general).
+    // Lotes de módulos LED y marca del fabricante, siempre asociados a una pantalla activa.
     if (Array.isArray(body.closure_module_lots)) {
       for (const lot of body.closure_module_lots) {
         const brand = lot.manufacturer_brand?.trim();
@@ -626,9 +694,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           await client.query("ROLLBACK");
           return jsonError("Cada lote de módulos requiere el número de lote");
         }
-        if (lot.screen_id && !parseId(lot.screen_id)) {
+        if (!lot.screen_id || !parseId(lot.screen_id)) {
           await client.query("ROLLBACK");
-          return jsonError("screen_id inválido en lotes de módulos");
+          return jsonError("Cada lote de módulos debe asociarse a una pantalla válida");
+        }
+        const { rows: screenRows } = await client.query(
+          `SELECT id FROM project_screens
+           WHERE id = $1 AND project_id = $2 AND COALESCE(cancelled, false) = false`,
+          [lot.screen_id, id]
+        );
+        if (screenRows.length === 0) {
+          await client.query("ROLLBACK");
+          return jsonError("La pantalla del lote no pertenece al proyecto o está cancelada");
         }
         if (lot.module_count !== undefined && lot.module_count !== null) {
           const n = Number(lot.module_count);
@@ -648,7 +725,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
              VALUES ($1, $2, $3, $4, $5)`,
             [
               id,
-              lot.screen_id && parseId(lot.screen_id) ? lot.screen_id : null,
+              lot.screen_id,
               lot.manufacturer_brand!.trim(),
               lot.lot_number!.trim(),
               lot.module_count ? Number(lot.module_count) : null,
@@ -668,7 +745,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       if (!c) {
         missing.push(
           "Instalación realizada",
-          "Actividades obligatorias completadas",
           "Horas justificadas",
           "Hoja de entrega firmada adjunta",
           "Nombre de quien recibe",
@@ -676,17 +752,42 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         );
       } else {
         if (!c.installation_done) missing.push("Instalación realizada");
-        if (!c.mandatory_activities_completed) missing.push("Actividades obligatorias completadas");
         if (!c.hours_justified) missing.push("Horas justificadas");
-        if (!c.delivery_sheet_attachment_id) missing.push("Hoja de entrega firmada adjunta");
+        const signedSheet = c.delivery_sheet_attachment_id
+          ? await client.query(
+              `SELECT id FROM attachments
+               WHERE id = $1 AND project_id = $2 AND attachment_type = 'delivery_sheet'`,
+              [c.delivery_sheet_attachment_id, id]
+            )
+          : null;
+        if (!signedSheet?.rows.length) missing.push("Hoja de entrega firmada adjunta");
         if (!c.receiver_name) missing.push("Nombre de quien recibe");
         if (!c.reception_date) missing.push("Fecha de recepción");
       }
-      const { rows: lotRows } = await client.query(
-        `SELECT id FROM project_closure_module_lots WHERE project_id = $1 LIMIT 1`,
+      const { rows: requiredScreens } = await client.query(
+        `SELECT id, screen_type FROM project_screens
+         WHERE project_id = $1 AND COALESCE(cancelled, false) = false`,
         [id]
       );
-      if (lotRows.length === 0) missing.push("Lote de módulos y marca del fabricante");
+      const { rows: lotScreens } = await client.query(
+        `SELECT DISTINCT pml.screen_id
+         FROM project_closure_module_lots pml
+         JOIN project_screens ps ON ps.id = pml.screen_id
+         WHERE pml.project_id = $1
+           AND pml.screen_id IS NOT NULL
+           AND ps.project_id = $1
+           AND COALESCE(ps.cancelled, false) = false`,
+        [id]
+      );
+      const lotScreenIds = new Set(lotScreens.map((row) => row.screen_id));
+      const missingLotScreens = requiredScreens.filter((screen) => !lotScreenIds.has(screen.id));
+      if (requiredScreens.length === 0) {
+        missing.push("Pantallas activas del proyecto");
+      } else if (missingLotScreens.length > 0) {
+        missing.push(
+          `Lote de módulos colocado para: ${missingLotScreens.map((screen) => screen.screen_type || screen.id).join(", ")}`
+        );
+      }
       if (missing.length > 0) {
         await client.query("ROLLBACK");
         return jsonError(`El proyecto no se cierra: falta ${missing.join("; ")}`);

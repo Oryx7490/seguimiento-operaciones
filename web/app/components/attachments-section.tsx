@@ -8,6 +8,8 @@ import { Badge, SecondaryButton } from "@/app/components/ui";
 type AttType =
   | "delivery_sheet"
   | "photo"
+  | "screen_photo"
+  | "technical_file"
   | "quote"
   | "evidence"
   | "digital_signature"
@@ -28,6 +30,8 @@ interface AttachmentRow {
 const TYPE_LABEL: Record<AttType, string> = {
   delivery_sheet: "Hoja de entrega",
   photo: "Foto",
+  screen_photo: "Foto de pantalla",
+  technical_file: "Archivo técnico",
   quote: "Cotización",
   evidence: "Evidencia",
   digital_signature: "Firma digital",
@@ -59,11 +63,13 @@ export default function AttachmentsSection({
   projectId,
   ticketId,
   initial,
+  defaultOpen = true,
   onChanged,
 }: {
   projectId?: string;
   ticketId?: string;
   initial: AttachmentRow[];
+  defaultOpen?: boolean;
   onChanged?: () => void;
 }) {
   const [list, setList] = useState<AttachmentRow[]>(initial);
@@ -71,6 +77,7 @@ export default function AttachmentsSection({
   const [uploading, setUploading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [open, setOpen] = useState(defaultOpen);
   const inputRef = useRef<HTMLInputElement>(null);
 
   async function onFile(file: File) {
@@ -110,10 +117,14 @@ export default function AttachmentsSection({
 
   return (
     <section className="rounded-lg border border-zinc-200 bg-white shadow-sm">
-      <header className="border-b border-zinc-100 px-4 py-3">
-        <h2 className="text-sm font-semibold text-zinc-800">Adjuntos</h2>
+      <header className="px-4 py-3">
+        <button type="button" onClick={() => setOpen((value) => !value)} className="flex items-center gap-2 text-left" aria-expanded={open}>
+          <span className="inline-flex h-5 w-5 items-center justify-center rounded border border-zinc-300 text-sm leading-none text-zinc-500">{open ? "−" : "+"}</span>
+          <h2 className="text-sm font-semibold text-zinc-800">Adjuntos</h2>
+          <span className="text-xs text-zinc-400">{list.length} {list.length === 1 ? "archivo" : "archivos"}</span>
+        </button>
       </header>
-      <div className="space-y-3 p-4">
+      {open && <div className="space-y-3 border-t border-zinc-100 p-4">
         <div className="flex flex-wrap items-center gap-2">
           <label className="text-xs text-zinc-500">Tipo:</label>
           <select
@@ -175,7 +186,7 @@ export default function AttachmentsSection({
             ))}
           </ul>
         )}
-      </div>
+      </div>}
     </section>
   );
 }
@@ -186,6 +197,8 @@ const TONE_BG: Partial<Record<AttType, string>> = {
   finiquito: "bg-sky-400",
   fiscal_complement: "bg-amber-400",
   photo: "bg-rose-400",
+  screen_photo: "bg-rose-400",
+  technical_file: "bg-indigo-400",
   quote: "bg-orange-400",
   evidence: "bg-teal-400",
 };

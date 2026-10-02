@@ -112,6 +112,37 @@ export default function ProyeccionPage() {
     [data]
   );
 
+  const projectRows = useMemo(() => {
+    const map = new Map<string, {
+      project_id: string;
+      code: string;
+      name: string;
+      client_name: string | null;
+      screens: { screen_type: string; byHorizon: Record<string, number>; total: number }[];
+      total: number;
+    }>();
+    for (const h of data?.horizons ?? []) {
+      for (const p of h.projects) {
+        let row = map.get(p.project_id);
+        if (!row) {
+          row = { project_id: p.project_id, code: p.code, name: p.name, client_name: p.client_name, screens: [], total: 0 };
+          map.set(p.project_id, row);
+        }
+        for (const s of p.screens) {
+          let sc = row.screens.find((x) => x.screen_type === s.screen_type);
+          if (!sc) {
+            sc = { screen_type: s.screen_type, byHorizon: {}, total: 0 };
+            row.screens.push(sc);
+          }
+          sc.byHorizon[h.key] = (sc.byHorizon[h.key] ?? 0) + s.m2_total;
+          sc.total += s.m2_total;
+          row.total += s.m2_total;
+        }
+      }
+    }
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, "es") || a.code.localeCompare(b.code));
+  }, [data]);
+
   return (
     <div className="p-6">
       {/* ── Header ── */}
@@ -241,15 +272,16 @@ export default function ProyeccionPage() {
             ))}
           </div>
 
-          {/* ── Tabla tipo × horizonte ── */}
-          {data.all_types.length > 0 && (
+          {/* ── Tabla proyecto × horizonte ── */}
+          {projectRows.length > 0 && (
             <div className="mt-6 overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm">
               <p className="border-b border-zinc-100 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                m² por tipo de pantalla por horizonte
+                m² por proyecto y tipo de pantalla
               </p>
               <table className="min-w-full text-sm">
                 <thead className="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500">
                   <tr>
+                    <th className="px-3 py-2 text-left">Proyecto</th>
                     <th className="px-3 py-2 text-left">Tipo de pantalla</th>
                     {data.horizons.map(h => (
                       <th key={h.key} className="px-3 py-2 text-right whitespace-nowrap">{h.label}</th>
@@ -258,22 +290,30 @@ export default function ProyeccionPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-100">
-                  {data.all_types.map(type => {
-                    const total = data.horizons.reduce((s, h) => s + (h.by_type[type] ?? 0), 0);
-                    return (
-                      <tr key={type} className="hover:bg-zinc-50">
-                        <td className="px-3 py-2 font-medium text-zinc-800">{type}</td>
-                        {data.horizons.map(h => (
+                  {projectRows.map((p) =>
+                    p.screens.map((s, si) => (
+                      <tr key={`${p.project_id}-${s.screen_type}`} className="hover:bg-zinc-50">
+                        {si === 0 && (
+                          <td className="px-3 py-2 align-top" rowSpan={p.screens.length}>
+                            <Link href={`/proyectos/${p.project_id}`} className="hover:underline">
+                              <p className="font-medium text-zinc-800">{p.name}</p>
+                              <p className="font-mono text-xs text-sky-700">{p.code}</p>
+                            </Link>
+                            {p.client_name && <p className="mt-0.5 text-xs text-zinc-400">{p.client_name}</p>}
+                          </td>
+                        )}
+                        <td className="px-3 py-2 text-zinc-800">{s.screen_type}</td>
+                        {data.horizons.map((h) => (
                           <td key={h.key} className="px-3 py-2 text-right text-zinc-600">
-                            {h.by_type[type] ? `${fmt(h.by_type[type])} m²` : "—"}
+                            {s.byHorizon[h.key] ? `${fmt(s.byHorizon[h.key])} m²` : "—"}
                           </td>
                         ))}
-                        <td className="px-3 py-2 text-right font-semibold text-zinc-800">{fmt(total)} m²</td>
+                        <td className="px-3 py-2 text-right font-semibold text-zinc-800">{fmt(s.total)} m²</td>
                       </tr>
-                    );
-                  })}
+                    ))
+                  )}
                   <tr className="bg-zinc-50 font-semibold">
-                    <td className="px-3 py-2 text-zinc-700">Total</td>
+                    <td colSpan={2} className="px-3 py-2 text-zinc-700">Total</td>
                     {data.horizons.map(h => (
                       <td key={h.key} className="px-3 py-2 text-right text-sky-700">{fmt(h.total_m2)} m²</td>
                     ))}
@@ -346,8 +386,8 @@ export default function ProyeccionPage() {
                                 {si === 0 ? (
                                   <td className="px-4 py-2" rowSpan={p.screens.length}>
                                     <Link href={`/proyectos/${p.project_id}`} className="hover:underline">
-                                      <span className="font-mono text-xs text-sky-700">{p.code}</span>
-                                      <span className="ml-1 text-zinc-800 font-medium">{p.name}</span>
+                                      <p className="font-medium text-zinc-800">{p.name}</p>
+                                      <p className="font-mono text-xs text-sky-700">{p.code}</p>
                                     </Link>
                                     <p className="mt-0.5 text-xs text-zinc-400">Entrega: {p.planned_end_date}</p>
                                   </td>

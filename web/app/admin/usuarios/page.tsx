@@ -164,7 +164,7 @@ function UserModal({
   }
 
   return (
-    <Modal
+    <Modal mark="W15"
       open={true}
       onClose={onClose}
       title={user ? "Editar usuario" : "Nuevo usuario"}

@@ -10,9 +10,23 @@ export async function GET() {
               c.name AS client_name,
               u.name AS coordinator_name,
               pc.installation_done,
-              pc.mandatory_activities_completed,
               pc.hours_justified,
               (pc.delivery_sheet_attachment_id IS NOT NULL) AS delivery_sheet_present,
+              (
+                (SELECT COUNT(*) FROM project_screens ps
+                 WHERE ps.project_id = p.id AND COALESCE(ps.cancelled, false) = false) > 0
+                AND
+                (SELECT COUNT(DISTINCT pml.screen_id)
+                 FROM project_closure_module_lots pml
+                 JOIN project_screens ps ON ps.id = pml.screen_id
+                 WHERE pml.project_id = p.id
+                   AND pml.screen_id IS NOT NULL
+                   AND ps.project_id = p.id
+                   AND COALESCE(ps.cancelled, false) = false)
+                >=
+                (SELECT COUNT(*) FROM project_screens ps
+                 WHERE ps.project_id = p.id AND COALESCE(ps.cancelled, false) = false)
+              ) AS module_lots_by_screen,
               pc.receiver_name,
               pc.reception_date,
               pc.closed_at,
@@ -36,9 +50,9 @@ export async function GET() {
     const rows2 = rows.map((r) => ({
       ...r,
       installation_done: Boolean(r.installation_done),
-      mandatory_activities_completed: Boolean(r.mandatory_activities_completed),
       hours_justified: Boolean(r.hours_justified),
       delivery_sheet_present: Boolean(r.delivery_sheet_present),
+      module_lots_by_screen: Boolean(r.module_lots_by_screen),
       cobro: Boolean(r.cobro),
       facturacion: Boolean(r.facturacion),
       evidencias: Boolean(r.evidencias),

@@ -21,7 +21,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 
     // Verificar que tenga solicitud pendiente
     const { rows } = await client.query(
-      `SELECT id, code, deletion_requested_at FROM projects WHERE id = $1 FOR UPDATE`,
+      `SELECT id, code, status, deletion_requested_at FROM projects WHERE id = $1 FOR UPDATE`,
       [id]
     );
     if (rows.length === 0) {
@@ -42,13 +42,30 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       );
     }
 
-    // Eliminar definitivamente (CASCADE elimina fases, pantallas, asignaciones, etc.)
+    // Actividades ligadas solo a este proyecto: si el CASCADE suelta el vínculo,
+    // el trigger impide dejarlas sin proyecto, ticket ni tipo interno.
+    await client.query(
+      `DELETE FROM activities a
+       WHERE a.ticket_id IS NULL
+         AND a.internal_activity_type_id IS NULL
+         AND EXISTS (
+           SELECT 1 FROM activity_projects ap
+           WHERE ap.activity_id = a.id AND ap.project_id = $1
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM activity_projects ap
+           WHERE ap.activity_id = a.id AND ap.project_id <> $1
+         )`,
+      [id]
+    );
+
     await client.query(`DELETE FROM projects WHERE id = $1`, [id]);
     await client.query("COMMIT");
     return jsonOk({ deleted: id, code: rows[0].code });
   } catch (err) {
     await client.query("ROLLBACK");
-    return jsonError("No se pudo eliminar el proyecto", 500, String(err));
+    const detail = err instanceof Error ? err.message : String(err);
+    return jsonError(`No se pudo eliminar el proyecto: ${detail}`, 500);
   } finally {
     client.release();
   }

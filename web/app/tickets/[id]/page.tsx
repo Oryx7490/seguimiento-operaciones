@@ -170,9 +170,7 @@ export default function TicketDetailPage() {
       <TicketClosure
         ticketId={id}
         status={detail.ticket.status}
-        ticketType={detail.ticket.ticket_type}
         closure={detail.closure}
-        attachments={detail.attachments}
         onChanged={reload}
       />
     </div>
@@ -210,7 +208,7 @@ function TicketStatusChanger({ detail, onSaved }: { detail: TicketDetail; onSave
     <>
       <PrimaryButton onClick={() => setOpen(true)}>Cambiar estado</PrimaryButton>
       {open && (
-        <Modal open={true} onClose={() => setOpen(false)} title="Cambiar estado"
+        <Modal mark="W35" open={true} onClose={() => setOpen(false)} title="Cambiar estado"
           footer={
             <>
               <SecondaryButton onClick={() => setOpen(false)}>Cancelar</SecondaryButton>
@@ -300,7 +298,7 @@ function EditTicket({ detail, onSaved }: { detail: TicketDetail; onSaved: () => 
     <>
       <SecondaryButton onClick={openModal}>Editar ticket</SecondaryButton>
       {open && (
-        <Modal open={true} onClose={() => setOpen(false)} title={`Editar ticket ${t.code}`}
+        <Modal mark="W36" open={true} onClose={() => setOpen(false)} title={`Editar ticket ${t.code}`}
           footer={
             <>
               <SecondaryButton onClick={() => setOpen(false)}>Cancelar</SecondaryButton>
@@ -375,7 +373,7 @@ function AddAssignment({ ticketId, onSaved }: { ticketId: string; onSaved: () =>
     <>
       <SecondaryButton onClick={() => setOpen(true)} className="text-xs px-2 py-1">Asignar técnico</SecondaryButton>
       {open && (
-        <Modal open={true} onClose={() => setOpen(false)} title="Asignar técnico"
+        <Modal mark="W37" open={true} onClose={() => setOpen(false)} title="Asignar técnico"
           footer={
             <>
               <SecondaryButton onClick={() => setOpen(false)}>Cancelar</SecondaryButton>
@@ -455,7 +453,7 @@ function TicketDeletionRequest({ detail, onSaved }: { detail: TicketDetail; onSa
         Solicitar eliminación
       </button>
       {open && (
-        <Modal
+        <Modal mark="W38"
           open={true}
           onClose={() => setOpen(false)}
           title={`Solicitar eliminación del ticket ${t.code}`}

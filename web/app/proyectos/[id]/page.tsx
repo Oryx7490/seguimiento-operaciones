@@ -46,6 +46,35 @@ const HEALTH_OPTIONS = ["on_time", "at_risk", "blocked", "no_update"];
 
 const PHASE_STATUS_OPTIONS = ["planned", "not_started", "in_progress", "completed", "blocked", "not_applicable"];
 
+function CollapsibleSection({
+  title,
+  defaultOpen,
+  summary,
+  actions,
+  children,
+}: {
+  title: string;
+  defaultOpen: boolean;
+  summary?: React.ReactNode;
+  actions?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section className="rounded-lg border border-zinc-200 bg-white shadow-sm">
+      <div className="flex items-center justify-between gap-3 px-4 py-3">
+        <button type="button" onClick={() => setOpen((value) => !value)} className="flex min-w-0 items-center gap-2 text-left" aria-expanded={open}>
+          <span className="inline-flex h-5 w-5 items-center justify-center rounded border border-zinc-300 text-sm leading-none text-zinc-500">{open ? "−" : "+"}</span>
+          <h2 className="text-sm font-semibold text-zinc-800">{title}</h2>
+          {summary && <span className="text-xs text-zinc-400">{summary}</span>}
+        </button>
+        {actions}
+      </div>
+      {open && <div className="border-t border-zinc-100 p-4">{children}</div>}
+    </section>
+  );
+}
+
 export default function ProjectDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
@@ -142,9 +171,12 @@ export default function ProjectDetailPage() {
       )}
 
       {/* Phases */}
-      <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+      <CollapsibleSection
+        title="Fases"
+        summary={`${detail.phases.filter((ph) => ["completed", "not_applicable"].includes(ph.status)).length}/${detail.phases.length} completadas`}
+        defaultOpen={detail.phases.length === 0 || detail.phases.some((ph) => !["completed", "not_applicable"].includes(ph.status))}
+        actions={<div className="flex flex-wrap items-center gap-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h2 className="text-sm font-semibold text-zinc-800">Fases</h2>
           <div className="flex gap-2">
             <NotApplicableChecklist detail={detail} onSaved={reload} />
             <AddPhase detail={detail} onSaved={reload} />
@@ -189,6 +221,8 @@ export default function ProjectDetailPage() {
             </div>
           </div>
         </div>
+        </div>}
+      >
         {detail.phases.length === 0 ? (
           <p className="mt-3 text-sm text-zinc-400">No hay fases registradas.</p>
         ) : (
@@ -244,14 +278,15 @@ export default function ProjectDetailPage() {
             </table>
           </div>
         )}
-      </section>
+      </CollapsibleSection>
 
       {/* Assignments */}
-      <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-zinc-800">Asignaciones</h2>
-          <AddAssignment projectId={id} onSaved={reload} />
-        </div>
+      <CollapsibleSection
+        title="Asignaciones"
+        summary={`${detail.assignments.length} ${detail.assignments.length === 1 ? "técnico" : "técnicos"}`}
+        defaultOpen={detail.assignments.length === 0}
+        actions={<AddAssignment projectId={id} onSaved={reload} />}
+      >
         {detail.assignments.length === 0 ? (
           <p className="mt-3 text-sm text-zinc-400">Sin técnicos asignados.</p>
         ) : (
@@ -267,14 +302,19 @@ export default function ProjectDetailPage() {
             ))}
           </ul>
         )}
-      </section>
+      </CollapsibleSection>
 
       {/* Pantallas */}
-      <ScreensSection projectId={id} detail={detail} onSaved={reload} />
+      <ScreensSection
+        projectId={id}
+        detail={detail}
+        onSaved={reload}
+        summary={`${detail.screens.filter((screen) => screen.installed && !screen.cancelled).length}/${detail.screens.filter((screen) => !screen.cancelled).length} instaladas`}
+        defaultOpen={detail.screens.length === 0 || detail.screens.some((screen) => !screen.cancelled && !screen.installed)}
+      />
 
       {/* History */}
-      <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
-        <h2 className="text-sm font-semibold text-zinc-800">Historial</h2>
+      <CollapsibleSection title="Historial" summary={`${detail.history.length} ${detail.history.length === 1 ? "evento" : "eventos"}`} defaultOpen={detail.history.length === 0}>
         {detail.history.length === 0 ? (
           <p className="mt-3 text-sm text-zinc-400">Sin cambios de estado.</p>
         ) : (
@@ -295,7 +335,7 @@ export default function ProjectDetailPage() {
             ))}
           </ul>
         )}
-      </section>
+      </CollapsibleSection>
 
       {/* Cierre */}
       <ProjectClosure
@@ -303,17 +343,18 @@ export default function ProjectDetailPage() {
         status={detail.project.status}
         closure={detail.closure as never}
         attachments={detail.attachments}
-        screens={detail.screens.map((s) => ({ id: s.id, screen_type: s.screen_type }))}
+        screens={detail.screens.map((s) => ({ id: s.id, screen_type: s.screen_type, cancelled: Boolean(s.cancelled) }))}
         closureControllers={detail.closure_controllers}
         closureModuleLots={detail.closure_module_lots}
+        defaultOpen={detail.project.status !== "closed"}
         onChanged={reload}
       />
 
       {/* Adjuntos */}
-      <AttachmentsSection projectId={id} initial={detail.attachments} onChanged={reload} />
+      <AttachmentsSection projectId={id} initial={detail.attachments} defaultOpen={detail.attachments.length === 0} onChanged={reload} />
 
       {/* Comments */}
-      <CommentSection kind="project" entityId={id} comments={detail.comments} onSaved={reload} />
+      <CommentSection kind="project" entityId={id} comments={detail.comments} defaultOpen={detail.comments.length === 0} onSaved={reload} />
     </div>
   );
 }
@@ -351,7 +392,7 @@ function StatusChanger({ detail, onSaved }: { detail: ProjectDetail; onSaved: ()
     <>
       <PrimaryButton onClick={() => { setStatus(next[0]); setOpen(true); }}>Cambiar estado</PrimaryButton>
       {open && (
-        <Modal open={true} onClose={() => setOpen(false)} title="Cambiar estado"
+        <Modal mark="W24" open={true} onClose={() => setOpen(false)} title="Cambiar estado"
           footer={
             <>
               <SecondaryButton onClick={() => setOpen(false)}>Cancelar</SecondaryButton>
@@ -422,7 +463,7 @@ function HealthChanger({ detail, onSaved }: { detail: ProjectDetail; onSaved: ()
     <>
       <SecondaryButton onClick={openModal}>Cambiar salud</SecondaryButton>
       {open && (
-        <Modal open={true} onClose={() => setOpen(false)} title="Actualizar salud"
+        <Modal mark="W25" open={true} onClose={() => setOpen(false)} title="Actualizar salud"
           footer={
             <>
               <SecondaryButton onClick={() => setOpen(false)}>Cancelar</SecondaryButton>
@@ -486,7 +527,7 @@ function AddPhase({ detail, onSaved }: { detail: ProjectDetail; onSaved: () => v
     <>
       <SecondaryButton onClick={() => setOpen(true)} className="text-xs px-2 py-1">Agregar fase</SecondaryButton>
       {open && (
-        <Modal open={true} onClose={() => setOpen(false)} title="Nueva fase"
+        <Modal mark="W26" open={true} onClose={() => setOpen(false)} title="Nueva fase"
           footer={
             <>
               <SecondaryButton onClick={() => setOpen(false)}>Cancelar</SecondaryButton>
@@ -575,7 +616,7 @@ function NotApplicableChecklist({ detail, onSaved }: { detail: ProjectDetail; on
     <>
       <SecondaryButton onClick={openModal} className="px-2 py-1 text-xs">Marcar no aplican</SecondaryButton>
       {open && (
-        <Modal open={true} onClose={() => setOpen(false)} title="Fases que no aplican"
+        <Modal mark="W27" open={true} onClose={() => setOpen(false)} title="Fases que no aplican"
           footer={
             <>
               <SecondaryButton onClick={() => setOpen(false)}>Cancelar</SecondaryButton>
@@ -683,7 +724,7 @@ function EditPhase({ detail, phase, onSaved }: { detail: ProjectDetail; phase: P
         Actualizar
       </SecondaryButton>
       {open && (
-        <Modal open={true} onClose={() => setOpen(false)} title={`Editar fase: ${phase.name}`}
+        <Modal mark="W28" open={true} onClose={() => setOpen(false)} title={`Editar fase: ${phase.name}`}
           footer={
             <>
               <SecondaryButton onClick={() => setOpen(false)}>Cancelar</SecondaryButton>
@@ -763,7 +804,7 @@ function AddAssignment({ projectId, onSaved }: { projectId: string; onSaved: () 
     <>
       <SecondaryButton onClick={() => setOpen(true)} className="text-xs px-2 py-1">Asignar técnico</SecondaryButton>
       {open && (
-        <Modal open={true} onClose={() => setOpen(false)} title="Asignar técnico"
+        <Modal mark="W29" open={true} onClose={() => setOpen(false)} title="Asignar técnico"
           footer={
             <>
               <SecondaryButton onClick={() => setOpen(false)}>Cancelar</SecondaryButton>
@@ -805,9 +846,20 @@ interface ScreenPatchInput {
   _deleted?: boolean;
 }
 
-function ScreensSection({ projectId, detail, onSaved }: { projectId: string; detail: ProjectDetail; onSaved: () => void }) {
+function ScreensSection({ projectId, detail, onSaved, summary, defaultOpen }: { projectId: string; detail: ProjectDetail; onSaved: () => void; summary: string; defaultOpen: boolean }) {
   const [editing, setEditing] = useState<ProjectScreen | "new" | null>(null);
   const [ctlEditing, setCtlEditing] = useState<ProjectScreen | null>(null);
+  const [menu, setMenu] = useState<{ screen: ProjectScreen; rect: DOMRect } | null>(null);
+  const [cancelling, setCancelling] = useState<ProjectScreen | null>(null);
+  const [open, setOpen] = useState(defaultOpen);
+
+  async function patchScreenStatus(screen: ProjectScreen, patch: { installed?: boolean; cancelled?: boolean; cancel_reason?: string | null }) {
+    await fetchJson(`/api/projects/${projectId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ screens: [{ id: screen.id, ...patch }] }),
+    });
+    onSaved();
+  }
 
   function buildPayload(update?: { id: string; patch: Omit<ScreenPatchInput, "id" | "_deleted"> }): ScreenPatchInput[] {
     return detail.screens.map((s): ScreenPatchInput =>
@@ -886,15 +938,20 @@ function ScreensSection({ projectId, detail, onSaved }: { projectId: string; det
   }
 
   return (
-    <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
-      <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-zinc-800">Pantallas a instalar</h2>
+    <section className="rounded-lg border border-zinc-200 bg-white shadow-sm">
+      <div className="flex items-center justify-between gap-3 px-4 py-3">
+        <button type="button" onClick={() => setOpen((value) => !value)} className="flex items-center gap-2 text-left" aria-expanded={open}>
+          <span className="inline-flex h-5 w-5 items-center justify-center rounded border border-zinc-300 text-sm leading-none text-zinc-500">{open ? "−" : "+"}</span>
+          <h2 className="text-sm font-semibold text-zinc-800">Pantallas a instalar</h2>
+          <span className="text-xs text-zinc-400">{summary}</span>
+        </button>
         <ScreenForm
           editing={editing}
           setEditing={setEditing}
           onSaved={save}
         />
       </div>
+      {open && <div className="border-t border-zinc-100 p-4">
       {detail.screens.length === 0 ? (
         <p className="mt-3 text-sm text-zinc-400">No hay pantallas registradas.</p>
       ) : (
@@ -915,7 +972,7 @@ function ScreensSection({ projectId, detail, onSaved }: { projectId: string; det
             </thead>
             <tbody className="divide-y divide-zinc-100">
               {detail.screens.map((s) => (
-                <tr key={s.id} className="hover:bg-zinc-50 align-top">
+                <tr key={s.id} className={`hover:bg-zinc-50 align-top ${s.cancelled ? "opacity-60" : ""}`}>
                   <td className="px-3 py-2">
                     {s.environment === "exterior" ? (
                       <span className="inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">Exterior</span>
@@ -929,12 +986,22 @@ function ScreensSection({ projectId, detail, onSaved }: { projectId: string; det
                       <span className="text-xs text-zinc-400">—</span>
                     )}
                     {s.voltage === "110ac" ? (
-                      <span className="mt-1 block w-fit rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">110V AC</span>
+                      <span className="mt-1 block w-fit rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700">110V</span>
                     ) : s.voltage === "220ac" ? (
-                      <span className="mt-1 block w-fit rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-700">220V AC</span>
+                      <span className="mt-1 block w-fit rounded-full bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-700">220V</span>
                     ) : null}
                   </td>
-                  <td className="px-3 py-2 font-medium text-zinc-800">{s.screen_type}</td>
+                  <td className="px-3 py-2">
+                    <p className={`font-medium ${s.cancelled ? "text-zinc-500 line-through" : "text-zinc-800"}`}>{s.screen_type}</p>
+                    {s.cancelled && (
+                      <p className="mt-0.5 text-[11px] text-rose-700" title={s.cancel_reason ?? ""}>
+                        Cancelada{s.cancel_reason ? `: ${s.cancel_reason}` : ""}
+                      </p>
+                    )}
+                    {s.installed && !s.cancelled && (
+                      <p className="mt-0.5 text-[11px] font-medium text-emerald-700">Instalada</p>
+                    )}
+                  </td>
                   <td className="px-3 py-2 text-center text-zinc-700">{s.quantity}</td>
                   <td className="px-3 py-2 text-zinc-600">
                     {s.is_irregular
@@ -956,20 +1023,20 @@ function ScreensSection({ projectId, detail, onSaved }: { projectId: string; det
                     <ScreenPdf screen={s} onChanged={onSaved} />
                   </td>
                   <td className="px-3 py-2 text-right">
-                    <div className="flex justify-end gap-1">
-                      <button
-                        onClick={() => setEditing(s)}
-                        className="rounded border border-zinc-200 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
-                      >
-                        Editar
-                      </button>
-                      <button
-                        onClick={() => remove(s)}
-                        className="rounded border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
-                      >
-                        Eliminar
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setMenu(menu?.screen.id === s.id ? null : { screen: s, rect: e.currentTarget.getBoundingClientRect() });
+                      }}
+                      aria-label={`Acciones de ${s.screen_type}`}
+                      aria-haspopup="menu"
+                      aria-expanded={menu?.screen.id === s.id}
+                      className="rounded-md px-2 py-1 text-base leading-5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
+                    >
+                      ⋮
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -977,6 +1044,7 @@ function ScreensSection({ projectId, detail, onSaved }: { projectId: string; det
           </table>
         </div>
       )}
+      </div>}
 
       {ctlEditing && (
         <ScreenControllersModal
@@ -988,12 +1056,165 @@ function ScreensSection({ projectId, detail, onSaved }: { projectId: string; det
           }}
         />
       )}
+
+      {menu && (
+        <ScreenActionsMenu
+          screen={menu.screen}
+          rect={menu.rect}
+          onClose={() => setMenu(null)}
+          onEdit={() => setEditing(menu.screen)}
+          onInstall={() => void patchScreenStatus(menu.screen, { installed: !menu.screen.installed })}
+          onCancel={() => setCancelling(menu.screen)}
+          onReactivate={() => void patchScreenStatus(menu.screen, { cancelled: false })}
+          onDelete={() => void remove(menu.screen)}
+        />
+      )}
+
+      {cancelling && (
+        <ScreenCancelModal
+          screen={cancelling}
+          onClose={() => setCancelling(null)}
+          onSaved={async (reason) => {
+            await patchScreenStatus(cancelling, { cancelled: true, cancel_reason: reason });
+            setCancelling(null);
+          }}
+        />
+      )}
     </section>
   );
 }
 
 function formatNum(v: number): string {
   return String(Number.isInteger(v) ? v : Math.round(v * 100) / 100);
+}
+
+function ScreenActionsMenu({
+  screen,
+  rect,
+  onClose,
+  onEdit,
+  onInstall,
+  onCancel,
+  onReactivate,
+  onDelete,
+}: {
+  screen: ProjectScreen;
+  rect: DOMRect;
+  onClose: () => void;
+  onEdit: () => void;
+  onInstall: () => void;
+  onCancel: () => void;
+  onReactivate: () => void;
+  onDelete: () => void;
+}) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    function dismiss() {
+      onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", dismiss, true);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", dismiss, true);
+    };
+  }, [onClose]);
+
+  const width = 220;
+  const left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8));
+  const itemCls = "block w-full px-3 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-100";
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose} aria-hidden />
+      <div
+        role="menu"
+        aria-label={`Acciones de ${screen.screen_type}`}
+        style={{ top: rect.bottom + 4, left, width }}
+        className="fixed z-50 overflow-hidden rounded-md border border-zinc-200 bg-white py-1 shadow-xl"
+      >
+        <p className="truncate px-3 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
+          {screen.screen_type}
+        </p>
+        <button role="menuitem" className={itemCls} onClick={() => { onEdit(); onClose(); }}>Editar</button>
+        {!screen.cancelled && (
+          <button role="menuitem" className={itemCls} onClick={() => { onInstall(); onClose(); }}>
+            {screen.installed ? "Quitar marca de instalada" : "Marcar como instalada"}
+          </button>
+        )}
+        {screen.cancelled ? (
+          <button role="menuitem" className={itemCls} onClick={() => { onReactivate(); onClose(); }}>
+            Reactivar pantalla
+          </button>
+        ) : (
+          <button role="menuitem" className={itemCls} onClick={() => { onCancel(); onClose(); }}>
+            Cancelar instalación
+          </button>
+        )}
+        <button role="menuitem" className={`${itemCls} text-red-600 hover:bg-red-50`} onClick={() => { onDelete(); onClose(); }}>
+          Eliminar
+        </button>
+      </div>
+    </>
+  );
+}
+
+function ScreenCancelModal({
+  screen,
+  onClose,
+  onSaved,
+}: {
+  screen: ProjectScreen;
+  onClose: () => void;
+  onSaved: (reason: string) => Promise<void>;
+}) {
+  const [reason, setReason] = useState(screen.cancel_reason ?? "");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit() {
+    if (!reason.trim()) {
+      setErr("Indica el motivo de la cancelación");
+      return;
+    }
+    setSaving(true);
+    setErr(null);
+    try {
+      await onSaved(reason.trim());
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      open={true}
+      onClose={onClose}
+      title={`Cancelar instalación · ${screen.screen_type}`}
+      footer={
+        <>
+          <SecondaryButton onClick={onClose}>Volver</SecondaryButton>
+          <PrimaryButton onClick={() => void submit()} disabled={saving}>
+            {saving ? "Guardando…" : "Cancelar instalación"}
+          </PrimaryButton>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <p className="text-sm text-zinc-600">
+          La pantalla seguirá en el proyecto, marcada como cancelada. Puedes reactivarla después desde el menú.
+        </p>
+        <Field label="Motivo o comentarios">
+          <Textarea value={reason} onChange={setReason} rows={3} placeholder="¿Por qué se cancela esta instalación?" />
+        </Field>
+        {err && <p className="text-xs text-red-600">{err}</p>}
+      </div>
+    </Modal>
+  );
 }
 
 function ScreenForm({
@@ -1051,7 +1272,7 @@ function ScreenModal({
       return;
     }
     if (voltage !== "110ac" && voltage !== "220ac") {
-      setErr("Selecciona el nivel de voltaje: 110V AC o 220V AC");
+      setErr("Selecciona el nivel de voltaje: 110V o 220V");
       return;
     }
     const qty = Number(quantity);
@@ -1107,7 +1328,7 @@ function ScreenModal({
   }
 
   return (
-    <Modal open={true} onClose={onClose}
+    <Modal mark="W30" open={true} onClose={onClose}
       title={editing === "new" ? "Nueva pantalla" : "Editar pantalla"}
       footer={
         <>
@@ -1162,14 +1383,14 @@ function ScreenModal({
                 onClick={() => setVoltage("110ac")}
                 className={`flex-1 px-2 py-1.5 ${voltage === "110ac" ? "bg-sky-600 text-white" : "bg-white text-zinc-600 hover:bg-zinc-50"}`}
               >
-                110V AC
+                110V
               </button>
               <button
                 type="button"
                 onClick={() => setVoltage("220ac")}
                 className={`flex-1 px-2 py-1.5 ${voltage === "220ac" ? "bg-sky-600 text-white" : "bg-white text-zinc-600 hover:bg-zinc-50"}`}
               >
-                220V AC
+                220V
               </button>
             </div>
           </Field>
@@ -1198,12 +1419,6 @@ function ScreenModal({
 }
 
 /* ── Controladores por pantalla (equipos de la cotización) ── */
-
-const OWNERSHIP_LABEL: Record<string, string> = {
-  propio: "Propio",
-  cliente: "Del cliente",
-  tercero: "De terceros",
-};
 
 function ScreenControllersCell({ screen, onEdit }: { screen: ProjectScreen; onEdit: () => void }) {
   return (
@@ -1291,7 +1506,7 @@ function ScreenControllersModal({
   }
 
   return (
-    <Modal
+    <Modal mark="W31"
       open={true}
       onClose={onClose}
       title={`Controladores — ${screen.screen_type}`}
@@ -1313,7 +1528,7 @@ function ScreenControllersModal({
             <option value="">Selecciona un controlador…</option>
             {activeControllers.map((c) => (
               <option key={c.id} value={c.id} disabled={addedIds.has(c.id)}>
-                {c.brand ? `${c.brand} ` : ""}{c.name} · {OWNERSHIP_LABEL[c.ownership] ?? c.ownership}
+                {c.brand ? `${c.brand} ` : ""}{c.name}
               </option>
             ))}
           </select>
@@ -1535,7 +1750,7 @@ function EditProjectName({ projectId, currentName, onSaved }: { projectId: strin
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>
       </button>
       {open && (
-        <Modal open={true} onClose={() => setOpen(false)} title="Editar nombre del proyecto"
+        <Modal mark="W32" open={true} onClose={() => setOpen(false)} title="Editar nombre del proyecto"
           footer={
             <>
               <SecondaryButton onClick={() => setOpen(false)}>Cancelar</SecondaryButton>
@@ -1613,7 +1828,7 @@ function DeletionRequest({ detail, onSaved }: { detail: ProjectDetail; onSaved: 
         Solicitar eliminación
       </button>
       {open && (
-        <Modal
+        <Modal mark="W33"
           open={true}
           onClose={() => setOpen(false)}
           title="Solicitar eliminación del proyecto"

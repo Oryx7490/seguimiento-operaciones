@@ -83,7 +83,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         [id]
       ),
       pool.query(
-        `SELECT tc.repair_note, tc.billing_authorized, tc.billable, tc.warranty, tc.client_resolved,
+        `SELECT tc.repair_note, tc.equipment_serial_number, tc.billing_authorized, tc.billable, tc.warranty, tc.client_resolved,
                 tc.charge_amount, tc.charge_description, tc.authorized_by, tc.authorized_at,
                 tc.invoice_generated, tc.invoice_id, tc.notes
          FROM ticket_closures tc WHERE tc.ticket_id = $1`,
@@ -134,6 +134,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     close_ticket?: boolean;
     closure?: {
       repair_note?: string;
+      equipment_serial_number?: string | null;
       billing_authorized?: boolean;
       billable?: boolean;
       warranty?: boolean;
@@ -239,6 +240,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     // Handle closure upsert
     if (body.closure) {
       const cl = body.closure;
+      if (cl.equipment_serial_number !== undefined && cl.equipment_serial_number !== null && cl.equipment_serial_number.trim().length > 200) {
+        await client.query("ROLLBACK");
+        return jsonError("El número de serie no puede exceder 200 caracteres");
+      }
       const clColumns: string[] = [];
       const clUpdates: string[] = [];
       const clVals: unknown[] = [id];
@@ -248,6 +253,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         clVals.push(val);
       };
       if (cl.repair_note !== undefined) clPush("repair_note", cl.repair_note ?? null);
+      if (cl.equipment_serial_number !== undefined) clPush("equipment_serial_number", cl.equipment_serial_number?.trim() || null);
       if (cl.billing_authorized !== undefined) clPush("billing_authorized", cl.billing_authorized);
       if (cl.billable !== undefined) clPush("billable", cl.billable);
       if (cl.warranty !== undefined) clPush("warranty", cl.warranty);

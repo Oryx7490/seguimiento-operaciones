@@ -208,7 +208,7 @@ function ClientModal({
   }
 
   return (
-    <Modal
+    <Modal mark="W5"
       open={true}
       onClose={onClose}
       title={client ? "Editar cliente" : "Nuevo cliente"}
@@ -274,7 +274,7 @@ function ClientDetailModal({ clientId, onClose }: { clientId: string; onClose: (
   }
 
   return (
-    <Modal
+    <Modal mark="W6"
       open={true}
       onClose={onClose}
       title={data ? `Contactos y notas · ${data.client.name}` : "Contactos y notas"}

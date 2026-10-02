@@ -4,11 +4,11 @@ import { useState } from "react";
 import { fetchJson, useResource } from "@/app/lib/client";
 import { formatDate } from "@/app/lib/format";
 import { Field, PrimaryButton, SecondaryButton, TextInput } from "@/app/components/ui";
+import ProjectClosureFiles from "@/app/components/project-closure-files";
 import type { ClosureController, ClosureModuleLot, Controller } from "@/app/lib/types";
 
 interface Closure {
   installation_done: boolean;
-  mandatory_activities_completed: boolean;
   hours_justified: boolean;
   delivery_sheet_attachment_id: string | null;
   receiver_name: string | null;
@@ -29,6 +29,7 @@ interface Att {
 interface ScreenRef {
   id: string;
   screen_type: string;
+  cancelled?: boolean;
 }
 
 interface Row {
@@ -50,7 +51,6 @@ interface LotRow {
 
 const REQUIREMENTS: Array<{ key: keyof Closure; label: string }> = [
   { key: "installation_done", label: "Instalación realizada" },
-  { key: "mandatory_activities_completed", label: "Actividades obligatorias completadas" },
   { key: "hours_justified", label: "Horas justificadas" },
 ];
 
@@ -89,6 +89,7 @@ export default function ProjectClosure({
   screens,
   closureControllers,
   closureModuleLots,
+  defaultOpen,
   onChanged,
 }: {
   projectId: string;
@@ -98,11 +99,11 @@ export default function ProjectClosure({
   screens: ScreenRef[];
   closureControllers: ClosureController[];
   closureModuleLots: ClosureModuleLot[];
+  defaultOpen: boolean;
   onChanged: () => void;
 }) {
   const [c, setC] = useState<Closure>({
     installation_done: closure?.installation_done ?? false,
-    mandatory_activities_completed: closure?.mandatory_activities_completed ?? false,
     hours_justified: closure?.hours_justified ?? false,
     delivery_sheet_attachment_id: closure?.delivery_sheet_attachment_id ?? null,
     receiver_name: closure?.receiver_name ?? "",
@@ -119,12 +120,60 @@ export default function ProjectClosure({
   const [closing, setClosing] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState<string | null>(null);
+  const [open, setOpen] = useState(defaultOpen);
 
   const catalog = useResource<{ controllers: Controller[] }>("/api/controllers");
   const controllers = catalog.data?.controllers ?? [];
-  const screenName = (id: string) => screens.find((s) => s.id === id)?.screen_type ?? "General";
-
   const isClosed = status === "closed";
+  const activeScreens = screens.filter((s) => !s.cancelled);
+  const screenName = (id: string) => screens.find((s) => s.id === id)?.screen_type ?? "General";
+  const screensWithLots = new Set(
+    lots
+      .filter((l) => l.screen_id && l.manufacturer_brand.trim() && l.lot_number.trim())
+      .map((l) => l.screen_id),
+  ).size;
+  const closureChecks = [
+    c.installation_done,
+    c.hours_justified,
+    Boolean(c.delivery_sheet_attachment_id),
+    Boolean(c.receiver_name),
+    Boolean(c.reception_date),
+    activeScreens.length > 0 && screensWithLots >= activeScreens.length,
+  ];
+  const closureSummary = isClosed
+    ? "Cerrado"
+    : `${closureChecks.filter(Boolean).length}/${closureChecks.length} requisitos completos`;
+
+  async function confirmarDePlaneacion() {
+    setErr(null);
+    try {
+      const res = await fetchJson<{ controllers: { screen_id: string; controller_id: string; quantity: number }[] }>(
+        `/api/projects/${projectId}/screen-controllers`
+      );
+      const planned = res.controllers ?? [];
+      if (planned.length === 0) {
+        setErr("No hay equipos en la planeación para este proyecto.");
+        return;
+      }
+      setRows((prev) => {
+        const existing = new Set(prev.map((r) => `${r.screen_id}|${r.controller_id}`));
+        const add = planned
+          .filter((p) => !existing.has(`${p.screen_id}|${p.controller_id}`))
+          .map((p) => ({
+            key: newKey(),
+            screen_id: p.screen_id,
+            controller_id: p.controller_id,
+            controller_name: controllers.find((c) => c.id === p.controller_id)?.name ?? "",
+            quantity: String(p.quantity),
+            serial_numbers: "",
+          }));
+        return [...prev, ...add];
+      });
+      setOk("Equipos de planeación confirmados.");
+    } catch (e) {
+      setErr(String(e));
+    }
+  }
 
   function addRow() {
     setRows([
@@ -144,7 +193,7 @@ export default function ProjectClosure({
   function addLotRow() {
     setLots([
       ...lots,
-      { key: newKey(), screen_id: "", manufacturer_brand: "", lot_number: "", module_count: "" },
+      { key: newKey(), screen_id: activeScreens[0]?.id ?? "", manufacturer_brand: "", lot_number: "", module_count: "" },
     ]);
   }
 
@@ -215,6 +264,10 @@ export default function ProjectClosure({
       if (!brand && !lotNo && !l.screen_id && !countStr) continue; // fila vacía se ignora
       if (!brand) return { __error: "Cada lote de módulos requiere la marca del fabricante" };
       if (!lotNo) return { __error: `La marca "${brand}" requiere el número de lote` };
+      if (!l.screen_id) return { __error: `El lote "${lotNo}" debe asociarse a una pantalla` };
+      if (!activeScreens.some((s) => s.id === l.screen_id)) {
+        return { __error: `La pantalla seleccionada para el lote "${lotNo}" no está activa` };
+      }
       let moduleCount: number | null = null;
       if (countStr) {
         const n = Number(countStr);
@@ -224,7 +277,7 @@ export default function ProjectClosure({
         moduleCount = n;
       }
       out.push({
-        screen_id: l.screen_id || null,
+        screen_id: l.screen_id,
         manufacturer_brand: brand,
         lot_number: lotNo,
         module_count: moduleCount,
@@ -255,13 +308,8 @@ export default function ProjectClosure({
         body: JSON.stringify({
           closure: {
             installation_done: c.installation_done,
-            mandatory_activities_completed: c.mandatory_activities_completed,
             hours_justified: c.hours_justified,
-            delivery_sheet_attachment_id:
-              c.delivery_sheet_attachment_id ??
-              attachments.find((a) => a.attachment_type === "delivery_sheet")?.id ??
-              attachments[0]?.id ??
-              null,
+            delivery_sheet_attachment_id: c.delivery_sheet_attachment_id,
             receiver_name: c.receiver_name,
             reception_date: c.reception_date,
             finiquito_attachment_id: c.finiquito_attachment_id,
@@ -304,12 +352,16 @@ export default function ProjectClosure({
 
   return (
     <section className="rounded-lg border border-zinc-200 bg-white shadow-sm">
-      <header className="flex items-center justify-between gap-2 border-b border-zinc-100 px-4 py-3">
-        <h2 className="text-sm font-semibold text-zinc-800">Cierre del proyecto</h2>
+      <header className="flex items-center justify-between gap-2 px-4 py-3">
+        <button type="button" onClick={() => setOpen((value) => !value)} className="flex items-center gap-2 text-left" aria-expanded={open}>
+          <span className="inline-flex h-5 w-5 items-center justify-center rounded border border-zinc-300 text-sm leading-none text-zinc-500">{open ? "−" : "+"}</span>
+          <h2 className="text-sm font-semibold text-zinc-800">Cierre del proyecto</h2>
+          <span className="text-xs text-zinc-400">{closureSummary}</span>
+        </button>
         {isClosed && <span className="text-[11px] font-semibold text-emerald-600">Proyecto cerrado</span>}
       </header>
 
-      <div className="space-y-4 p-4">
+      {open && <div className="space-y-4 border-t border-zinc-100 p-4">
         {isClosed ? (
           <div className="space-y-2 text-sm text-zinc-600">
             <p>
@@ -372,30 +424,10 @@ export default function ProjectClosure({
                   </label>
                 </li>
               ))}
-              <li className="flex items-center gap-3 text-sm text-zinc-700">
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(c.delivery_sheet_attachment_id)}
-                    onChange={(e) =>
-                      setC({
-                        ...c,
-                        delivery_sheet_attachment_id: e.target.checked ? (
-                          attachments.find((a) => a.attachment_type === "delivery_sheet")?.id ??
-                          attachments[0]?.id ??
-                          null
-                        ) : null,
-                      })
-                    }
-                    className="rounded border-zinc-300"
-                  />
-                  Hoja de entrega firmada adjunta
-                </label>
-              </li>
             </ul>
 
             <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="Hoja de entrega (adjunto)" hint="Súbela en la sección Adjuntos">
+              <Field label="Hoja de entrega firmada" hint="Puedes adjuntarla en Archivos del cierre, abajo.">
                 <select
                   value={c.delivery_sheet_attachment_id ?? ""}
                   onChange={(e) =>
@@ -403,14 +435,10 @@ export default function ProjectClosure({
                   }
                   className="w-full rounded-md border border-zinc-300 bg-white px-2.5 py-1.5 text-sm text-zinc-800"
                 >
-                  <option value="">Selecciona un adjunto…</option>
-                  {(attachments.length > 0
-                    ? attachments
-                    : []
-                  ).map((a) => (
+                  <option value="">Selecciona la hoja firmada…</option>
+                  {attachments.filter((a) => a.attachment_type === "delivery_sheet").map((a) => (
                     <option key={a.id} value={a.id}>
                       {a.file_name}
-                      {a.attachment_type == null ? "" : ""}
                     </option>
                   ))}
                 </select>
@@ -428,10 +456,19 @@ export default function ProjectClosure({
 
             {/* Equipos definitivos utilizados (con números de serie) */}
             <div className="border-t border-zinc-100 pt-3">
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                  Equipos definitivos instalados
-                </p>
+<div className="flex items-center justify-between gap-2 flex-wrap">
+              <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
+                Equipos definitivos instalados
+              </p>
+              <div className="flex gap-1.5">
+                <button
+                  type="button"
+                  onClick={confirmarDePlaneacion}
+                  className="rounded border border-zinc-300 bg-amber-50 px-2 py-1 text-xs text-amber-800 hover:bg-amber-100"
+                  title="Copia los controladores de la cotización (planeación) a equipos definitivos"
+                >
+                  Confirmar equipos de planeación
+                </button>
                 <button
                   type="button"
                   onClick={addRow}
@@ -440,6 +477,7 @@ export default function ProjectClosure({
                   Agregar equipo
                 </button>
               </div>
+            </div>
               <p className="mt-1 text-[11px] text-zinc-400">
                 Registra los controladores realmente utilizados y sus números de serie. Pueden diferir de la cotización.
               </p>
@@ -541,11 +579,11 @@ export default function ProjectClosure({
               )}
             </div>
 
-            {/* Lotes de módulos y marca del fabricante (por pantalla o general) */}
+            {/* Lotes de módulos y marca del fabricante por pantalla */}
             <div className="border-t border-zinc-100 pt-3">
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
-                  Lotes de módulos y marca del fabricante
+                  Lotes de módulos por pantalla
                 </p>
                 <button
                   type="button"
@@ -556,7 +594,14 @@ export default function ProjectClosure({
                 </button>
               </div>
               <p className="mt-1 text-[11px] text-zinc-400">
-                Registra los lotes de módulos LED usados y su fabricante, por pantalla (o &ldquo;General&rdquo;). Se comparan contra el inventario inicial.
+                Cada pantalla activa debe tener al menos un lote de módulos registrado para poder cerrar el proyecto.
+              </p>
+              <p className="mt-1 text-[11px] text-zinc-500">
+                Pantallas con lote: {new Set(
+                  lots
+                    .filter((l) => l.screen_id && l.manufacturer_brand.trim() && l.lot_number.trim())
+                    .map((l) => l.screen_id)
+                ).size}/{activeScreens.length}
               </p>
 
               {lots.length === 0 ? (
@@ -582,8 +627,7 @@ export default function ProjectClosure({
                               onChange={(e) => updateLotRow(l.key, { screen_id: e.target.value })}
                               className="rounded border border-zinc-300 bg-white px-1.5 py-1 text-xs text-zinc-800"
                             >
-                              <option value="">General</option>
-                              {screens.map((s) => (
+                              {activeScreens.map((s) => (
                                 <option key={s.id} value={s.id}>{s.screen_type}</option>
                               ))}
                             </select>
@@ -644,7 +688,14 @@ export default function ProjectClosure({
             </div>
           </>
         )}
-      </div>
+        <ProjectClosureFiles
+          projectId={projectId}
+          attachments={attachments}
+          selectedDeliverySheetId={c.delivery_sheet_attachment_id}
+          onDeliverySheetChange={(id) => setC((current) => ({ ...current, delivery_sheet_attachment_id: id }))}
+          onChanged={onChanged}
+        />
+      </div>}
     </section>
   );
 }

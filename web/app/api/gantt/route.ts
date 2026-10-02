@@ -19,7 +19,8 @@ export async function GET() {
   const { rows: phases } = await pool.query(
     `SELECT pp.id, pp.project_id, pp.name, pc.kind, pp.status,
             pp.planned_start_date, pp.planned_end_date,
-            pp.actual_start_date, pp.actual_end_date
+            pp.actual_start_date, pp.actual_end_date,
+            pp.blocked_reason, pp.next_action, pp.next_action_date
        FROM project_phases pp
        LEFT JOIN phase_catalog pc ON pc.id = pp.catalog_phase_id
       WHERE pp.status <> 'not_applicable'

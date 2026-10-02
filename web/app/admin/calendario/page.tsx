@@ -211,7 +211,7 @@ function DayModal({
   };
 
   return (
-    <Modal
+    <Modal mark="W3"
       open={true}
       onClose={onClose}
       title={day ? "Editar día no laborable" : "Nuevo día no laborable"}

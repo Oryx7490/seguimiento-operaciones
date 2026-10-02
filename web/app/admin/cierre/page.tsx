@@ -21,9 +21,9 @@ interface PipeProject {
   client_name: string | null;
   coordinator_name: string | null;
   installation_done: boolean;
-  mandatory_activities_completed: boolean;
   hours_justified: boolean;
   delivery_sheet_present: boolean;
+  module_lots_by_screen: boolean;
   receiver_name: string | null;
   reception_date: string | null;
   closed_at: string | null;
@@ -61,7 +61,7 @@ interface PipeTicket {
 
 const TECH_ITEMS: Array<{ key: keyof PipeProject; label: string }> = [
   { key: "installation_done", label: "Instalación realizada" },
-  { key: "mandatory_activities_completed", label: "Actividades obligatorias" },
+  { key: "module_lots_by_screen", label: "Lotes colocados por pantalla" },
   { key: "hours_justified", label: "Horas justificadas" },
   { key: "delivery_sheet_present", label: "Hoja de entrega" },
 ];

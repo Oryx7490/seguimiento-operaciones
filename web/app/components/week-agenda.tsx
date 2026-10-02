@@ -329,6 +329,7 @@ export default function WeekAgenda() {
           <div className="flex min-w-0 flex-1 items-center gap-1">
             <div className="min-w-0 flex-1">
               <SearchableSelect
+                mark="N5"
                 value={techId}
                 onChange={setTechId}
                 placeholder="Técnicos"
@@ -361,6 +362,7 @@ export default function WeekAgenda() {
           </div>
           <div className="min-w-0 flex-1">
             <SearchableSelect
+              mark="N6"
               value={clientId}
               onChange={setClientId}
               placeholder="Clientes"
@@ -369,14 +371,10 @@ export default function WeekAgenda() {
           </div>
         </div>
 
-        <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
           <StatCard cls="border-rose-200 bg-rose-50" textCls="text-rose-600" valueCls="text-rose-700" label="Actividades vencidas" value={overdueCount} />
           <StatCard cls="border-violet-200 bg-violet-50" textCls="text-violet-600" valueCls="text-violet-700" label="Tickets sin asignar" value={unassignedTickets} />
           <StatCard cls="border-amber-200 bg-amber-50" textCls="text-amber-600" valueCls="text-amber-700" label="Proyectos bloqueados" value={blockedProjects} />
-          <div className="rounded-md border border-zinc-200 bg-white px-3 py-2">
-            <p className="text-xs text-zinc-500">Horas plan / real</p>
-            <p className="text-xl font-semibold text-zinc-800">{plannedTotal} / {workedTotal}</p>
-          </div>
         </div>
       </header>
 
@@ -510,7 +508,7 @@ export default function WeekAgenda() {
                         </span>
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium text-zinc-800">{tech.display_name}</p>
-                          <p className="text-[11px] text-zinc-500">{techActs.length} actividad{techActs.length === 1 ? "" : "es"} · {planned}h plan / {worked}h real</p>
+                          <p className="text-[11px] text-zinc-500">{techActs.length} actividad{techActs.length === 1 ? "" : "es"}</p>
                         </div>
                       </div>
                       <div className="flex min-h-[180px] flex-1 flex-col gap-1.5 p-2">
@@ -602,9 +600,7 @@ function ActivityCard({ activity, onClick, large, showTechs, variant, draggable,
   const code = activity.kind === "project" ? activity.projects[0]?.project_code
     : activity.kind === "ticket" ? activity.ticket_code
     : activity.internal_activity_type_name?.slice(0, 10);
-  const hours = activity.worked_hours > 0
-    ? `${activity.worked_hours}h / ${activity.planned_hours}h`
-    : `${activity.planned_hours}h`;
+  const hours = `${activity.planned_hours}h`;
   const overdue = activityEnd(activity) < isoDate(new Date()) && (activity.status === "planned" || activity.status === "in_progress");
   const multi = activity.end_date !== null && activity.end_date > activity.date;
   const dayMain = activity.kind === "project"
@@ -845,7 +841,7 @@ function ActivityDetailModal({ activity, technicians, onClose, onSaved }: {
   }
 
   return (
-    <Modal open={true} onClose={onClose} title={activity.description}
+    <Modal mark="W22" open={true} onClose={onClose} title={activity.description}
       footer={
         activity.status !== "cancelled" ? (
           <>
@@ -1051,7 +1047,7 @@ function NewActivityModal({ date, initialTechIds, technicians, onClose, onSaved 
   }
 
   return (
-    <Modal open={true} onClose={onClose} title="Nueva actividad" wide
+    <Modal mark="W23" open={true} onClose={onClose} title="Nueva actividad" wide
       footer={
         <>
           <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
@@ -1076,6 +1072,7 @@ function NewActivityModal({ date, initialTechIds, technicians, onClose, onSaved 
         {kind === "project" && (
           <Field label="Proyecto (en curso)">
             <SearchableSelect
+              mark="N7"
               value={projectId}
               onChange={setProjectId}
               placeholder="Buscar proyecto por código o nombre…"
@@ -1102,6 +1099,7 @@ function NewActivityModal({ date, initialTechIds, technicians, onClose, onSaved 
         {kind === "ticket" && (
           <Field label="Ticket">
             <SearchableSelect
+              mark="N8"
               value={ticketId}
               onChange={setTicketId}
               placeholder="Buscar ticket por código o título…"

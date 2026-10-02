@@ -367,7 +367,7 @@ function TemplateModal({
   }
 
   return (
-    <Modal
+    <Modal mark="W12"
       open
       onClose={onClose}
       wide

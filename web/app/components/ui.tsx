@@ -161,6 +161,14 @@ export function DangerButton({
 
 /* ── Modal ───────────────────────────────────────── */
 
+export function UiMark({ id }: { id: string }) {
+  return (
+    <span className="pointer-events-none select-none text-[10px] font-medium leading-none tracking-wide text-zinc-400">
+      {id}
+    </span>
+  );
+}
+
 export function Modal({
   open,
   onClose,
@@ -168,6 +176,7 @@ export function Modal({
   footer,
   children,
   wide = false,
+  mark,
 }: {
   open: boolean;
   onClose: () => void;
@@ -175,6 +184,7 @@ export function Modal({
   footer?: ReactNode;
   children: ReactNode;
   wide?: boolean;
+  mark?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
 
@@ -193,6 +203,11 @@ export function Modal({
       }}
       className={`fixed left-1/2 top-1/2 m-0 max-h-[90vh] w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border border-zinc-200 bg-white p-0 shadow-xl ${wide ? "max-w-2xl" : "max-w-md"} backdrop:backdrop-blur-sm`}
     >
+      {mark && (
+        <span className="pointer-events-none absolute left-2 top-1.5 z-10">
+          <UiMark id={mark} />
+        </span>
+      )}
       <form
         method="dialog"
         onSubmit={(e) => {
@@ -415,12 +430,18 @@ export function SearchableSelect({
   placeholder,
   options,
   topN = 5,
+  mark,
+  clearLabel = "— Todos —",
+  onCreate,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
   options: { value: string; label: string; frequency?: number }[];
   topN?: number;
+  mark?: string;
+  clearLabel?: string;
+  onCreate?: (query: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -445,6 +466,8 @@ export function SearchableSelect({
     : frecuentes.slice(0, topN);
 
   const shown = selected && !matches.some((o) => o.value === value) ? [selected, ...matches] : matches;
+  const trimmedQuery = query.trim();
+  const exactMatch = q.length > 0 && options.some((o) => normText(o.label) === q);
 
   return (
     <div ref={boxRef} className="relative">
@@ -463,6 +486,11 @@ export function SearchableSelect({
       </button>
       {open && (
         <div className="absolute inset-x-0 top-full z-20 mt-1 overflow-hidden rounded-md border border-zinc-200 bg-white shadow-lg">
+          {mark && (
+            <span className="absolute right-1.5 top-1 z-10">
+              <UiMark id={mark} />
+            </span>
+          )}
           <input
             autoFocus
             value={query}
@@ -482,7 +510,7 @@ export function SearchableSelect({
                 title="Quitar filtro"
                 className={`block w-full truncate px-2.5 py-1.5 text-left text-sm hover:bg-zinc-50 ${value === "" ? "bg-zinc-100 font-medium text-zinc-800" : "text-zinc-400"}`}
               >
-                {value === "" ? "— Todos —" : "Quitar filtro"}
+                {value === "" ? clearLabel : "Quitar filtro"}
               </button>
             )}
             {shown.length === 0 && q && (
@@ -499,7 +527,7 @@ export function SearchableSelect({
                 title="Quitar filtro"
                 className="block w-full truncate px-2.5 py-1.5 text-left text-sm text-zinc-400 hover:bg-zinc-50"
               >
-                — Todos —
+                {clearLabel}
               </button>
             )}
             {shown.map((o) => (
@@ -516,6 +544,19 @@ export function SearchableSelect({
                 {o.label}
               </button>
             ))}
+            {q && onCreate && !exactMatch && (
+              <button
+                type="button"
+                onClick={() => {
+                  onCreate(trimmedQuery);
+                  setOpen(false);
+                  setQuery("");
+                }}
+                className="block w-full border-t border-zinc-100 px-2.5 py-2 text-left text-sm font-medium text-sky-700 hover:bg-sky-50"
+              >
+                + Agregar &ldquo;{trimmedQuery}&rdquo;
+              </button>
+            )}
           </div>
         </div>
       )}

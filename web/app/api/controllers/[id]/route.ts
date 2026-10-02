@@ -2,13 +2,11 @@ import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
 import { jsonOk, jsonError, parseId } from "@/app/lib/api";
 
-const OWNERSHIP = ["propio", "cliente", "tercero"];
-
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!parseId(id)) return jsonError("id inválido");
 
-  let body: { name?: string; brand?: string | null; ownership?: string; active?: boolean };
+  let body: { name?: string; brand?: string | null; active?: boolean };
   try {
     body = await req.json();
   } catch {
@@ -28,10 +26,6 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     push("name", name);
   }
   if (body.brand !== undefined) push("brand", body.brand?.trim() || null);
-  if (body.ownership !== undefined) {
-    if (!OWNERSHIP.includes(body.ownership)) return jsonError("ownership inválido");
-    push("ownership", body.ownership);
-  }
   if (body.active !== undefined) {
     if (typeof body.active !== "boolean") return jsonError("active debe ser boolean");
     push("active", body.active);
@@ -40,8 +34,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   try {
     const { rows } = await pool.query(
-      `UPDATE controller_catalog SET ${setters.join(", ")}, updated_at = now()
-       WHERE id = $1 RETURNING id, name, brand, ownership, active, created_at`,
+       `UPDATE controller_catalog SET ${setters.join(", ")}, updated_at = now()
+       WHERE id = $1 RETURNING id, name, brand, active, created_at`,
       values
     );
     if (rows.length === 0) return jsonError("controlador no encontrado", 404);

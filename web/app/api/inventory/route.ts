@@ -1,7 +1,50 @@
 import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
 import { jsonError, jsonOk } from "@/app/lib/api";
-import { SELECT_INVENTORY, validateInventoryLot } from "@/app/lib/inventory";
+import { SELECT_INVENTORY, validateInventoryLot, type ValidLot } from "@/app/lib/inventory";
+
+const UPSERT = `INSERT INTO inventory_lots
+  (manufacturer_brand, lot_number, module_count, location, pitch_mm, module_type, led_type, observations,
+   ic_serial_1, ic_serial_2, ic_serial_3, status, expected_arrival, width_mm, height_mm)
+ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+ON CONFLICT (LOWER(manufacturer_brand), LOWER(lot_number)) DO UPDATE
+  SET module_count    = EXCLUDED.module_count,
+      location        = EXCLUDED.location,
+      pitch_mm        = EXCLUDED.pitch_mm,
+      module_type     = EXCLUDED.module_type,
+      led_type        = EXCLUDED.led_type,
+      observations    = EXCLUDED.observations,
+      ic_serial_1     = EXCLUDED.ic_serial_1,
+      ic_serial_2     = EXCLUDED.ic_serial_2,
+      ic_serial_3     = EXCLUDED.ic_serial_3,
+      status          = EXCLUDED.status,
+      expected_arrival = EXCLUDED.expected_arrival,
+      width_mm         = EXCLUDED.width_mm,
+      height_mm        = EXCLUDED.height_mm
+RETURNING id, manufacturer_brand, lot_number, module_count, location, pitch_mm, module_type,
+          led_type, observations, ic_serial_1, ic_serial_2, ic_serial_3, status, expected_arrival,
+          width_mm, height_mm,
+          created_at, updated_at`;
+
+function toParams(v: ValidLot) {
+  return [
+    v.brand,
+    v.lot,
+    v.count,
+    v.location,
+    v.pitch,
+    v.moduleType,
+    v.ledType,
+    v.observations,
+    v.ic1,
+    v.ic2,
+    v.ic3,
+    v.status,
+    v.eta,
+    v.widthMm,
+    v.heightMm,
+  ];
+}
 
 export async function GET() {
   try {
@@ -35,18 +78,9 @@ export async function POST(req: NextRequest) {
   }
   const v = validateInventoryLot(body as never);
   if (!v.ok) return jsonError(v.error);
-  const { brand, lot, count, location } = v.lot;
 
   try {
-    const { rows } = await pool.query(
-      `INSERT INTO inventory_lots (manufacturer_brand, lot_number, module_count, location)
-       VALUES ($1, $2, $3, $4)
-       ON CONFLICT (LOWER(manufacturer_brand), LOWER(lot_number)) DO UPDATE
-         SET module_count = EXCLUDED.module_count,
-             location     = EXCLUDED.location
-       RETURNING id, manufacturer_brand, lot_number, module_count, location, created_at, updated_at`,
-      [brand, lot, count, location]
-    );
+    const { rows } = await pool.query(UPSERT, toParams(v.lot));
     return jsonOk({ lot: rows[0] }, 201);
   } catch (err) {
     return jsonError("No se pudo guardar el lote", 500, String(err));

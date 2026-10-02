@@ -180,14 +180,14 @@ export default function MejorasPage() {
 
       {/* Create modal */}
       {showCreate && (
-        <Modal open={true} onClose={() => setShowCreate(false)} title="Nueva mejora">
+        <Modal mark="W10" open={true} onClose={() => setShowCreate(false)} title="Nueva mejora">
           <CreateForm onClose={() => setShowCreate(false)} />
         </Modal>
       )}
 
       {/* Edit modal */}
       {editing && (
-        <Modal open={true} onClose={() => setEditing(null)} title={`Editar: ${editing.title}`}>
+        <Modal mark="W11" open={true} onClose={() => setEditing(null)} title={`Editar: ${editing.title}`}>
           <EditForm improvement={editing} onClose={() => setEditing(null)} />
         </Modal>
       )}

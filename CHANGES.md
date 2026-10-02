@@ -1,5 +1,105 @@
 # Constraints & Decisions Log
 
+## 0.4.0 — Planeación, cierre V4 y operación centralizada (2026-10-02)
+
+> Versión estable. Consolida la planeación de inventario, el cierre V4, la documentación adjunta y la operación centralizada. El nav lee la versión desde `web/package.json` (v0.4.0).
+
+### Migraciones pendientes de commit (todas aplicadas en BD)
+- `039_inventory_lot_details.sql`: `pitch_mm`, `module_type`, `led_type`, `observations`, `ic_serial_1/2/3` en `inventory_lots`.
+- `041_inventory_lot_status.sql`: `status` (`available`/`ordered`/`in_transit`, default `available`).
+- `042_inventory_lot_eta.sql`: `expected_arrival` date (solo aplica a `ordered`/`in_transit`; se limpia al pasar a `available`).
+- `043_planning_notes.sql`: `notes` en `project_screens` y `screen_controllers` (comentarios opcionales de planeación).
+- `044_drop_controller_ownership.sql`: elimina `ownership` + CHECK de `controller_catalog`. La procedencia pasa a comentarios del proyecto. Sin backfill: valores previos `propio/cliente/tercero` se pierden (ver `CODE_REVIEW.md`).
+- `045_controller_installed.sql`: `installed` boolean default `false` en `screen_controllers`.
+- `046_inventory_module_dims.sql`: `width_mm`/`height_mm` default `320`/`160` + CHECK `> 0` en `inventory_lots`.
+- `047_screen_install_status.sql`: `installed`/`cancelled` default `false` + `cancel_reason` en `project_screens`.
+- `048_project_status_settings.sql`: tabla de etiqueta/color configurable por código fijo `project_status`, con seed para los diez estados.
+- `049_ticket_closure_equipment_serial.sql`: `equipment_serial_number` opcional en `ticket_closures`.
+
+### Planeación de inventario (nuevo: `/admin/planeacion` + `/api/planning`)
+- Tabla proyecto → pantallas con m², pitch, controladores considerados y comentarios por pantalla/controlador (PATCH `target: screen|controller`, `NOTES_MAX=2000`, guarda al salir del campo).
+- Resumen global (proyectos, pantallas, m²), demanda agregada por controlador (`quantity × pantallas`) y recuadro **Faltan por instalar** (ámbar/verde) con conteo de pantallas sin equipos asignados.
+- Checkbox **instalado** por controlador (línea tachada) con `PATCH { target: controller, installed }`; optimista con rollback en error.
+- Buscadores proyecto/cliente y equipo/controlador (nombre o marca); orden ▲▼ en Proyecto, Pantalla, Pitch, Metraje, Controladores y Comentario (primer clic = mayor a menor, vacíos al final). Ordenar Pantalla/Pitch/Metraje/Controladores/Comentario aplana filas (sin rowspan); ordenar Proyecto agrupa.
+- Filtro **Ocultar pantallas con equipos / Mostrar todas**. Conocido: falta `hideAssigned` en deps del `useMemo` (advertencia ESLint vigente).
+- Columna **Pitch** dedicada (`P2.5` o `—`).
+- Nav: **Inventario → Planeación** (hijo en `ADMIN_SUB` + tarjeta en dashboard admin).
+
+### Cierre: confirmar equipos de planeación (V4)
+- Nuevo `GET /api/projects/[id]/screen-controllers`: `{ screen_id, controller_id, quantity }` de la cotización.
+- Botón **Confirmar equipos de planeación** en `ProjectClosure` → copia faltantes a filas de cierre (sin duplicados por `screen_id|controller_id`), mensaje de éxito o error si no hay equipos.
+
+### Catálogo de controladores sin procedencia
+- API: `GET/POST/PATCH` de `/api/controllers` ya no aceptan ni devuelven `ownership`; `GET /api/projects/[id]` tampoco.
+- UI: sin columna **Procedencia** ni selector; copy actualizado (la procedencia va en comentarios del proyecto). Tipos `Controller`/`ScreenController` sin `ownership`; planeación sin columna de procedencia.
+
+### Inventario de módulos: m² por módulo
+- Columna **m² / módulo** (`ancho × alto / 1e6`, p. ej. 320×160 mm = `0.0512 m²`) + total del lote (`m² × cantidad`).
+- Formulario con **Ancho/ Alto (mm)** precargados `320`/`160`; validación `> 0`; CSV/import sin esos campos usa los defaults; `status` ausente normaliza a `available` (ver riesgo CSV en `CODE_REVIEW.md`).
+- APIs `POST/PATCH/import` persisten `pitch_mm`, `module_type`, `led_type`, `observations`, `ic_serial_1/2/3`, `status`, `expected_arrival`, `width_mm`, `height_mm`.
+
+### V4 pantallas: instalada / cancelada con motivo + menú ⋮
+- Rama `statusOnly` en `PATCH /api/projects/[id]`: actualiza `installed`/`cancelled`/`cancel_reason` sin exigir dimensiones.
+- Reglas: cancelar exige motivo no vacío y fuerza `installed=false`; instalar limpia `cancelled`/`cancel_reason`; reactivar limpia motivo.
+- Acciones pasa de botones a menú **⋮** fijo (Editar, Marcar/Quitar instalada, Cancelar instalación, Reactivar, Eliminar; cierra con clic fuera/`Esc`/scroll).
+- Fila cancelada con opacidad + texto tachado y motivo visible; instalada con insignia verde.
+- GET de proyecto expone `installed`, `cancelled`, `cancel_reason`; tipos `ProjectScreen` actualizados.
+
+### Gantt: editar etapa completa
+- `PhaseEditModal` edita descripción, estado (`planned`, `not_started`, `in_progress`, `completed`, `blocked`, `not_applicable`), fechas y bloqueo (motivo + próxima acción + fecha obligatorios si `blocked`); aviso si `not_applicable` oculta la barra.
+- `GET /api/gantt` ahora trae `blocked_reason`, `next_action`, `next_action_date`.
+
+### V34 Gantt de tickets abiertos
+- Nueva ruta `/gantt-tickets` y acceso principal **Gantt tickets** junto al Gantt de proyectos.
+- Nuevo `GET /api/ticket-gantt`: tickets con estado distinto de `closed`/`cancelled`, cliente, prioridad, próxima acción y actividades no canceladas con fechas, horas y técnicos.
+- Una fila por ticket; barras por actividad (`planned`, `in_progress`, `completed`) y marcador rosa de próxima acción. Tickets sin actividad/fecha permanecen visibles al final como **Sin programación**.
+- Buscadores por código/título/cliente, filtro por estado abierto, escalas semana/2 semanas/mes, navegación día anterior/Hoy/día siguiente, línea de hoy y links al detalle de ticket/Agenda/Lista.
+- Arrastre de actividades para cambiar `date`/`end_date` conservando duración; `pointercancel` revierte la previsualización sin guardar.
+- Asignación directa por ticket: técnicos activos mínimos desde `/api/ticket-gantt`, modal `W40` para asignar (`POST /api/assignments`) o quitar (`DELETE /api/assignments/[id]`), y nombres visibles en cada renglón.
+- Marcador de vista `V34`. API y página HTTP 200; TypeScript y ESLint sin errores en los archivos nuevos.
+
+### V3 estado inline + voltaje W30
+- Columna **Estado** en `/proyectos` abre modal `W41` con dropdown completo: Nuevo, Planeación, Esperando autorización, Esperando materiales, Armado, Listo para instalar, Instalación, Pendiente de documentos, Cerrado y Cancelado. Default de proyecto nuevo sigue `new` (etiqueta **Nuevo**).
+- Seleccionar **Cerrado** ejecuta `close_project` y valida el checklist de V4; **Cancelado** pide confirmación y usa `DELETE /api/projects/[id]` (cancelación lógica, desaparece de la lista activa). Proyectos ya cerrados muestran badge sin flecha.
+- W30 voltaje muestra **110V / 220V** (valores guardados siguen `110ac`/`220ac`).
+
+### V18 colores y etiquetas configurables de estados
+- Nueva pestaña **Estados de proyecto** en Catálogos: código interno solo lectura, nombre visible editable, selector de color + hexadecimal `#RRGGBB`, vista previa y guardado por estado.
+- Nuevo `GET/PATCH /api/catalogs/project-statuses`; valida código técnico, etiqueta no vacía y color hexadecimal.
+- V3 consume esta configuración para el texto, borde, fondo y color de la columna Estado, y también para las opciones del dropdown. Los códigos del enum y las reglas de negocio permanecen fijos.
+- Corrección de navegación: `/gantt-tickets` ya no activa simultáneamente el enlace `/gantt` (coincidencia exacta o subruta real).
+
+### W34 nuevo proyecto: buscador y alta rápida de clientes
+- Cliente cambia de `Select` a `SearchableSelect` (`N9`): muestra los cinco clientes más usados, busca por nombre y mantiene opción **Sin cliente**.
+- `SearchableSelect` incorpora props reutilizables `onCreate(query)` y `clearLabel`; si no existe coincidencia exacta muestra **+ Agregar “nombre”**.
+- Formulario rápido dentro de W34: nombre obligatorio, contacto/teléfono/correo opcionales; usa `POST /api/clients`, agrega el resultado a la lista y lo selecciona automáticamente sin perder los datos del proyecto.
+
+### V6 cierre de ticket: número de serie reparado
+- Campo **Número de serie del equipo o pantalla reparada** dentro de Tipo de servicio; opcional, máximo 200 caracteres y persistido tanto al guardar checklist como al cerrar.
+- `GET/PATCH /api/tickets/[id]` lee, valida y guarda `equipment_serial_number`; la vista cerrada lo muestra junto a la nota de reparación.
+
+### V31 proyección con proyecto primero
+- Tabla resumen pasa de tipo×horizonte a **proyecto×horizonte**: primera columna **Proyecto** (nombre, código, cliente) con rowspan por tipo de pantalla; detalle por horizonte también con nombre arriba y código debajo.
+
+### V1 agenda sin Horas plan/real
+- Fuera: tarjeta resumen, `· {planned}h plan / {worked}h real` por técnico y `worked/planned` en tarjetas (ahora solo `{planned_hours}h`). Quedan advertencias ESLint por variables no usadas (`plannedTotal`, `workedTotal`, `planned`, `worked`).
+
+### Marcas UI (V/W/N) + navegación
+- `UiMark` (gris `text-[10px]`, esquina superior, `pointer-events-none`) + `Modal mark` (W1–W39), `PageMark` (V1–V33 según ruta, en `layout.tsx`), menús N1 (nav), N2 (Administración), N3 (⋮ Gantt), N4 (columnas) y `SearchableSelect mark` (N5–N8 en agenda).
+- Nav con grupos hijos: **Catálogos → Controladores**, **Inventario → Planeación**; padre con estado activo tenue cuando el hijo está activo.
+
+### Archivo V29: borrado definitivo
+- `POST /api/admin/projects/[id]/delete` selecciona `status` real para el historial y borra primero actividades exclusivas del proyecto (evita trigger de huérfanas) antes del `DELETE`; error detallado en respuesta.
+
+### Misc
+- Dashboard admin: tarjeta **Planeación de inventario** y copy de Controladores actualizado.
+- `compose.yaml` sigue en `build && start`: tras editar hay que reconstruir con `docker compose up -d --force-recreate web`.
+
+### Zona horaria del sistema
+- Error detectado: el host Linux está en `Etc/UTC`; por eso ejecutar `date` reportó 1 de octubre aunque en CDMX todavía era 30 de septiembre.
+- Aplicación verificada: `web` y `worker` reciben `TZ`/`DEFAULT_TIMEZONE=America/Mexico_City`; Node Intl muestra CST (UTC-6). PostgreSQL usa `America/Mexico_City` y `now()` coincide con CDMX.
+- El cambio del host requiere autenticación administrativa interactiva y quedó bloqueado desde el agente (`timedatectl: Access denied`). Comando pendiente: `sudo timedatectl set-timezone America/Mexico_City`.
+
 ## 0.3.1 — Gantt: menú por proyecto, enfoque de un proyecto y fecha editable de actividad (2026-09-26)
 
 ### Menú contextual por proyecto en el Gantt

@@ -16,11 +16,13 @@ export default function CommentSection({
   kind,
   entityId,
   comments,
+  defaultOpen = true,
   onSaved,
 }: {
   kind: "project" | "ticket" | "client";
   entityId: string;
   comments: Comment[];
+  defaultOpen?: boolean;
   onSaved: () => void;
 }) {
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
@@ -29,6 +31,7 @@ export default function CommentSection({
   const [err, setErr] = useState<string | null>(null);
   const [editing, setEditing] = useState<Comment | null>(null);
   const [editBody, setEditBody] = useState("");
+  const [open, setOpen] = useState(defaultOpen);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,9 +82,16 @@ export default function CommentSection({
   }
 
   return (
-    <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
-      <h2 className="text-sm font-semibold text-zinc-800">Comentarios</h2>
+    <section className="rounded-lg border border-zinc-200 bg-white shadow-sm">
+      <header className="px-4 py-3">
+        <button type="button" onClick={() => setOpen((value) => !value)} className="flex items-center gap-2 text-left" aria-expanded={open}>
+          <span className="inline-flex h-5 w-5 items-center justify-center rounded border border-zinc-300 text-sm leading-none text-zinc-500">{open ? "−" : "+"}</span>
+          <h2 className="text-sm font-semibold text-zinc-800">Comentarios</h2>
+          <span className="text-xs text-zinc-400">{comments.length} {comments.length === 1 ? "comentario" : "comentarios"}</span>
+        </button>
+      </header>
 
+      {open && <div className="space-y-3 border-t border-zinc-100 p-4">
       {comments.length === 0 ? (
         <p className="mt-3 text-sm text-zinc-400">Sin comentarios.</p>
       ) : (
@@ -127,7 +137,7 @@ export default function CommentSection({
       </div>
 
       {editing && (
-        <Modal
+        <Modal mark="W16"
           open={true}
           onClose={() => setEditing(null)}
           title="Editar comentario"
@@ -145,6 +155,7 @@ export default function CommentSection({
           </Field>
         </Modal>
       )}
+      </div>}
     </section>
   );
 }

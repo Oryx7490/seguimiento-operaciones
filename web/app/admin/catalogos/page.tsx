@@ -15,18 +15,28 @@ import {
 } from "@/app/components/ui";
 import type { CatalogItem, CatalogsResponse } from "@/app/lib/types";
 
-type CatalogKey = "priorities" | "phases" | "internal-activity-types" | "channels";
+type CatalogKey = "priorities" | "phases" | "internal-activity-types" | "channels" | "project-statuses";
+
+interface ProjectStatusSetting {
+  status: string;
+  label: string;
+  color: string;
+  sort_order: number;
+  updated_at: string;
+}
 
 const TABS: { key: CatalogKey; label: string }[] = [
   { key: "priorities", label: "Prioridades" },
   { key: "phases", label: "Fases" },
   { key: "internal-activity-types", label: "Actividades internas" },
   { key: "channels", label: "Canales" },
+  { key: "project-statuses", label: "Estados de proyecto" },
 ];
 
 export default function CatalogsPage() {
   const [tab, setTab] = useState<CatalogKey>("priorities");
   const { data, error, reload } = useResource<CatalogsResponse>("/api/catalogs");
+  const statusResource = useResource<{ project_statuses: ProjectStatusSetting[] }>("/api/catalogs/project-statuses");
   const [editing, setEditing] = useState<{ item: CatalogItem | null; mode: "edit" | "toggle" } | null>(null);
 
   const items: CatalogItem[] =
@@ -36,18 +46,25 @@ export default function CatalogsPage() {
         ? (data?.phases ?? [])
         : tab === "channels"
           ? (data?.ticket_channels ?? [])
-          : (data?.internal_activity_types ?? []);
-  const loading = !data && !error;
+          : tab === "project-statuses"
+            ? []
+            : (data?.internal_activity_types ?? []);
+  const loading = tab === "project-statuses"
+    ? !statusResource.data && !statusResource.error
+    : !data && !error;
 
   return (
     <div className="p-6">
       <h1 className="text-xl font-semibold text-zinc-900">Catálogos</h1>
       <p className="mt-1 text-sm text-zinc-500">
-        Opciones de prioridades, fases de proyecto, actividades internas y canales de reporte.
+        Opciones de prioridades, fases, actividades internas, canales y presentación de estados.
       </p>
 
       {error && (
         <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
+      )}
+      {tab === "project-statuses" && statusResource.error && (
+        <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{statusResource.error}</div>
       )}
 
       <div className="mt-6">
@@ -68,7 +85,14 @@ export default function CatalogsPage() {
         </div>
 
         <div className="mt-4">
-          {loading ? (
+          {tab === "project-statuses" ? (
+            loading ? <Spinner /> : (
+              <ProjectStatusesPanel
+                statuses={statusResource.data?.project_statuses ?? []}
+                onSaved={statusResource.reload}
+              />
+            )
+          ) : loading ? (
             <Spinner />
           ) : items.length === 0 ? (
             <EmptyState title="Este catálogo está vacío" />
@@ -124,11 +148,13 @@ export default function CatalogsPage() {
         </div>
       </div>
 
-      <div className="mt-4">
-        <PrimaryButton onClick={() => setEditing({ item: null, mode: "edit" })}>
-          Agregar {tab === "priorities" ? "prioridad" : tab === "phases" ? "fase" : tab === "channels" ? "canal" : "tipo de actividad"}
-        </PrimaryButton>
-      </div>
+      {tab !== "project-statuses" && (
+        <div className="mt-4">
+          <PrimaryButton onClick={() => setEditing({ item: null, mode: "edit" })}>
+            Agregar {tab === "priorities" ? "prioridad" : tab === "phases" ? "fase" : tab === "channels" ? "canal" : "tipo de actividad"}
+          </PrimaryButton>
+        </div>
+      )}
 
       {editing && (
         <ItemModal
@@ -141,6 +167,97 @@ export default function CatalogsPage() {
         />
       )}
     </div>
+  );
+}
+
+function ProjectStatusesPanel({ statuses, onSaved }: { statuses: ProjectStatusSetting[]; onSaved: () => void }) {
+  if (statuses.length === 0) return <EmptyState title="No hay estados configurados" />;
+  return (
+    <div className="overflow-x-auto rounded-lg border border-zinc-200 bg-white shadow-sm">
+      <table className="min-w-full text-sm">
+        <thead className="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500">
+          <tr>
+            <th className="px-4 py-3 text-left">Código interno</th>
+            <th className="px-4 py-3 text-left">Nombre visible</th>
+            <th className="px-4 py-3 text-left">Color</th>
+            <th className="px-4 py-3 text-left">Vista previa</th>
+            <th className="px-4 py-3 text-right">Acción</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-zinc-100">
+          {statuses.map((status) => (
+            <ProjectStatusRow key={status.status} status={status} onSaved={onSaved} />
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function ProjectStatusRow({ status, onSaved }: { status: ProjectStatusSetting; onSaved: () => void }) {
+  const [label, setLabel] = useState(status.label);
+  const [color, setColor] = useState(status.color);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const validColor = /^#[0-9A-F]{6}$/i.test(color);
+  const previewColor = validColor ? color : status.color;
+
+  async function save() {
+    setSaving(true);
+    setMessage(null);
+    try {
+      await fetchJson("/api/catalogs/project-statuses", {
+        method: "PATCH",
+        body: JSON.stringify({ status: status.status, label, color }),
+      });
+      setMessage("Guardado");
+      onSaved();
+    } catch (err) {
+      setMessage(String(err));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <tr className="hover:bg-zinc-50">
+      <td className="px-4 py-3 font-mono text-xs text-zinc-500">{status.status}</td>
+      <td className="px-4 py-3">
+        <TextInput value={label} onChange={setLabel} />
+      </td>
+      <td className="px-4 py-3">
+        <div className="flex items-center gap-2">
+          <input
+            type="color"
+            value={previewColor}
+            onChange={(e) => setColor(e.target.value.toUpperCase())}
+            className="h-8 w-10 cursor-pointer rounded border border-zinc-300 bg-white p-0.5"
+            aria-label={`Color de ${label}`}
+          />
+          <input
+            value={color}
+            onChange={(e) => setColor(e.target.value.toUpperCase())}
+            maxLength={7}
+            className="w-24 rounded-md border border-zinc-300 bg-white px-2 py-1.5 font-mono text-xs text-zinc-700"
+          />
+        </div>
+      </td>
+      <td className="px-4 py-3">
+        <span
+          className="inline-flex rounded-full border px-2.5 py-1 text-xs font-medium"
+          style={{ color: previewColor, borderColor: previewColor, backgroundColor: `${previewColor}18` }}
+        >
+          {label || status.status}
+        </span>
+      </td>
+      <td className="px-4 py-3 text-right">
+        <SecondaryButton onClick={() => void save()} disabled={saving || !label.trim() || !validColor} className="px-2 py-1 text-xs">
+          {saving ? "Guardando…" : "Guardar"}
+        </SecondaryButton>
+        {message && <p className={`mt-1 text-[10px] ${message === "Guardado" ? "text-emerald-600" : "text-red-600"}`}>{message}</p>}
+        {!validColor && <p className="mt-1 text-[10px] text-red-600">Usa formato #RRGGBB</p>}
+      </td>
+    </tr>
   );
 }
 
@@ -217,7 +334,7 @@ function ItemModal({
   }
 
   return (
-    <Modal
+    <Modal mark="W4"
       open={true}
       onClose={onClose}
       title={isNew ? "Agregar elemento" : mode === "edit" ? "Editar" : "Cambiar estado"}

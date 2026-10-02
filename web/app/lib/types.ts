@@ -351,6 +351,7 @@ export interface TicketDetail {
 
 export interface Closure {
   repair_note: string | null;
+  equipment_serial_number: string | null;
   billing_authorized: boolean | null;
   billable: boolean | null;
   warranty: boolean | null;
@@ -379,7 +380,6 @@ export interface Controller {
   id: string;
   name: string;
   brand: string | null;
-  ownership: "propio" | "cliente" | "tercero";
   active: boolean;
   created_at: string;
 }
@@ -389,7 +389,6 @@ export interface ScreenController {
   controller_id: string;
   name: string;
   brand: string | null;
-  ownership: string;
   quantity: number;
 }
 
@@ -414,6 +413,9 @@ export interface ProjectScreen {
   area_m2: number | null;
   pitch_mm: number | null;
   voltage: string | null;
+  installed: boolean;
+  cancelled: boolean;
+  cancel_reason: string | null;
   m2: number;
   created_at: string;
   attachment: ProjectAttachment[];
@@ -434,6 +436,17 @@ export interface InventoryLot {
   lot_number: string;
   module_count: number;
   location: string | null;
+  pitch_mm: number | null;
+  module_type: string | null;
+  led_type: string | null;
+  observations: string | null;
+  ic_serial_1: string | null;
+  ic_serial_2: string | null;
+  ic_serial_3: string | null;
+  status: "available" | "ordered" | "in_transit";
+  expected_arrival: string | null;
+  width_mm: number;
+  height_mm: number;
   created_at: string;
   updated_at: string;
 }

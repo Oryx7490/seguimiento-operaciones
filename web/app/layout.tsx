@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import AppNav from "./components/app-nav";
+import PageMark from "./components/page-mark";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -27,7 +28,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       <body className="min-h-full bg-zinc-100 text-zinc-900">
         <div className="flex min-h-screen">
           <AppNav />
-          <main className="flex-1 overflow-y-auto">{children}</main>
+          <main className="relative flex-1 overflow-y-auto">
+            <PageMark />
+            {children}
+          </main>
         </div>
       </body>
     </html>

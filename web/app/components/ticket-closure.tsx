@@ -5,29 +5,20 @@ import { fetchJson } from "@/app/lib/client";
 import { Field, PrimaryButton, SecondaryButton, TextInput, Textarea } from "@/app/components/ui";
 import type { Closure } from "@/app/lib/types";
 
-interface Att {
-  id: string;
-  file_name: string;
-  attachment_type?: string;
-}
-
 export default function TicketClosure({
   ticketId,
   status,
-  ticketType,
   closure,
-  attachments,
   onChanged,
 }: {
   ticketId: string;
   status: string;
-  ticketType: "external" | "internal";
   closure: Closure | null;
-  attachments: Att[];
   onChanged: () => void;
 }) {
   const [c, setC] = useState<Closure>({
     repair_note: closure?.repair_note ?? "",
+    equipment_serial_number: closure?.equipment_serial_number ?? "",
     billing_authorized: closure?.billing_authorized ?? false,
     billable: closure?.billable ?? true,
     warranty: closure?.warranty ?? false,
@@ -79,6 +70,7 @@ export default function TicketClosure({
         body: JSON.stringify({
           closure: {
             repair_note: c.repair_note,
+            equipment_serial_number: c.equipment_serial_number,
             billing_authorized: c.billing_authorized,
             billable: c.billable,
             warranty: c.warranty,
@@ -123,6 +115,7 @@ export default function TicketClosure({
           close_ticket: true,
           closure: {
             repair_note: c.repair_note,
+            equipment_serial_number: c.equipment_serial_number,
             billing_authorized: c.billing_authorized,
             billable: c.billable,
             warranty: c.warranty,
@@ -154,6 +147,9 @@ export default function TicketClosure({
           <div className="space-y-2 text-sm text-zinc-600">
             <p>
               <strong>Reparación:</strong> {c.repair_note || "—"}
+            </p>
+            <p>
+              <strong>Número de serie:</strong> {c.equipment_serial_number || "—"}
             </p>
             <p>
               Servicio:{" "}
@@ -236,6 +232,14 @@ export default function TicketClosure({
                   />
                   <span className="text-sm text-zinc-700">Sin cargo / no facturable</span>
                 </label>
+
+                <Field label="Número de serie del equipo o pantalla reparada" hint="Opcional; máximo 200 caracteres">
+                  <TextInput
+                    value={c.equipment_serial_number ?? ""}
+                    onChange={(v) => setC({ ...c, equipment_serial_number: v })}
+                    placeholder="P. ej. SN-LED-2026-001"
+                  />
+                </Field>
 
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input

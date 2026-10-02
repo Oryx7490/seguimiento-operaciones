@@ -266,7 +266,7 @@ function TechnicianModal({
   }
 
   return (
-    <Modal
+    <Modal mark="W13"
       open={true}
       onClose={onClose}
       title={tech ? "Editar técnico" : "Nuevo técnico"}

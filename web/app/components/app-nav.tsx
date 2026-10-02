@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { UiMark } from "@/app/components/ui";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import pkg from "../../package.json";
@@ -8,6 +9,7 @@ import pkg from "../../package.json";
 const NAV = [
   { href: "/", label: "Agenda" },
   { href: "/gantt", label: "Gantt" },
+  { href: "/gantt-tickets", label: "Gantt tickets" },
   { href: "/proyectos", label: "Proyectos" },
   { href: "/tickets", label: "Tickets" },
   { href: "/pendientes", label: "Pendientes" },
@@ -17,21 +19,34 @@ const NAV = [
   { href: "/admin", label: "Configuración" },
 ] as const;
 
-const ADMIN_SUB = [
+type NavItem = {
+  href: string;
+  label: string;
+  children?: readonly { href: string; label: string }[];
+};
+
+const ADMIN_SUB: readonly NavItem[] = [
   { href: "/admin/usuarios", label: "Usuarios" },
   { href: "/admin/tecnicos", label: "Técnicos" },
   { href: "/admin/clientes", label: "Clientes" },
   { href: "/admin/ubicaciones", label: "Ubicaciones" },
-  { href: "/admin/catalogos", label: "Catálogos" },
+  {
+    href: "/admin/catalogos",
+    label: "Catálogos",
+    children: [{ href: "/admin/controladores", label: "Controladores" }],
+  },
   { href: "/admin/especialidades", label: "Especialidades" },
   { href: "/admin/calendario", label: "Calendario" },
-  { href: "/admin/controladores", label: "Controladores" },
-  { href: "/admin/inventario", label: "Inventario" },
+  {
+    href: "/admin/inventario",
+    label: "Inventario",
+    children: [{ href: "/admin/planeacion", label: "Planeación" }],
+  },
   { href: "/admin/cierre", label: "Cierre" },
   { href: "/admin/horas-extra", label: "Horas extra" },
   { href: "/admin/notificaciones", label: "Notificaciones" },
   { href: "/admin/agentes", label: "Agentes CLI" },
-] as const;
+];
 
 export default function AppNav() {
   const path = usePathname();
@@ -56,7 +71,10 @@ export default function AppNav() {
   }, []);
 
   return (
-    <div className="flex h-full min-h-screen w-52 shrink-0 flex-col border-r border-zinc-200 bg-white">
+    <div className="relative flex h-full min-h-screen w-52 shrink-0 flex-col border-r border-zinc-200 bg-white">
+      <span className="absolute right-2 top-1">
+        <UiMark id="N1" />
+      </span>
       <div className="border-b border-zinc-200 px-4 py-4">
         <h1 className="text-sm font-bold tracking-tight text-zinc-800">
           <Link href="/">Seguimiento Ops</Link>
@@ -67,7 +85,7 @@ export default function AppNav() {
       <nav className="flex-1 overflow-y-auto px-2 py-3">
         <ul className="space-y-0.5">
           {NAV.map(({ href, label }) => {
-            const active = href === "/" ? path === "/" : path.startsWith(href);
+            const active = href === "/" ? path === "/" : path === href || path.startsWith(`${href}/`);
             return (
               <li key={href}>
                 <Link
@@ -91,24 +109,41 @@ export default function AppNav() {
         </ul>
 
         <div className="mt-5 border-t border-zinc-100 pt-3">
-          <p className="mb-1 px-2.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
+          <p className="mb-1 flex items-center justify-between px-2.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
             Administración
+            <UiMark id="N2" />
           </p>
           <ul className="space-y-0.5">
-            {ADMIN_SUB.map(({ href, label }) => {
-              const active = path === href;
+            {ADMIN_SUB.map((item) => {
+              const selfActive = path === item.href;
+              const childActive = item.children?.some((c) => path === c.href) ?? false;
               return (
-                <li key={href}>
+                <li key={item.href}>
                   <Link
-                    href={href}
+                    href={item.href}
                     className={`block rounded-md px-2.5 py-1.5 text-sm transition ${
-                      active
+                      selfActive
                         ? "bg-zinc-900 font-medium text-white"
-                        : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
+                        : childActive
+                          ? "bg-zinc-100 font-medium text-zinc-900"
+                          : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
                     }`}
                   >
-                    {label}
+                    {item.label}
                   </Link>
+                  {item.children?.map((child) => (
+                    <Link
+                      key={child.href}
+                      href={child.href}
+                      className={`mt-0.5 block rounded-md py-1.5 pl-6 pr-2.5 text-sm transition ${
+                        path === child.href
+                          ? "bg-zinc-900 font-medium text-white"
+                          : "text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
+                      }`}
+                    >
+                      {child.label}
+                    </Link>
+                  ))}
                 </li>
               );
             })}

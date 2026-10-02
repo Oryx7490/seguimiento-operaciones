@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { fetchJson, useResource } from "@/app/lib/client";
-import { Field, Modal, PrimaryButton, SecondaryButton, Spinner, TextInput } from "@/app/components/ui";
+import { Field, Modal, PrimaryButton, SecondaryButton, Select, Spinner, TextInput, Textarea } from "@/app/components/ui";
 import type { InventoryLot, InventoryResponse } from "@/app/lib/types";
 
 type RowKey = string;
@@ -12,6 +12,13 @@ interface Aggregate {
   lot: string;
   invQty: number;
   location: string | null;
+  pitch: number | null;
+  widthMm: number | null;
+  heightMm: number | null;
+  moduleType: string | null;
+  ledType: string | null;
+  obs: string | null;
+  ics: [string | null, string | null, string | null];
   usedTotal: number;
   projects: Map<string, { code: string; name: string; used: number; screens: Set<string> }>;
 }
@@ -21,33 +28,161 @@ interface LotFormData {
   lot: string;
   count: string;
   location: string;
+  pitch: string;
+  widthMm: string;
+  heightMm: string;
+  moduleType: string;
+  ledType: string;
+  observations: string;
+  ic1: string;
+  ic2: string;
+  ic3: string;
+  status: string;
+  eta: string;
 }
 
-const EMPTY_FORM: LotFormData = { brand: "", lot: "", count: "", location: "" };
+const EMPTY_FORM: LotFormData = {
+  brand: "",
+  lot: "",
+  count: "",
+  location: "",
+  pitch: "",
+  widthMm: "320",
+  heightMm: "160",
+  moduleType: "",
+  ledType: "",
+  observations: "",
+  ic1: "",
+  ic2: "",
+  ic3: "",
+  status: "available",
+  eta: "",
+};
 
 function keyOf(brand: string, lot: string): RowKey {
   return `${brand}${String.fromCharCode(1)}${lot}`;
 }
 
-function parseCsv(text: string): Array<{ manufacturer_brand: string; lot_number: string; module_count: number; location?: string }> {
-  const rows: Array<{ manufacturer_brand: string; lot_number: string; module_count: number; location?: string }> = [];
-  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
-  for (const line of lines) {
-    const cells = line.split(",").map((c) => c.trim().replace(/^"|"$/g, ""));
-    const brand = cells[0] ?? "";
-    const lot = cells[1] ?? "";
-    const count = Number(cells[2]);
-    const location = cells[3]?.trim();
-    if (!brand && !lot && !Number.isFinite(count)) continue;
-    if (Number.isInteger(count) && count > 0) {
-      rows.push({ manufacturer_brand: brand, lot_number: lot, module_count: count, location: location || undefined });
-    }
+const HEADER_ALIASES: Record<string, keyof Record<string, unknown>> = {
+  marca: "manufacturer_brand",
+  manufacturer_brand: "manufacturer_brand",
+  man: "manufacturer_brand",
+  brand: "manufacturer_brand",
+  lote: "lot_number",
+  lot: "lot_number",
+  lote_no: "lot_number",
+  cantidad: "module_count",
+  cantidad_modulos: "module_count",
+  module_count: "module_count",
+  count: "module_count",
+  pitch: "pitch_mm",
+  pitch_mm: "pitch_mm",
+  tipo: "module_type",
+  tipo_modulo: "module_type",
+  module_type: "module_type",
+  tipo_led: "led_type",
+  led_type: "led_type",
+  led: "led_type",
+  observaciones: "observations",
+  observacion: "observations",
+  obs: "observations",
+  notes: "observations",
+  integrado_1: "ic_serial_1",
+  integrado1: "ic_serial_1",
+  ic1: "ic_serial_1",
+  integrado_2: "ic_serial_2",
+  integrado2: "ic_serial_2",
+  ic2: "ic_serial_2",
+  integrado_3: "ic_serial_3",
+  integrado3: "ic_serial_3",
+  ic3: "ic_serial_3",
+  ubicacion: "location",
+  ubicaci_n: "location",
+  location: "location",
+  loc: "location",
+};
+
+function normHeader(h: string): string {
+  return h.toLowerCase().trim().replace(/[\s_]+/g, "_").replace(/á/g, "a").replace(/é/g, "e").replace(/í/g, "i").replace(/ó/g, "o").replace(/ú/g, "u");
+}
+
+function splitLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = "";
+  let inQ = false;
+  for (const ch of line) {
+    if (ch === '"') inQ = !inQ;
+    else if (ch === "," && !inQ) {
+      out.push(cur.trim().replace(/^"|"$/g, ""));
+      cur = "";
+    } else cur += ch;
   }
-  return rows;
+  out.push(cur.trim().replace(/^"|"$/g, ""));
+  return out;
+}
+
+interface CsvRow {
+  manufacturer_brand?: string;
+  lot_number?: string;
+  module_count?: string;
+  location?: string;
+  pitch_mm?: string;
+  module_type?: string;
+  led_type?: string;
+  observations?: string;
+  ic_serial_1?: string;
+  ic_serial_2?: string;
+  ic_serial_3?: string;
+}
+
+function parseCsv(text: string): CsvRow[] {
+  const lines = text.split(/\r?\n/).filter((l) => l.trim().length > 0);
+  if (lines.length === 0) return [];
+  const out: CsvRow[] = [];
+  let headerMap: Record<number, string> | null = null;
+
+  const first = lines[0].toLowerCase();
+  if (first.includes("marca") || first.includes("lote") || first.includes("manufacturer")) {
+    headerMap = {};
+    splitLine(lines[0]).forEach((h, i) => {
+      const key = HEADER_ALIASES[normHeader(h)];
+      if (key) headerMap![i] = key;
+    });
+  }
+
+  for (let i = headerMap ? 1 : 0; i < lines.length; i++) {
+    const cells = splitLine(lines[i]);
+    const row: CsvRow = {};
+    if (headerMap) {
+      cells.forEach((v, idx) => {
+        const key = headerMap![idx];
+        if (key && v) row[key as keyof CsvRow] = v;
+      });
+    } else {
+      const set = (idx: number, key: keyof CsvRow) => {
+        const v = cells[idx];
+        if (v !== undefined && v !== "") row[key] = v;
+      };
+      set(0, "manufacturer_brand");
+      set(1, "lot_number");
+      set(2, "module_count");
+      set(3, "pitch_mm");
+      set(4, "module_type");
+      set(5, "led_type");
+      set(6, "observations");
+      set(7, "ic_serial_1");
+      set(8, "ic_serial_2");
+      set(9, "ic_serial_3");
+      set(10, "location");
+    }
+    if (!row.manufacturer_brand && !row.lot_number && !row.module_count) continue;
+    out.push(row);
+  }
+  return out;
 }
 
 function downloadTemplate() {
-  const csv = "marca, lote, cantidad, ubicacion\nROE, LOT-2024-001, 64, Bodega CDMX\n";
+  const csv = "marca,lote,cantidad,pitch_mm,tipo,tipo_led,observaciones,integrado_1,integrado_2,integrado_3,ubicacion\nROE,LOT-2024-001,64,2.5,P2.5,SMD 2121,Primer lote recibido,ICSN001,ICSN002,ICSN003,Bodega CDMX\n";
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -82,6 +217,13 @@ export default function InventoryPage() {
         lot: lot.lot_number,
         invQty: lot.module_count,
         location: lot.location,
+        pitch: lot.pitch_mm,
+        widthMm: lot.width_mm != null ? Number(lot.width_mm) : null,
+        heightMm: lot.height_mm != null ? Number(lot.height_mm) : null,
+        moduleType: lot.module_type,
+        ledType: lot.led_type,
+        obs: lot.observations,
+        ics: [lot.ic_serial_1, lot.ic_serial_2, lot.ic_serial_3],
         usedTotal: 0,
         projects: new Map(),
       });
@@ -90,7 +232,7 @@ export default function InventoryPage() {
       const k = keyOf(u.manufacturer_brand, u.lot_number);
       let agg = byKey.get(k);
       if (!agg) {
-        agg = { brand: u.manufacturer_brand, lot: u.lot_number, invQty: 0, location: null, usedTotal: 0, projects: new Map() };
+        agg = { brand: u.manufacturer_brand, lot: u.lot_number, invQty: 0, location: null, pitch: null, widthMm: null, heightMm: null, moduleType: null, ledType: null, obs: null, ics: [null, null, null], usedTotal: 0, projects: new Map() };
         byKey.set(k, agg);
       }
       agg.usedTotal += u.module_count;
@@ -124,7 +266,11 @@ export default function InventoryPage() {
         (a) =>
           a.brand.toLowerCase().includes(q) ||
           a.lot.toLowerCase().includes(q) ||
-          (a.location ?? "").toLowerCase().includes(q)
+          (a.location ?? "").toLowerCase().includes(q) ||
+          (a.moduleType ?? "").toLowerCase().includes(q) ||
+          (a.ledType ?? "").toLowerCase().includes(q) ||
+          (a.obs ?? "").toLowerCase().includes(q) ||
+          a.ics.some((s) => (s ?? "").toLowerCase().includes(q))
       );
     }
     const dir = sortDir;
@@ -163,20 +309,34 @@ export default function InventoryPage() {
     return sortCol === col ? (sortDir === 1 ? " ↑" : " ↓") : "";
   }
 
-  async function saveLot(lotForm: LotFormData) {
+  function toPayload(form: LotFormData) {
+    return {
+      manufacturer_brand: form.brand,
+      lot_number: form.lot,
+      module_count: Number(form.count),
+      location: form.location.trim() || null,
+      pitch_mm: form.pitch.trim() === "" ? null : Number(form.pitch),
+      width_mm: form.widthMm.trim() === "" ? 320 : Number(form.widthMm),
+      height_mm: form.heightMm.trim() === "" ? 160 : Number(form.heightMm),
+      module_type: form.moduleType.trim() || null,
+      led_type: form.ledType.trim() || null,
+      observations: form.observations.trim() || null,
+      ic_serial_1: form.ic1.trim() || null,
+      ic_serial_2: form.ic2.trim() || null,
+      ic_serial_3: form.ic3.trim() || null,
+      status: form.status,
+      expected_arrival: form.status !== "available" ? form.eta.trim() || null : null,
+    };
+  }
+
+  async function saveLot(form: LotFormData) {
     setSaving(true);
     setErr(null);
-    const payload = {
-      manufacturer_brand: lotForm.brand,
-      lot_number: lotForm.lot,
-      module_count: Number(lotForm.count),
-      location: lotForm.location.trim() || null,
-    };
     try {
       if (editing === "new") {
-        await fetchJson("/api/inventory", { method: "POST", body: JSON.stringify(payload) });
+        await fetchJson("/api/inventory", { method: "POST", body: JSON.stringify(toPayload(form)) });
       } else if (editing) {
-        await fetchJson(`/api/inventory/${editing.id}`, { method: "PATCH", body: JSON.stringify(payload) });
+        await fetchJson(`/api/inventory/${editing.id}`, { method: "PATCH", body: JSON.stringify(toPayload(form)) });
       }
       setOk(editing === "new" ? "Lote agregado." : "Lote actualizado.");
       setEditing(null);
@@ -228,6 +388,10 @@ export default function InventoryPage() {
     return { label: "Ok", cls: "bg-zinc-100 text-zinc-600", text: "Sin sobrante" };
   }
 
+  function findInventoryLot(brand: string, lot: string): InventoryLot | null {
+    return inventory.find((l) => l.manufacturer_brand === brand && l.lot_number === lot) ?? null;
+  }
+
   if (!data && !error) return <div className="p-6"><Spinner /></div>;
 
   return (
@@ -266,8 +430,8 @@ export default function InventoryPage() {
         <TextInput
           value={search}
           onChange={setSearch}
-          placeholder="Buscar marca, lote o ubicación…"
-          className="!w-64"
+          placeholder="Buscar marca, lote, tipo, LED, observación…"
+          className="!w-72"
         />
         <select
           value={projectFilter}
@@ -304,10 +468,17 @@ export default function InventoryPage() {
               <tr>
                 <th className="cursor-pointer px-3 py-2 text-left" onClick={() => toggleSort("brand")}>Marca{arrow("brand")}</th>
                 <th className="cursor-pointer px-3 py-2 text-left" onClick={() => toggleSort("lot")}>Lote{arrow("lot")}</th>
+                <th className="px-3 py-2 text-right">Pitch</th>
+                <th className="px-3 py-2 text-right">m² / módulo</th>
+                <th className="px-3 py-2 text-left">Tipo</th>
+                <th className="px-3 py-2 text-left">LED</th>
+                <th className="px-3 py-2 text-left">Integrados de control</th>
                 <th className="px-3 py-2 text-left">Ubicación</th>
+                <th className="px-3 py-2 text-left">Observaciones</th>
                 <th className="cursor-pointer px-3 py-2 text-right" onClick={() => toggleSort("inv")}>Inventario{arrow("inv")}</th>
                 <th className="cursor-pointer px-3 py-2 text-right" onClick={() => toggleSort("used")}>Usado{arrow("used")}</th>
                 <th className="cursor-pointer px-3 py-2 text-right" onClick={() => toggleSort("diff")}>Diferencia{arrow("diff")}</th>
+                <th className="px-3 py-2 text-left">Disponibilidad</th>
                 <th className="px-3 py-2 text-left">Pantallas donde se ocupó</th>
                 <th className="px-3 py-2 text-left">Estado</th>
                 <th className="px-3 py-2 text-right">Acciones</th>
@@ -315,20 +486,59 @@ export default function InventoryPage() {
             </thead>
             <tbody className="divide-y divide-zinc-100">
               {filtered.length === 0 ? (
-                <tr><td colSpan={9} className="px-3 py-4 text-sm text-zinc-400">Sin datos.</td></tr>
+                <tr><td colSpan={15} className="px-3 py-4 text-sm text-zinc-400">Sin datos.</td></tr>
               ) : (
                 filtered.map((row) => {
                   const st = statusOf(row);
                   const screens = new Set<string>();
                   for (const proj of row.projects.values()) for (const s of proj.screens) screens.add(s);
+                  const invLot = findInventoryLot(row.brand, row.lot);
                   return (
-                    <tr key={keyOf(row.brand, row.lot)} className="hover:bg-zinc-50">
+                    <tr key={keyOf(row.brand, row.lot)} className="hover:bg-zinc-50 align-top">
                       <td className="px-3 py-2 font-medium text-zinc-800">{row.brand}</td>
                       <td className="px-3 py-2 text-zinc-600">{row.lot}</td>
+                      <td className="px-3 py-2 text-right text-zinc-600">{row.pitch != null ? `${formatNum(row.pitch)} mm` : "—"}</td>
+                      <td className="px-3 py-2 text-right text-zinc-700">
+                        <ModuleArea widthMm={row.widthMm} heightMm={row.heightMm} count={row.invQty} />
+                      </td>
+                      <td className="px-3 py-2 text-zinc-600">{row.moduleType ?? "—"}</td>
+                      <td className="px-3 py-2 text-zinc-600">{row.ledType ?? "—"}</td>
+                      <td className="px-3 py-2 text-xs text-zinc-500">
+                        {row.ics.every((s) => !s) ? "—" : (
+                          <span className="inline-flex flex-col gap-0.5">
+                            {row.ics.map((s, i) => (
+                              <span key={i} className={s ? "text-zinc-600" : "text-zinc-300"}>#{i + 1}: {s ?? "—"}</span>
+                            ))}
+                          </span>
+                        )}
+                      </td>
                       <td className="px-3 py-2 text-zinc-500">{row.location ?? "—"}</td>
+                      <td className="px-3 py-2 text-xs text-zinc-500">
+                        {row.obs ? <span title={row.obs} className="block max-w-[180px] truncate">{row.obs}</span> : "—"}
+                      </td>
                       <td className="px-3 py-2 text-right text-zinc-700">{row.invQty || "—"}</td>
                       <td className="px-3 py-2 text-right text-zinc-700">{row.usedTotal || "0"}</td>
                       <td className="px-3 py-2 text-right font-medium text-zinc-800">{row.invQty - row.usedTotal}</td>
+                      <td className="px-3 py-2 text-xs">
+                        {(() => {
+                          const inv = invLot;
+                          if (!inv) return <span className="text-zinc-300">—</span>;
+                          const map = {
+                            available: { label: "Disponible", cls: "bg-emerald-100 text-emerald-700" },
+                            ordered: { label: "Ordenado", cls: "bg-amber-100 text-amber-700" },
+                            in_transit: { label: "En tránsito", cls: "bg-sky-100 text-sky-700" },
+                          } as const;
+                          const s = map[inv.status as keyof typeof map] ?? map.available;
+                          return (
+                            <span className="inline-flex flex-col items-start gap-0.5">
+                              <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${s.cls}`}>{s.label}</span>
+                              {inv.expected_arrival && (
+                                <span className="text-[11px] text-zinc-400">llega {formatDateShort(inv.expected_arrival)}</span>
+                              )}
+                            </span>
+                          );
+                        })()}
+                      </td>
                       <td className="px-3 py-2 text-xs text-zinc-500">
                         {screens.size === 0 ? "—" : [...screens].join(", ")}
                       </td>
@@ -339,21 +549,21 @@ export default function InventoryPage() {
                       </td>
                       <td className="px-3 py-2 text-right">
                         <div className="flex justify-end gap-1">
-                          {inventory.some((l) => l.manufacturer_brand === row.brand && l.lot_number === row.lot) && (
-                            <button
-                              onClick={() => setEditing(inventory.find((l) => l.manufacturer_brand === row.brand && l.lot_number === row.lot) ?? null)}
-                              className="rounded border border-zinc-200 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
-                            >
-                              Editar
-                            </button>
-                          )}
-                          {inventory.some((l) => l.manufacturer_brand === row.brand && l.lot_number === row.lot) && (
-                            <button
-                              onClick={() => removeLot(inventory.find((l) => l.manufacturer_brand === row.brand && l.lot_number === row.lot)!)}
-                              className="rounded border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
-                            >
-                              Eliminar
-                            </button>
+                          {invLot && (
+                            <>
+                              <button
+                                onClick={() => setEditing(invLot)}
+                                className="rounded border border-zinc-200 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
+                              >
+                                Editar
+                              </button>
+                              <button
+                                onClick={() => removeLot(invLot)}
+                                className="rounded border border-red-200 px-2 py-1 text-xs text-red-600 hover:bg-red-50"
+                              >
+                                Eliminar
+                              </button>
+                            </>
                           )}
                         </div>
                       </td>
@@ -432,6 +642,28 @@ export default function InventoryPage() {
   );
 }
 
+function ModuleArea({ widthMm, heightMm, count }: { widthMm: number | null; heightMm: number | null; count: number }) {
+  if (widthMm == null || heightMm == null || widthMm <= 0 || heightMm <= 0) return <span className="text-zinc-300">—</span>;
+  const each = (widthMm / 1000) * (heightMm / 1000);
+  const lot = count > 0 ? each * count : null;
+  return (
+    <span className="inline-flex flex-col items-end">
+      <span className="font-medium">{each.toLocaleString("es-MX", { maximumFractionDigits: 4 })} m²</span>
+      <span className="text-[10px] text-zinc-400">{formatNum(widthMm)} × {formatNum(heightMm)} mm</span>
+      {lot != null && <span className="text-[10px] text-zinc-500">lote {lot.toLocaleString("es-MX", { maximumFractionDigits: 2 })} m²</span>}
+    </span>
+  );
+}
+
+function formatNum(v: number): string {
+  return String(Number.isInteger(v) ? v : Math.round(v * 100) / 100);
+}
+
+function formatDateShort(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  return m ? `${m[3]}/${m[2]}/${m[1].slice(2)}` : iso;
+}
+
 function LotModal({
   editing,
   onClose,
@@ -451,6 +683,17 @@ function LotModal({
           lot: editing.lot_number,
           count: String(editing.module_count),
           location: editing.location ?? "",
+          pitch: editing.pitch_mm != null ? String(editing.pitch_mm) : "",
+          widthMm: editing.width_mm != null ? String(Number(editing.width_mm)) : "320",
+          heightMm: editing.height_mm != null ? String(Number(editing.height_mm)) : "160",
+          moduleType: editing.module_type ?? "",
+          ledType: editing.led_type ?? "",
+          observations: editing.observations ?? "",
+          ic1: editing.ic_serial_1 ?? "",
+          ic2: editing.ic_serial_2 ?? "",
+          ic3: editing.ic_serial_3 ?? "",
+          status: editing.status ?? "available",
+          eta: editing.expected_arrival ?? "",
         }
   );
   const [err, setErr] = useState<string | null>(null);
@@ -460,12 +703,16 @@ function LotModal({
     if (!form.lot.trim()) return setErr("Indica el número de lote");
     const n = Number(form.count);
     if (!Number.isInteger(n) || n <= 0) return setErr("La cantidad de módulos debe ser un entero > 0");
+    if (form.pitch.trim() !== "") {
+      const p = Number(form.pitch);
+      if (!Number.isFinite(p) || p < 0) return setErr("El pitch debe ser un número ≥ 0");
+    }
     setErr(null);
     await onSave(form);
   }
 
   return (
-    <Modal
+    <Modal mark="W9"
       open
       onClose={onClose}
       title={editing === "new" ? "Agregar lote" : "Editar lote"}
@@ -479,17 +726,66 @@ function LotModal({
       }
     >
       <div className="space-y-4">
-        <Field label="Marca del fabricante">
-          <TextInput value={form.brand} onChange={(v) => setForm({ ...form, brand: v })} placeholder="P. ej. Novastar" />
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Marca del fabricante">
+            <TextInput value={form.brand} onChange={(v) => setForm({ ...form, brand: v })} placeholder="P. ej. Novastar" />
+          </Field>
+          <Field label="Número de lote">
+            <TextInput value={form.lot} onChange={(v) => setForm({ ...form, lot: v })} placeholder="P. ej. LOT-2024-001" />
+          </Field>
+        </div>
+        <div className="grid grid-cols-3 gap-3">
+          <Field label="Cantidad de módulos">
+            <TextInput value={form.count} onChange={(v) => setForm({ ...form, count: v })} type="number" />
+          </Field>
+          <Field label="Pitch (mm)">
+            <TextInput value={form.pitch} onChange={(v) => setForm({ ...form, pitch: v })} type="number" placeholder="P. ej. 2.5" />
+          </Field>
+          <Field label="Ancho (mm)" hint="La mayoría mide 320">
+            <TextInput value={form.widthMm} onChange={(v) => setForm({ ...form, widthMm: v })} type="number" />
+          </Field>
+          <Field label="Alto (mm)" hint="La mayoría mide 160">
+            <TextInput value={form.heightMm} onChange={(v) => setForm({ ...form, heightMm: v })} type="number" />
+          </Field>
+          <Field label="Tipo de módulo">
+            <TextInput value={form.moduleType} onChange={(v) => setForm({ ...form, moduleType: v })} placeholder="P. ej. P2.5" />
+          </Field>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Tipo de LED">
+            <TextInput value={form.ledType} onChange={(v) => setForm({ ...form, ledType: v })} placeholder="P. ej. SMD 2121 / DIP" />
+          </Field>
+          <Field label="Ubicación (opcional)">
+            <TextInput value={form.location} onChange={(v) => setForm({ ...form, location: v })} placeholder="P. ej. Bodega CDMX" />
+          </Field>
+        </div>
+        <Field label="Número de serie de los integrados de control" hint="Los 3 integrados de control del módulo (p. ej. tarjetas receptoras/scan).">
+          <div className="grid grid-cols-3 gap-3">
+            <TextInput value={form.ic1} onChange={(v) => setForm({ ...form, ic1: v })} placeholder="Integrado 1" />
+            <TextInput value={form.ic2} onChange={(v) => setForm({ ...form, ic2: v })} placeholder="Integrado 2" />
+            <TextInput value={form.ic3} onChange={(v) => setForm({ ...form, ic3: v })} placeholder="Integrado 3" />
+          </div>
         </Field>
-        <Field label="Número de lote">
-          <TextInput value={form.lot} onChange={(v) => setForm({ ...form, lot: v })} placeholder="P. ej. LOT-2024-001" />
-        </Field>
-        <Field label="Cantidad de módulos">
-          <TextInput value={form.count} onChange={(v) => setForm({ ...form, count: v })} type="number" />
-        </Field>
-        <Field label="Ubicación (opcional)">
-          <TextInput value={form.location} onChange={(v) => setForm({ ...form, location: v })} placeholder="P. ej. Bodega CDMX" />
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Disponibilidad" hint="Si aún no está físicamente, marca Ordenado o En tránsito y captura la fecha estimada de llegada.">
+            <Select
+              value={form.status}
+              onChange={(v) => setForm({ ...form, status: v })}
+              options={[
+                { value: "available", label: "Disponible físicamente" },
+                { value: "ordered", label: "Ordenado (pedido en firme)" },
+                { value: "in_transit", label: "En trayecto de envío" },
+              ]}
+            />
+          </Field>
+          {form.status !== "available" && (
+            <Field label="Fecha estimada de llegada" hint="Se usa para las proyecciones de inventario.">
+              <TextInput value={form.eta} onChange={(v) => setForm({ ...form, eta: v })} type="date" />
+            </Field>
+          )}
+        </div>
+        <Field label="Observaciones">
+          <Textarea value={form.observations} onChange={(v) => setForm({ ...form, observations: v })} placeholder="Notas del lote…" />
         </Field>
         {err && <p className="text-xs text-red-600">{err}</p>}
       </div>

@@ -8,28 +8,14 @@ import {
   Modal,
   PrimaryButton,
   SecondaryButton,
-  Select,
   Spinner,
   TextInput,
 } from "@/app/components/ui";
-
-const OWNERSHIP_LABEL: Record<string, string> = {
-  propio: "Propio",
-  cliente: "Del cliente",
-  tercero: "De terceros",
-};
-
-const OWNERSHIP_BADGE: Record<string, string> = {
-  propio: "bg-emerald-100 text-emerald-700",
-  cliente: "bg-sky-100 text-sky-700",
-  tercero: "bg-violet-100 text-violet-700",
-};
 
 interface CatalogController {
   id: string;
   name: string;
   brand: string | null;
-  ownership: string;
   active: boolean;
   created_at: string;
 }
@@ -59,7 +45,7 @@ export default function ControllersPage() {
       <div className="mb-2">
         <h1 className="text-xl font-semibold text-zinc-900">Controladores</h1>
         <p className="mt-1 text-sm text-zinc-500">
-          Catálogo de equipos de pantalla (Novastar y otras marcas): propios, del cliente o de terceros.
+          Catálogo de equipos de pantalla (Novastar y otras marcas). La procedencia se anota en los comentarios del proyecto.
         </p>
       </div>
 
@@ -82,7 +68,6 @@ export default function ControllersPage() {
               <tr>
                 <th className="px-3 py-2 text-left first:px-4">Modelo</th>
                 <th className="px-3 py-2 text-left">Marca</th>
-                <th className="px-3 py-2 text-left">Procedencia</th>
                 <th className="px-3 py-2 text-left">Estado</th>
                 <th className="px-3 py-2 text-right">Acciones</th>
               </tr>
@@ -92,11 +77,6 @@ export default function ControllersPage() {
                 <tr key={c.id} className={c.active ? "" : "opacity-50"}>
                   <td className="px-3 py-2 font-medium text-zinc-800 first:px-4">{c.name}</td>
                   <td className="px-3 py-2 text-zinc-600">{c.brand ?? "—"}</td>
-                  <td className="px-3 py-2">
-                    <Badge className={OWNERSHIP_BADGE[c.ownership] ?? "bg-zinc-100 text-zinc-600"}>
-                      {OWNERSHIP_LABEL[c.ownership] ?? c.ownership}
-                    </Badge>
-                  </td>
                   <td className="px-3 py-2">
                     <Badge className={c.active ? "bg-emerald-100 text-emerald-700" : "bg-zinc-100 text-zinc-500"}>
                       {c.active ? "Activo" : "Inactivo"}
@@ -159,7 +139,6 @@ function ControllerModal({
 }) {
   const [name, setName] = useState(item?.name ?? "");
   const [brand, setBrand] = useState(item?.brand ?? "");
-  const [ownership, setOwnership] = useState(item?.ownership ?? "propio");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -187,7 +166,7 @@ function ControllerModal({
     setSaving(true);
     setErr(null);
     try {
-      const body = { name: name.trim(), brand: brand.trim() || null, ownership };
+      const body = { name: name.trim(), brand: brand.trim() || null };
       if (isNew) {
         await fetchJson("/api/controllers", { method: "POST", body: JSON.stringify(body) });
       } else {
@@ -202,7 +181,7 @@ function ControllerModal({
   }
 
   return (
-    <Modal
+    <Modal mark="W7"
       open={true}
       onClose={onClose}
       title={isNew ? "Agregar controlador" : "Editar controlador"}
@@ -219,17 +198,6 @@ function ControllerModal({
         </Field>
         <Field label="Marca">
           <TextInput value={brand} onChange={setBrand} placeholder="P. ej. Novastar" />
-        </Field>
-        <Field label="Procedencia">
-          <Select
-            value={ownership}
-            onChange={setOwnership}
-            options={[
-              { value: "propio", label: "Propio" },
-              { value: "cliente", label: "Del cliente" },
-              { value: "tercero", label: "De terceros" },
-            ]}
-          />
         </Field>
         {!isNew && (
           <div className="border-t border-zinc-100 pt-3">

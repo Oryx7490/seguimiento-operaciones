@@ -333,7 +333,7 @@ function ReportTicketModal({
 
   if (created) {
     return (
-      <Modal
+      <Modal mark="W19"
         open={true}
         onClose={onClose}
         title="Ticket reportado"
@@ -348,7 +348,7 @@ function ReportTicketModal({
   }
 
   return (
-    <Modal
+    <Modal mark="W20"
       open={true}
       onClose={onClose}
       title="Reportar ticket"
@@ -525,7 +525,7 @@ function ActivitySheet({
   }
 
   return (
-    <Modal
+    <Modal mark="W21"
       open={true}
       onClose={onClose}
       title={activity.description}

@@ -231,7 +231,7 @@ function NewTicketModal({ onClose, onSaved }: { onClose: () => void; onSaved: ()
   }
 
   return (
-    <Modal open={true} onClose={onClose} title="Nuevo ticket"
+    <Modal mark="W39" open={true} onClose={onClose} title="Nuevo ticket"
       footer={
         <>
           <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>

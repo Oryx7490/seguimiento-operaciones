@@ -12,10 +12,12 @@ import {
   PrimaryButton,
   SecondaryButton,
   Select,
+  SearchableSelect,
   Spinner,
   StatusBadge,
   TextInput,
 } from "@/app/components/ui";
+import { projectStatusLabel } from "@/app/lib/format";
 import { ColumnSelector } from "@/app/components/column-selector";
 import type { CatalogItem, CatalogsResponse, Client, ClientsResponse, Project, ProjectsResponse } from "@/app/lib/types";
 
@@ -34,6 +36,26 @@ const DEFAULT_PROJECT_COLS: Record<string, boolean> = Object.fromEntries(
   PROJECT_COLUMNS.map((c) => [c.key, true])
 );
 
+const EDITABLE_PROJECT_STATUSES = [
+  "new",
+  "planning",
+  "waiting_authorization",
+  "waiting_materials",
+  "assembly",
+  "ready_install",
+  "installation",
+  "pending_docs",
+  "closed",
+  "cancelled",
+] as const;
+
+interface ProjectStatusSetting {
+  status: string;
+  label: string;
+  color: string;
+  sort_order: number;
+}
+
 export default function ProjectsPage() {
   const [statusFilter, setStatusFilter] = useState("");
   const [search, setSearch] = useState("");
@@ -47,8 +69,10 @@ export default function ProjectsPage() {
   if (search.trim()) params.set("q", search.trim());
   const query = params.toString();
   const { data, error, reload } = useResource<ProjectsResponse>(`/api/projects${query ? `?${query}` : ""}`);
+  const statusSettingsResource = useResource<{ project_statuses: ProjectStatusSetting[] }>("/api/catalogs/project-statuses");
 
   const projects = data?.projects ?? [];
+  const statusSettings = statusSettingsResource.data?.project_statuses ?? [];
   const loading = !data && !error;
 
   return (
@@ -126,7 +150,12 @@ export default function ProjectsPage() {
                     {cols.cliente && <td className="px-4 py-3 text-zinc-600">{p.client_name ?? "—"}</td>}
                     {cols.estado && (
                       <td className="px-4 py-3">
-                        <StatusBadge status={p.status} kind="project" />
+                        <StatusCell
+                          status={p.status}
+                          projectId={p.id}
+                          settings={statusSettings}
+                          onChange={reload}
+                        />
                       </td>
                     )}
                     {cols.salud && (
@@ -162,6 +191,14 @@ function NewProjectModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
   const [endDate, setEndDate] = useState("");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [clientDraft, setClientDraft] = useState<{
+    name: string;
+    contactName: string;
+    contactEmail: string;
+    contactPhone: string;
+  } | null>(null);
+  const [clientSaving, setClientSaving] = useState(false);
+  const [clientErr, setClientErr] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -179,6 +216,31 @@ function NewProjectModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
       cancelled = true;
     };
   }, []);
+
+  async function createClient() {
+    if (!clientDraft?.name.trim()) return;
+    setClientSaving(true);
+    setClientErr(null);
+    try {
+      const { client } = await fetchJson<{ client: Client }>("/api/clients", {
+        method: "POST",
+        body: JSON.stringify({
+          name: clientDraft.name.trim(),
+          contact_name: clientDraft.contactName.trim() || null,
+          contact_email: clientDraft.contactEmail.trim() || null,
+          contact_phone: clientDraft.contactPhone.trim() || null,
+          active: true,
+        }),
+      });
+      setClients((prev) => [...prev, client].sort((a, b) => a.name.localeCompare(b.name, "es")));
+      setClientId(client.id);
+      setClientDraft(null);
+    } catch (e) {
+      setClientErr(String(e));
+    } finally {
+      setClientSaving(false);
+    }
+  }
 
   async function submit() {
     setSaving(true);
@@ -203,7 +265,7 @@ function NewProjectModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
   }
 
   return (
-    <Modal open={true} onClose={onClose} title="Nuevo proyecto"
+    <Modal mark="W34" open={true} onClose={onClose} title="Nuevo proyecto"
       footer={
         <>
           <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
@@ -218,12 +280,61 @@ function NewProjectModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
         </Field>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Cliente">
-            <Select value={clientId} onChange={setClientId} placeholder="— Sin cliente —" options={clients.map((c) => ({ value: c.id, label: c.name }))} />
+            <SearchableSelect
+              mark="N9"
+              value={clientId}
+              onChange={(value) => {
+                setClientId(value);
+                setClientDraft(null);
+              }}
+              placeholder="Buscar cliente…"
+              clearLabel="— Sin cliente —"
+              topN={5}
+              options={clients
+                .filter((client) => client.active)
+                .map((client) => ({
+                  value: client.id,
+                  label: client.name,
+                  frequency: Number(client.activity_count) || 0,
+                }))}
+              onCreate={(query) => {
+                setClientErr(null);
+                setClientDraft({ name: query, contactName: "", contactEmail: "", contactPhone: "" });
+              }}
+            />
           </Field>
           <Field label="Prioridad">
             <Select value={priorityId} onChange={setPriorityId} placeholder="— Sin prioridad —" options={priorities.map((p) => ({ value: p.id, label: p.name }))} />
           </Field>
         </div>
+        {clientDraft && (
+          <div className="rounded-md border border-sky-200 bg-sky-50 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-sky-700">Agregar cliente</p>
+              <button type="button" onClick={() => setClientDraft(null)} className="text-xs text-zinc-500 hover:text-zinc-800">Cancelar</button>
+            </div>
+            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+              <Field label="Nombre del cliente">
+                <TextInput value={clientDraft.name} onChange={(value) => setClientDraft({ ...clientDraft, name: value })} />
+              </Field>
+              <Field label="Nombre de contacto (opcional)">
+                <TextInput value={clientDraft.contactName} onChange={(value) => setClientDraft({ ...clientDraft, contactName: value })} />
+              </Field>
+              <Field label="Teléfono (opcional)">
+                <TextInput value={clientDraft.contactPhone} onChange={(value) => setClientDraft({ ...clientDraft, contactPhone: value })} />
+              </Field>
+              <Field label="Correo (opcional)">
+                <TextInput type="email" value={clientDraft.contactEmail} onChange={(value) => setClientDraft({ ...clientDraft, contactEmail: value })} />
+              </Field>
+            </div>
+            {clientErr && <p className="mt-2 text-xs text-red-600">{clientErr}</p>}
+            <div className="mt-3 flex justify-end">
+              <SecondaryButton onClick={() => void createClient()} disabled={clientSaving || !clientDraft.name.trim()}>
+                {clientSaving ? "Creando…" : "Crear y seleccionar"}
+              </SecondaryButton>
+            </div>
+          </div>
+        )}
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Inicio planificado">
             <TextInput value={startDate} onChange={setStartDate} type="date" />
@@ -238,5 +349,111 @@ function NewProjectModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
         {err && <p className="text-xs text-red-600">{err}</p>}
       </div>
     </Modal>
+  );
+}
+
+function StatusCell({
+  status,
+  projectId,
+  settings,
+  onChange,
+}: {
+  status: string;
+  projectId: string;
+  settings: ProjectStatusSetting[];
+  onChange: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [newStatus, setNewStatus] = useState(status);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const currentSetting = settings.find((setting) => setting.status === status);
+  const displayLabel = currentSetting?.label ?? projectStatusLabel(status);
+  const displayColor = currentSetting?.color ?? "#71717A";
+
+  async function submit() {
+    if (newStatus === status) return;
+    if (newStatus === "cancelled" && !window.confirm("¿Cancelar este proyecto? Dejará de aparecer en la lista activa.")) return;
+    setSaving(true);
+    setErr(null);
+    try {
+      if (newStatus === "closed") {
+        await fetchJson(`/api/projects/${projectId}`, {
+          method: "PATCH",
+          body: JSON.stringify({ close_project: true }),
+        });
+      } else if (newStatus === "cancelled") {
+        await fetchJson(`/api/projects/${projectId}`, { method: "DELETE" });
+      } else {
+        await fetchJson(`/api/projects/${projectId}`, {
+          method: "PATCH",
+          body: JSON.stringify({ status: newStatus }),
+        });
+      }
+      setOpen(false);
+      onChange();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => {
+          if (status === "closed") return;
+          setNewStatus(status);
+          setOpen(true);
+        }}
+        disabled={status === "closed"}
+        title={status === "closed" ? "El proyecto está cerrado" : "Cambiar estado"}
+        className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium border"
+        style={{
+          backgroundColor: `${displayColor}18`,
+          color: displayColor,
+          borderColor: displayColor,
+        }}
+      >
+        {displayLabel}
+        {status !== "closed" && <span className="ml-1">▼</span>}
+      </button>
+
+      {open && (
+        <Modal
+          mark="W41"
+          open={true}
+          onClose={() => setOpen(false)}
+          title="Cambiar estado del proyecto"
+          footer={
+            <>
+              <SecondaryButton onClick={() => setOpen(false)}>Cancelar</SecondaryButton>
+              <PrimaryButton onClick={() => void submit()} disabled={saving || newStatus === status}>
+                {saving ? "Guardando…" : "Guardar"}
+              </PrimaryButton>
+            </>
+          }
+        >
+          <div className="space-y-3">
+            <Field label="Estado">
+              <Select
+                value={newStatus}
+                onChange={setNewStatus}
+                options={EDITABLE_PROJECT_STATUSES.map((value) => ({
+                  value,
+                  label: settings.find((setting) => setting.status === value)?.label ?? projectStatusLabel(value),
+                }))}
+              />
+            </Field>
+            <p className="text-[11px] text-zinc-400">
+              Cerrado valida el checklist de cierre de V4. Cancelado retira el proyecto de la lista activa.
+            </p>
+            {err && <p className="text-xs text-red-600">{err}</p>}
+          </div>
+        </Modal>
+      )}
+    </>
   );
 }

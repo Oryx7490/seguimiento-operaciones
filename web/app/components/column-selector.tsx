@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { UiMark } from "@/app/components/ui";
 
 export interface ColumnDef {
   key: string;
@@ -31,9 +32,12 @@ export function ColumnSelector({
       </button>
       {open && (
         <div
-          className="absolute right-0 z-50 mt-1 min-w-[160px] rounded-md border border-zinc-200 bg-white py-1 shadow-lg"
+          className="absolute right-0 z-50 mt-1 min-w-[160px] rounded-md border border-zinc-200 bg-white py-1 pt-4 shadow-lg"
           role="menu"
         >
+          <span className="absolute right-1.5 top-1">
+            <UiMark id="N4" />
+          </span>
           {columns.map((col) => (
             <label
               key={col.key}

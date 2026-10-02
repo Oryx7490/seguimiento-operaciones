@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState, useRef, type PointerEvent as ReactPointerEvent } from "react";
 import Link from "next/link";
 import { fetchJson, useResource } from "@/app/lib/client";
-import { Modal, Field, TextInput, Select, PrimaryButton, SecondaryButton } from "@/app/components/ui";
+import { phaseStatusLabel } from "@/app/lib/format";
+import { Modal, Field, TextInput, Textarea, Select, PrimaryButton, SecondaryButton, UiMark } from "@/app/components/ui";
 
 type GanttKind =
   | "planning"
@@ -37,10 +38,24 @@ interface GanttPhase {
   kind: string | null;
   status: string;
   blocked_reason: string | null;
+  next_action: string | null;
+  next_action_date: string | null;
   planned_start_date: string | null;
   planned_end_date: string | null;
   actual_start_date: string | null;
   actual_end_date: string | null;
+}
+
+const PHASE_STATUS_OPTIONS = ["planned", "not_started", "in_progress", "completed", "blocked", "not_applicable"];
+
+interface PhaseEdit {
+  name: string;
+  status: string;
+  planned_start_date: string | null;
+  planned_end_date: string | null;
+  blocked_reason: string | null;
+  next_action: string | null;
+  next_action_date: string | null;
 }
 
 interface GanttProject {
@@ -289,7 +304,7 @@ export default function GanttView() {
     return list;
   }, [data, activeKinds, sortKey, search, from, focusId]);
 
-  async function saveDates(start: string | null, end: string | null) {
+  async function savePhase(patch: PhaseEdit) {
     if (!edit) return;
     setSaving(true);
     setSaveErr(null);
@@ -300,8 +315,7 @@ export default function GanttView() {
           phases: [
             {
               id: edit.phase.id,
-              planned_start_date: start ? toDateIso(start) : null,
-              planned_end_date: end ? toDateIso(end) : null,
+              ...patch,
             },
           ],
         }),
@@ -593,7 +607,7 @@ export default function GanttView() {
           phase={edit.phase}
           saving={saving}
           err={saveErr}
-          onSave={saveDates}
+          onSave={savePhase}
           onClose={() => setEdit(null)}
         />
       )}
@@ -763,31 +777,73 @@ function PhaseEditModal({
   phase: GanttPhase;
   saving: boolean;
   err: string | null;
-  onSave: (start: string | null, end: string | null) => void;
+  onSave: (patch: PhaseEdit) => void;
   onClose: () => void;
 }) {
+  const [name, setName] = useState(phase.name);
+  const [status, setStatus] = useState(phase.status);
   const [start, setStart] = useState(toDateIso(phase.planned_start_date));
   const [openEnd, setOpenEnd] = useState(phase.planned_end_date === null && phase.planned_start_date !== null);
   const [end, setEnd] = useState(toDateIso(phase.planned_end_date));
+  const [reason, setReason] = useState(phase.blocked_reason ?? "");
+  const [nextAction, setNextAction] = useState(phase.next_action ?? "");
+  const [nextActionDate, setNextActionDate] = useState(toDateIso(phase.next_action_date));
+  const [localErr, setLocalErr] = useState<string | null>(null);
+
+  function submit() {
+    if (!name.trim()) {
+      setLocalErr("La descripción de la etapa es obligatoria");
+      return;
+    }
+    if (status === "blocked" && (!reason.trim() || !nextAction.trim())) {
+      setLocalErr("Para bloquear una fase indica el motivo y la próxima acción");
+      return;
+    }
+    setLocalErr(null);
+    onSave({
+      name: name.trim(),
+      status,
+      planned_start_date: start ? toDateIso(start) : null,
+      planned_end_date: openEnd ? null : end ? toDateIso(end) : null,
+      blocked_reason: status === "blocked" ? reason.trim() : null,
+      next_action: status === "blocked" ? nextAction.trim() : null,
+      next_action_date: status === "blocked" && nextActionDate ? toDateIso(nextActionDate) : null,
+    });
+  }
 
   return (
-    <Modal
+    <Modal mark="W17"
       open={true}
       onClose={onClose}
-      title={`Editar etapa · ${phase.name}`}
+      title="Editar etapa"
       footer={
         <>
           <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
-          <PrimaryButton onClick={() => onSave(start || null, openEnd ? null : end || null)} disabled={saving}>
-            {saving ? "Guardando…" : "Guardar"}
-          </PrimaryButton>
+          <PrimaryButton onClick={submit} disabled={saving}>{saving ? "Guardando…" : "Guardar"}</PrimaryButton>
         </>
       }
     >
       <div className="space-y-4">
-        <Field label="Fecha de inicio planificada">
-          <TextInput type="date" value={start} onChange={setStart} />
+        <Field label="Descripción de la etapa">
+          <TextInput value={name} onChange={setName} placeholder="P. ej. Armado en planta" />
         </Field>
+        <Field label="Estado de la etapa">
+          <Select
+            value={status}
+            onChange={setStatus}
+            options={PHASE_STATUS_OPTIONS.map((s) => ({ value: s, label: phaseStatusLabel(s) }))}
+          />
+        </Field>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Field label="Fecha de inicio planificada">
+            <TextInput type="date" value={start} onChange={setStart} />
+          </Field>
+          {!openEnd && (
+            <Field label="Fecha de fin planificada">
+              <TextInput type="date" value={end} onChange={setEnd} />
+            </Field>
+          )}
+        </div>
         <div className="flex items-center gap-3 pt-1">
           <label className="flex items-center gap-2 text-sm text-zinc-700">
             <input
@@ -799,12 +855,25 @@ function PhaseEditModal({
             Fase abierta (sin fecha de fin)
           </label>
         </div>
-        {!openEnd && (
-          <Field label="Fecha de fin planificada">
-            <TextInput type="date" value={end} onChange={setEnd} />
-          </Field>
+        {status === "blocked" && (
+          <div className="space-y-4">
+            <Field label="Motivo del bloqueo">
+              <Textarea value={reason} onChange={setReason} rows={2} placeholder="¿Por qué está bloqueada esta etapa?" />
+            </Field>
+            <Field label="Próxima acción">
+              <TextInput value={nextAction} onChange={setNextAction} placeholder="Siguiente paso concreto" />
+            </Field>
+            <Field label="Fecha de la próxima acción">
+              <TextInput type="date" value={nextActionDate} onChange={setNextActionDate} />
+            </Field>
+          </div>
         )}
-        {err && <p className="text-[11px] text-red-600">{err}</p>}
+        {status === "not_applicable" && (
+          <p className="text-[11px] text-zinc-500">
+            La etapa dejará de dibujarse en el Gantt hasta que cambies su estado.
+          </p>
+        )}
+        {(localErr || err) && <p className="text-[11px] text-red-600">{localErr ?? err}</p>}
       </div>
     </Modal>
   );
@@ -853,6 +922,9 @@ function RowMenu({
         style={{ top: rect.bottom + 4, left, width }}
         className="fixed z-50 overflow-hidden rounded-md border border-zinc-200 bg-white py-1 shadow-xl"
       >
+        <span className="absolute right-1.5 top-1">
+          <UiMark id="N3" />
+        </span>
         <p className="px-3 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wide text-zinc-400">
           {project.code}
         </p>
@@ -955,7 +1027,7 @@ function NewPhaseModal({
   }
 
   return (
-    <Modal
+    <Modal mark="W18"
       open={true}
       onClose={onClose}
       title={`Agregar etapa · ${project.code}`}
