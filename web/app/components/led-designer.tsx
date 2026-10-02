@@ -1,107 +1,144 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
-type Cabinet = {
+type Vector3 = [number, number, number];
+
+type CabinetModel = {
   id: string;
+  name: string;
+  width_mm: number;
+  height_mm: number;
+  depth_mm: number | null;
+  status: "demo" | "reference" | "verified" | "approved";
+  source: string;
+};
+
+type Placement = {
+  id: string;
+  model_id: string;
+  face_id: string;
   x_mm: number;
   y_mm: number;
+  rotation_deg: number;
+  grid: { row: number; column: number } | null;
+};
+
+type Face = {
+  id: string;
+  name: string;
+  origin_mm: Vector3;
+  u_axis: Vector3;
+  v_axis: Vector3;
+  normal: Vector3;
   width_mm: number;
   height_mm: number;
 };
 
 type ScreenDocument = {
-  schema_version: number;
+  schema_version: 2;
   id: string;
   name: string;
   source: string;
-  rows: number;
-  columns: number;
-  faces: {
-    id: string;
-    width_mm: number;
-    height_mm: number;
-    cabinets: Cabinet[];
-  }[];
+  units: "mm";
+  template: { type: "rectangle"; params: { rows: number; columns: number; model_id: string } };
+  catalog: { revision: string; models: CabinetModel[] };
+  faces: Face[];
+  placements: Placement[];
+  joins: unknown[];
 };
 
-async function requestRectangle(rows: number, columns: number): Promise<ScreenDocument> {
+type Summary = {
+  cabinet_count: number;
+  active_area_mm2: number;
+  active_area_m2: number;
+  faces: { face_id: string; name: string; width_mm: number; height_mm: number; cabinet_count: number; active_area_m2: number }[];
+  models: { model_id: string; name: string; status: string; width_mm: number; height_mm: number; depth_mm: number | null; quantity: number; area_m2: number }[];
+  warnings: string[];
+};
+
+type DesignResponse = { engine_version: string; document: ScreenDocument; summary: Summary };
+
+type Issue = { field: string; message: string };
+
+class EngineError extends Error {
+  constructor(message: string, readonly issues: Issue[] = []) {
+    super(message);
+  }
+}
+
+type DisplayError = { message: string; issues: Issue[] };
+
+async function requestRectangle(rows: number | null, columns: number | null, signal: AbortSignal): Promise<DesignResponse> {
   const response = await fetch("/api/led-designer/rectangle", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ rows, columns }),
+    signal,
   });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error ?? "No se pudo generar la pantalla.");
-  return data as ScreenDocument;
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new EngineError(data.error ?? "No se pudo generar la pantalla.", Array.isArray(data.issues) ? data.issues : []);
+  }
+  return data as DesignResponse;
+}
+
+function toDisplayError(reason: unknown): DisplayError {
+  if (reason instanceof EngineError) return { message: reason.message, issues: reason.issues };
+  if (reason instanceof Error) return { message: reason.message, issues: [] };
+  return { message: "Ocurrió un error inesperado.", issues: [] };
 }
 
 const SVG = { width: 1120, height: 1020, maxDrawingWidth: 640, maxDrawingHeight: 620 };
 
 export default function LedDesigner() {
-  const [document, setDocument] = useState<ScreenDocument | null>(null);
+  const [result, setResult] = useState<DesignResponse | null>(null);
   const [draftRows, setDraftRows] = useState("3");
   const [draftColumns, setDraftColumns] = useState("4");
-  const [error, setError] = useState<string | null>(null);
-  const [generating, setGenerating] = useState(false);
-  const [initialLoading, setInitialLoading] = useState(true);
+  const [error, setError] = useState<DisplayError | null>(null);
+  const [generating, setGenerating] = useState(true);
+  // Sólo la solicitud más reciente puede actualizar el diseño: una respuesta
+  // antigua nunca sustituye el resultado de una edición posterior.
+  const latestRequest = useRef<{ id: number; controller: AbortController } | null>(null);
 
-  const applyLayout = useCallback(async (rows: number, columns: number) => {
-    setGenerating(true);
-    setError(null);
+  async function runLayout(rows: number | null, columns: number | null) {
+    latestRequest.current?.controller.abort();
+    const request = { id: (latestRequest.current?.id ?? 0) + 1, controller: new AbortController() };
+    latestRequest.current = request;
+    const isCurrent = () => latestRequest.current === request;
     try {
-      const data = await requestRectangle(rows, columns);
-      setDocument(data);
-      setDraftRows(String(data.rows));
-      setDraftColumns(String(data.columns));
+      const data = await requestRectangle(rows, columns, request.controller.signal);
+      if (!isCurrent()) return;
+      setResult(data);
+      setError(null);
+      setDraftRows(String(data.document.template.params.rows));
+      setDraftColumns(String(data.document.template.params.columns));
     } catch (reason: unknown) {
-      setError(reason instanceof Error ? reason.message : "Ocurrió un error inesperado.");
+      if (isCurrent()) setError(toDisplayError(reason));
     } finally {
-      setGenerating(false);
+      if (isCurrent()) setGenerating(false);
     }
-  }, []);
+  }
 
   useEffect(() => {
-    let active = true;
-    requestRectangle(3, 4)
-      .then((data) => {
-        if (active) {
-          setDocument(data);
-          setDraftRows(String(data.rows));
-          setDraftColumns(String(data.columns));
-        }
-      })
-      .catch((reason: unknown) => {
-        if (active) setError(reason instanceof Error ? reason.message : "No se pudo generar la pantalla.");
-      })
-      .finally(() => {
-        if (active) setInitialLoading(false);
-      });
-    return () => {
-      active = false;
-    };
+    void runLayout(3, 4);
+    return () => latestRequest.current?.controller.abort();
   }, []);
 
   function submitLayout(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const rows = Number(draftRows);
-    const columns = Number(draftColumns);
-    if (
-      !Number.isInteger(rows) ||
-      !Number.isInteger(columns) ||
-      rows < 1 ||
-      columns < 1 ||
-      rows > 20 ||
-      columns > 20 ||
-      rows * columns > 400
-    ) {
-      setError("Usa filas y columnas enteras de 1 a 20; la pantalla admite hasta 400 gabinetes.");
-      return;
-    }
-    void applyLayout(rows, columns);
+    // El motor es la validación autoritativa: devuelve los errores por campo.
+    // Un valor vacío o no numérico viaja como null y se rechaza allí.
+    const parse = (value: string) => (value.trim() === "" ? null : Number(value));
+    setGenerating(true);
+    void runLayout(parse(draftRows), parse(draftColumns));
   }
 
+  const document = result?.document;
+  const summary = result?.summary;
   const face = document?.faces[0];
+  const models = new Map(document?.catalog.models.map((model) => [model.id, model]) ?? []);
+  const placements = face ? (document?.placements ?? []).filter((placement) => placement.face_id === face.id) : [];
   const scale = face
     ? Math.min(SVG.maxDrawingWidth / face.width_mm, SVG.maxDrawingHeight / face.height_mm)
     : 0;
@@ -112,13 +149,7 @@ export default function LedDesigner() {
   const x = (value: number) => originX + value * scale;
   const y = (value: number) => originY + (face ? face.height_mm - value : 0) * scale;
   const dimensionText = (millimeters: number) => `${millimeters} mm  (${(millimeters / 1000).toFixed(2)} m)`;
-  const cabinetCount = face?.cabinets.length ?? 0;
-  const cabinetArea = face?.cabinets[0]
-    ? (face.cabinets[0].width_mm * face.cabinets[0].height_mm) / 1_000_000
-    : 0;
-  const totalArea = face
-    ? face.cabinets.reduce((area, cabinet) => area + cabinet.width_mm * cabinet.height_mm, 0) / 1_000_000
-    : 0;
+  const params = document?.template.params;
 
   return (
     <div className="min-h-screen bg-[#f4f6f8] px-5 py-7 text-slate-900 sm:px-8">
@@ -139,7 +170,17 @@ export default function LedDesigner() {
 
         {error && (
           <div role="alert" className="mb-5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
-            <strong className="font-semibold">No se aplicó la modulación.</strong> {error}
+            <strong className="font-semibold">No se aplicó la modulación.</strong> {error.message}
+            {error.issues.length > 0 && (
+              <ul className="mt-1 list-disc pl-5">
+                {error.issues.map((issue) => (
+                  <li key={`${issue.field}-${issue.message}`}>
+                    {issue.field ? <strong className="font-medium">{issue.field}:</strong> : null} {issue.message}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {result && <p className="mt-1 text-xs text-rose-700">Se conserva la modulación vigente.</p>}
           </div>
         )}
 
@@ -153,12 +194,12 @@ export default function LedDesigner() {
               <span className="rounded-md bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">1 cara</span>
             </div>
             <div className="bg-[linear-gradient(#f8fafc_1px,transparent_1px),linear-gradient(90deg,#f8fafc_1px,transparent_1px)] bg-[size:24px_24px] px-3 py-2 sm:px-8">
-              {!face ? (
+              {!face || !document ? (
                 <div className="flex h-[min(68vh,720px)] min-h-[420px] items-center justify-center text-sm text-slate-500">
-                  {initialLoading || generating ? "Generando pantalla…" : "El motor no devolvió una cara dibujable."}
+                  {generating ? "Generando pantalla…" : "El motor no devolvió una cara dibujable."}
                 </div>
               ) : (
-                <svg viewBox={`0 0 ${SVG.width} ${SVG.height}`} className="mx-auto block max-h-[min(68vh,720px)] min-h-[420px] w-full" role="img" aria-label={`Pantalla de ${document.columns} columnas por ${document.rows} filas, ${dimensionText(face.width_mm)} por ${dimensionText(face.height_mm)}`}>
+                <svg viewBox={`0 0 ${SVG.width} ${SVG.height}`} className="mx-auto block max-h-[min(68vh,720px)] min-h-[420px] w-full" role="img" aria-label={`Pantalla de ${params?.columns} columnas por ${params?.rows} filas, ${dimensionText(face.width_mm)} por ${dimensionText(face.height_mm)}`}>
                   <defs>
                     <marker id="dimension-arrow" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto-start-reverse" markerUnits="strokeWidth">
                       <path d="M 7 1 L 1 4 L 7 7" fill="none" stroke="#0e7490" strokeWidth="1.2" />
@@ -170,18 +211,21 @@ export default function LedDesigner() {
                   </defs>
                   <text x={originX} y="68" fill="#64748b" fontSize="18" fontWeight="600">ELEVACIÓN FRONTAL · {document.id}</text>
 
-                  {face.cabinets.map((cabinet, index) => {
-                    const cabinetX = x(cabinet.x_mm);
-                    const cabinetY = y(cabinet.y_mm + cabinet.height_mm);
-                    const cabinetWidth = cabinet.width_mm * scale;
-                    const cabinetHeight = cabinet.height_mm * scale;
+                  {placements.map((placement) => {
+                    const model = models.get(placement.model_id);
+                    if (!model) return null;
+                    const cabinetX = x(placement.x_mm);
+                    const cabinetY = y(placement.y_mm + model.height_mm);
+                    const cabinetWidth = model.width_mm * scale;
+                    const cabinetHeight = model.height_mm * scale;
                     const inset = Math.min(4, cabinetWidth / 12, cabinetHeight / 12);
-                    const row = Math.floor(index / document.columns) + 1;
-                    const column = (index % document.columns) + 1;
                     return (
-                      <g key={cabinet.id}>
+                      <g key={placement.id}>
+                        <title>{placement.id}</title>
                         <rect x={cabinetX + inset} y={cabinetY + inset} width={cabinetWidth - inset * 2} height={cabinetHeight - inset * 2} rx="3" fill="url(#cabinet-face)" stroke="#0e7490" strokeWidth="2.5" />
-                        <text x={cabinetX + cabinetWidth / 2} y={cabinetY + cabinetHeight / 2 + 5} textAnchor="middle" fill="#155e75" fontSize={Math.min(17, cabinetHeight / 5)} fontWeight="600">R{row} · C{column}</text>
+                        {placement.grid && (
+                          <text x={cabinetX + cabinetWidth / 2} y={cabinetY + cabinetHeight / 2 + 5} textAnchor="middle" fill="#155e75" fontSize={Math.min(17, cabinetHeight / 5)} fontWeight="600">R{placement.grid.row} · C{placement.grid.column}</text>
+                        )}
                       </g>
                     );
                   })}
@@ -209,7 +253,7 @@ export default function LedDesigner() {
           <aside className="space-y-5">
             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Modulación</p>
-              <form onSubmit={submitLayout} className="mt-3 space-y-4">
+              <form onSubmit={submitLayout} noValidate className="mt-3 space-y-4">
                 <div className="grid grid-cols-2 gap-3">
                   <label className="text-xs font-medium text-slate-600">
                     Columnas
@@ -232,29 +276,41 @@ export default function LedDesigner() {
               <h2 className="mt-2 text-lg font-semibold">{document?.name ?? "Pantalla rectangular"}</h2>
               <div className="mt-4 divide-y divide-slate-100">
                 <Metric label="Medida total" value={face ? `${(face.width_mm / 1000).toFixed(2)} × ${(face.height_mm / 1000).toFixed(2)} m` : "—"} />
-                <Metric label="Gabinetes" value={String(cabinetCount)} />
-                <Metric label="Área LED total" value={`${totalArea.toFixed(4)} m²`} />
+                <Metric label="Gabinetes" value={summary ? String(summary.cabinet_count) : "—"} />
+                <Metric label="Área LED total" value={summary ? `${summary.active_area_m2.toFixed(4)} m²` : "—"} />
               </div>
+              {summary && summary.warnings.length > 0 && (
+                <ul className="mt-4 space-y-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-4 text-amber-900">
+                  {summary.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+                </ul>
+              )}
             </section>
 
             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Listado de gabinetes</h2>
               <div className="mt-3 overflow-hidden rounded-lg border border-slate-100">
-                <div className="grid grid-cols-[1fr_auto] bg-slate-50 px-3 py-2 text-[11px] font-medium text-slate-500">
-                  <span>Modelo · demostración</span><span>Cantidad</span>
+                <div className="grid grid-cols-[1fr_auto_auto] gap-3 bg-slate-50 px-3 py-2 text-[11px] font-medium text-slate-500">
+                  <span>Modelo</span><span>Área</span><span>Cantidad</span>
                 </div>
-                <div className="grid grid-cols-[1fr_auto] items-center px-3 py-3 text-sm">
-                  <span className="font-medium text-slate-700">960 × 960 mm</span><span className="font-semibold tabular-nums">{cabinetCount}</span>
-                </div>
+                {summary?.models.map((line) => (
+                  <div key={line.model_id} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 border-t border-slate-100 px-3 py-3 text-sm first:border-t-0">
+                    <span>
+                      <span className="block font-medium text-slate-700">{line.width_mm} × {line.height_mm} mm</span>
+                      <span className="block text-[11px] text-slate-500">{line.name} · prof. {line.depth_mm === null ? "desconocida" : `${line.depth_mm} mm`}</span>
+                    </span>
+                    <span className="tabular-nums text-xs text-slate-600">{line.area_m2.toFixed(4)} m²</span>
+                    <span className="font-semibold tabular-nums">{line.quantity}</span>
+                  </div>
+                ))}
               </div>
-              <p className="mt-2 text-xs text-slate-500">Área por gabinete: {cabinetArea.toFixed(4)} m²</p>
+              {document && <p className="mt-2 text-[11px] text-slate-500">Catálogo: {document.catalog.revision} · motor {result?.engine_version}</p>}
               {face && (
                 <details className="mt-3">
-                  <summary className="cursor-pointer text-xs font-medium text-cyan-800">Ver posiciones de los {cabinetCount} gabinetes</summary>
+                  <summary className="cursor-pointer text-xs font-medium text-cyan-800">Ver posiciones de los {placements.length} gabinetes</summary>
                   <div className="mt-2 max-h-52 overflow-auto rounded-lg border border-slate-100">
                     <table className="w-full text-left text-[11px] tabular-nums">
-                      <thead className="sticky top-0 bg-slate-50 text-slate-500"><tr><th className="px-2 py-1.5">ID</th><th className="px-2 py-1.5">X</th><th className="px-2 py-1.5">Y</th></tr></thead>
-                      <tbody>{face.cabinets.map((cabinet) => <tr key={cabinet.id} className="border-t border-slate-100"><td className="px-2 py-1.5 text-slate-700">{cabinet.id}</td><td className="px-2 py-1.5">{cabinet.x_mm}</td><td className="px-2 py-1.5">{cabinet.y_mm}</td></tr>)}</tbody>
+                      <thead className="sticky top-0 bg-slate-50 text-slate-500"><tr><th className="px-2 py-1.5">ID</th><th className="px-2 py-1.5">Fila</th><th className="px-2 py-1.5">Col.</th><th className="px-2 py-1.5">X</th><th className="px-2 py-1.5">Y</th></tr></thead>
+                      <tbody>{placements.map((placement) => <tr key={placement.id} className="border-t border-slate-100"><td className="px-2 py-1.5 text-slate-700">{placement.id}</td><td className="px-2 py-1.5">{placement.grid?.row ?? "—"}</td><td className="px-2 py-1.5">{placement.grid?.column ?? "—"}</td><td className="px-2 py-1.5">{placement.x_mm}</td><td className="px-2 py-1.5">{placement.y_mm}</td></tr>)}</tbody>
                     </table>
                   </div>
                   <p className="mt-1 text-[10px] text-slate-400">Coordenadas X/Y en mm, con origen en la esquina inferior izquierda.</p>

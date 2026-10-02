@@ -1,0 +1,169 @@
+"""Casos de aceptación del motor. Los valores esperados se calculan a mano:
+960 mm × 960 mm = 921,600 mm² por gabinete."""
+
+import copy
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app import app
+
+client = TestClient(app)
+CABINET_MM2 = 960 * 960
+
+
+def rectangle(rows: int, columns: int) -> dict:
+    response = client.post("/v1/rectangle", json={"rows": rows, "columns": columns})
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def validate(document: dict):
+    return client.post("/v1/validate", json=document)
+
+
+def test_health_reports_versions():
+    data = client.get("/health").json()
+    assert data["status"] == "ok"
+    assert data["schema_version"] == 2
+
+
+def test_reference_single_cabinet():
+    data = client.get("/v1/reference").json()
+    assert data["summary"]["cabinet_count"] == 1
+    assert data["summary"]["active_area_mm2"] == 921_600
+    assert data["summary"]["active_area_m2"] == pytest.approx(0.9216)
+
+
+@pytest.mark.parametrize(
+    ("rows", "columns", "count", "width", "height", "area_mm2", "area_m2"),
+    [
+        (3, 4, 12, 3_840, 2_880, 11_059_200, 11.0592),
+        (12, 16, 192, 15_360, 11_520, 176_947_200, 176.9472),
+        (20, 20, 400, 19_200, 19_200, 368_640_000, 368.64),
+    ],
+)
+def test_rectangle_acceptance(rows, columns, count, width, height, area_mm2, area_m2):
+    data = rectangle(rows, columns)
+    summary = data["summary"]
+    face = summary["faces"][0]
+    assert summary["cabinet_count"] == count
+    assert (face["width_mm"], face["height_mm"]) == (width, height)
+    assert summary["active_area_mm2"] == area_mm2 == count * CABINET_MM2
+    assert summary["active_area_m2"] == pytest.approx(area_m2)
+    assert summary["models"] == [
+        {
+            "model_id": "demo-960x960",
+            "name": "Gabinete demostración 960 × 960 mm",
+            "status": "demo",
+            "width_mm": 960,
+            "height_mm": 960,
+            "depth_mm": None,
+            "quantity": count,
+            "area_mm2": area_mm2,
+            "area_m2": pytest.approx(area_m2),
+        }
+    ]
+
+
+def test_document_structure_and_grid_labels():
+    document = rectangle(3, 4)["document"]
+    assert document["schema_version"] == 2
+    assert document["units"] == "mm"
+    assert document["template"] == {
+        "type": "rectangle",
+        "params": {"rows": 3, "columns": 4, "model_id": "demo-960x960"},
+    }
+    assert document["catalog"]["revision"] == "demo-2026-10-02"
+    assert document["joins"] == []
+    face = document["faces"][0]
+    assert face["normal"] == [0.0, 0.0, 1.0]
+
+    placements = {p["id"]: p for p in document["placements"]}
+    assert len(placements) == 12
+    # Fila 1 es la superior: su Y es la más alta.
+    top_left = placements["cabinet-r01-c01"]
+    assert top_left["grid"] == {"row": 1, "column": 1}
+    assert (top_left["x_mm"], top_left["y_mm"]) == (0, 1_920)
+    bottom_right = placements["cabinet-r03-c04"]
+    assert bottom_right["grid"] == {"row": 3, "column": 4}
+    assert (bottom_right["x_mm"], bottom_right["y_mm"]) == (2_880, 0)
+
+
+def test_unknown_depth_is_flagged():
+    warnings = rectangle(1, 1)["summary"]["warnings"]
+    assert any("profundidad desconocida" in warning for warning in warnings)
+    assert any("demostración" in warning for warning in warnings)
+
+
+@pytest.mark.parametrize(
+    ("payload", "field", "message"),
+    [
+        ({"rows": 21, "columns": 4}, "Filas", "Debe ser menor o igual que 20."),
+        ({"rows": 0, "columns": 4}, "Filas", "Debe ser mayor o igual que 1."),
+        ({"rows": 3, "columns": 2.5}, "Columnas", "Debe ser un número entero."),
+        ({"rows": 3}, "Columnas", "Falta este dato o no es numérico."),
+        ({"rows": None, "columns": 4}, "Filas", "Falta este dato o no es numérico."),
+        ({"rows": 3, "columns": 4, "x": 1}, "x", "Campo no admitido."),
+    ],
+)
+def test_rectangle_rejections_are_readable(payload, field, message):
+    response = client.post("/v1/rectangle", json=payload)
+    assert response.status_code == 422
+    body = response.json()
+    assert body["error"] == "Datos no válidos."
+    assert {"field": field, "message": message} in body["issues"]
+
+
+def test_validate_round_trip_preserves_results():
+    generated = rectangle(3, 4)
+    response = validate(generated["document"])
+    assert response.status_code == 200
+    assert response.json() == generated
+
+
+def _invalid(mutate) -> dict:
+    document = copy.deepcopy(rectangle(3, 4)["document"])
+    mutate(document)
+    response = validate(document)
+    assert response.status_code == 422, response.text
+    return response.json()
+
+
+def test_rejects_cabinet_outside_face():
+    body = _invalid(lambda d: d["placements"][0].update(x_mm=3_000))
+    assert "excede el ancho" in body["issues"][0]["message"]
+
+
+def test_rejects_unknown_model():
+    body = _invalid(lambda d: d["placements"][0].update(model_id="no-existe"))
+    assert "modelo inexistente" in body["issues"][0]["message"]
+
+
+def test_rejects_unknown_face():
+    body = _invalid(lambda d: d["placements"][0].update(face_id="face-x"))
+    assert "cara inexistente" in body["issues"][0]["message"]
+
+
+def test_rejects_duplicate_placement_ids():
+    body = _invalid(lambda d: d["placements"][1].update(id=d["placements"][0]["id"]))
+    assert "ID repetido" in body["issues"][0]["message"]
+
+
+def test_rejects_non_orthogonal_axes():
+    body = _invalid(lambda d: d["faces"][0].update(v_axis=[1.0, 0.0, 0.0]))
+    assert "perpendiculares" in body["issues"][0]["message"]
+
+
+def test_rejects_normal_facing_away():
+    body = _invalid(lambda d: d["faces"][0].update(normal=[0.0, 0.0, -1.0]))
+    assert "U × V" in body["issues"][0]["message"]
+
+
+def test_joins_reserved_but_not_accepted_yet():
+    join = {"id": "j1", "face_a_id": "face-front", "face_b_id": "face-front", "angle_deg": 90}
+    _invalid(lambda d: d["joins"].append(join))
+
+
+def test_rejects_old_schema_version():
+    _invalid(lambda d: d.update(schema_version=1))
