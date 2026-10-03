@@ -130,6 +130,12 @@ function formatDiff(diffMm: number): string {
   return `${sign}${diffMm} mm (${sign}${(diffMm / 1000).toFixed(2)} m)`;
 }
 
+function areaPct(areaM2: number, targetM2: number): string {
+  if (targetM2 <= 0) return "—";
+  const pct = ((areaM2 - targetM2) / targetM2) * 100;
+  return `${pct >= 0 ? "+" : ""}${pct.toFixed(2)} %`;
+}
+
 // Margen derecho reservado para la cota vertical.
 const SVG = { width: 1120, height: 1020, maxDrawingWidth: 860, maxDrawingHeight: 620, rightMargin: 210 };
 
@@ -295,6 +301,7 @@ export default function LedDesigner() {
   const y = (value: number) => originY + (face ? face.height_mm - value : 0) * scale;
   const dimensionText = (millimeters: number) => `${millimeters} mm  (${(millimeters / 1000).toFixed(2)} m)`;
   const params = document?.template.params;
+  const requestedM2 = fit ? (fit.target_width_mm * fit.target_height_mm) / 1_000_000 : 0;
   // Escala gráfica con un valor redondo de aproximadamente 125 px.
   const scaleBarMm = scale
     ? [100, 200, 500, 1000, 2000, 5000, 10000, 20000].reduce((best, value) =>
@@ -344,6 +351,24 @@ export default function LedDesigner() {
               </div>
               <span className="rounded-md bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">1 cara</span>
             </div>
+            {fit && face && summary && (
+              <div className="grid grid-cols-3 divide-x divide-slate-100 border-b border-slate-100 bg-slate-50/60 px-5 py-3 text-center">
+                <div>
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Solicitada</p>
+                  <p className="text-base font-semibold tabular-nums text-slate-800">{requestedM2.toFixed(4)} m²</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Propuesta vigente</p>
+                  <p className="text-base font-semibold tabular-nums text-slate-800">{summary.active_area_m2.toFixed(4)} m²</p>
+                </div>
+                <div>
+                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Diferencia</p>
+                  <p className={`text-base font-semibold tabular-nums ${summary.active_area_m2 >= requestedM2 ? "text-emerald-700" : "text-rose-700"}`}>
+                    {areaPct(summary.active_area_m2, requestedM2)}
+                  </p>
+                </div>
+              </div>
+            )}
             <div className="bg-[linear-gradient(#f8fafc_1px,transparent_1px),linear-gradient(90deg,#f8fafc_1px,transparent_1px)] bg-[size:24px_24px] px-3 py-2 sm:px-8">
               {!face || !document ? (
                 <div className="flex h-[min(68vh,720px)] min-h-[420px] items-center justify-center text-sm text-slate-500">
@@ -515,6 +540,9 @@ export default function LedDesigner() {
                       </div>
                       <p className="mt-0.5 text-[11px] tabular-nums text-slate-500">
                         Diferencia: {formatDiff(proposal.diff_width_mm)} · {formatDiff(proposal.diff_height_mm)}
+                      </p>
+                      <p className="text-[11px] tabular-nums text-slate-500">
+                        Área: {proposal.area_m2.toFixed(4)} m² ({areaPct(proposal.area_m2, requestedM2)})
                       </p>
                       <button type="button" onClick={() => applyProposal(proposal)} disabled={generating} className="mt-2 w-full rounded-lg border border-cyan-800 px-3 py-1.5 text-xs font-semibold text-cyan-900 transition hover:bg-cyan-50 disabled:cursor-wait disabled:opacity-60">
                         Usar esta medida
