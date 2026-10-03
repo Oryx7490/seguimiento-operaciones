@@ -183,6 +183,9 @@ export default function LedDesigner() {
   const [newWidth, setNewWidth] = useState("");
   const [newHeight, setNewHeight] = useState("");
   const [newStock, setNewStock] = useState("");
+  const [newEnv, setNewEnv] = useState<"interior" | "exterior">("exterior");
+  // Tipo de pantalla: filtra el catálogo por entorno.
+  const [screenEnv, setScreenEnv] = useState<"interior" | "exterior">("exterior");
   const [catalogError, setCatalogError] = useState<DisplayError | null>(null);
   const [catalogNotice, setCatalogNotice] = useState<string | null>(null);
   const [addingModel, setAddingModel] = useState(false);
@@ -245,7 +248,7 @@ export default function LedDesigner() {
     // Un valor vacío o no numérico viaja como null y se rechaza allí.
     const parse = (value: string) => (value.trim() === "" ? null : Number(value));
     setGenerating(true);
-    void runLayout(parse(draftRows), parse(draftColumns), selectedModelId);
+    void runLayout(parse(draftRows), parse(draftColumns), effectiveModelId);
   }
 
   function submitModel(event: React.FormEvent<HTMLFormElement>) {
@@ -259,7 +262,7 @@ export default function LedDesigner() {
     fetch("/api/led-designer/catalog", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: newName.trim(), width_mm: width, height_mm: height, stock_qty: stock }),
+      body: JSON.stringify({ name: newName.trim(), width_mm: width, height_mm: height, stock_qty: stock, environment: newEnv }),
     })
       .then(async (response) => {
         const data = await response.json().catch(() => ({}));
@@ -296,7 +299,7 @@ export default function LedDesigner() {
     const heightMm = toMm(targetHeight);
     setFitting(true);
     setFitError(null);
-    void requestFit(widthMm, heightMm, selectedModelId)
+    void requestFit(widthMm, heightMm, effectiveModelId)
       .then((data) => setFit(data))
       .catch((reason: unknown) => {
         setFit(null);
@@ -327,6 +330,12 @@ export default function LedDesigner() {
 
   const catalogModels = catalog?.models ?? [];
   const modelById = (id: string) => catalogModels.find((model) => model.id === id);
+  const envModels = catalogModels.filter((model) => model.environment === screenEnv);
+
+  // Modelo efectivo: si el elegido no es del entorno activo, el primero disponible.
+  const effectiveModelId = envModels.some((model) => model.id === selectedModelId)
+    ? selectedModelId
+    : (envModels[0]?.id ?? selectedModelId);
 
   const manualAreaM2 =
     manualPlacements.reduce((area, placement) => {
@@ -669,9 +678,31 @@ export default function LedDesigner() {
             </select>
             </label>
             </div>
-            <button type="submit" disabled={fitting} className="w-full rounded-lg bg-cyan-800 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-cyan-900 disabled:cursor-wait disabled:opacity-60">
-            {fitting ? "Calculando…" : "Proponer medidas"}
-            </button>
+                <div>
+                  <span className="text-xs font-medium text-slate-600">Tipo de pantalla</span>
+                  <div role="group" aria-label="Tipo de pantalla" className="mt-1 flex overflow-hidden rounded-lg border border-slate-300 text-sm font-semibold">
+                    <button
+                      type="button"
+                      onClick={() => setScreenEnv("exterior")}
+                      aria-pressed={screenEnv === "exterior"}
+                      className={`flex-1 px-3 py-2 ${screenEnv === "exterior" ? "bg-cyan-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                    >
+                      Exterior
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setScreenEnv("interior")}
+                      aria-pressed={screenEnv === "interior"}
+                      className={`flex-1 px-3 py-2 ${screenEnv === "interior" ? "bg-cyan-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                    >
+                      Interior
+                    </button>
+                  </div>
+                  <p className="mt-1 text-[11px] leading-4 text-slate-500">Filtra el catálogo por entorno.</p>
+                </div>
+                <button type="submit" disabled={fitting} className="w-full rounded-lg bg-cyan-800 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-cyan-900 disabled:cursor-wait disabled:opacity-60">
+                  {fitting ? "Calculando…" : "Proponer medidas"}
+                </button>
             <p className="text-[11px] leading-4 text-slate-500">Muestra medidas construibles sin modificar el diseño; tú eliges cuál aplicar.</p>
             </form>
             {fitError && (
@@ -728,7 +759,10 @@ export default function LedDesigner() {
             <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400"><span className="mr-2 rounded bg-slate-800 px-1.5 py-0.5 align-middle font-mono text-[10px] font-semibold tracking-wide text-white">PAL</span>Gabinetes para arrastrar</h2>
             <p className="mt-1 text-[11px] leading-4 text-slate-500">Arrastra un gabinete al área. La esquina superior izquierda de la pieza queda donde sueltes.</p>
             <div className="mt-3 space-y-2">
-            {(catalog?.models ?? []).map((model) => {
+            {envModels.length === 0 && (
+              <p className="text-xs text-slate-500">Sin modelos de {screenEnv}. Dalos de alta en CAT.</p>
+            )}
+            {envModels.map((model) => {
               const colors = modelColor(model.id);
               return (
                 <div
@@ -814,10 +848,17 @@ export default function LedDesigner() {
             <input aria-label="Alto del modelo" type="number" inputMode="numeric" min="1" step="1" value={newHeight} onChange={(event) => setNewHeight(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-cyan-700" />
             </label>
             </div>
-            <label className="block text-xs font-medium text-slate-600">
-            Existencia (opcional)
-            <input aria-label="Existencia del modelo" type="number" inputMode="numeric" min="0" step="1" value={newStock} onChange={(event) => setNewStock(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-cyan-700" />
-            </label>
+                  <label className="block text-xs font-medium text-slate-600">
+                    Existencia (opcional)
+                    <input aria-label="Existencia del modelo" type="number" inputMode="numeric" min="0" step="1" value={newStock} onChange={(event) => setNewStock(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-cyan-700" />
+                  </label>
+                  <label className="block text-xs font-medium text-slate-600">
+                    Entorno
+                    <select aria-label="Entorno del modelo" value={newEnv} onChange={(event) => setNewEnv(event.target.value as "interior" | "exterior")} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-cyan-700">
+                      <option value="exterior">Exterior</option>
+                      <option value="interior">Interior</option>
+                    </select>
+                  </label>
             <button type="submit" disabled={addingModel} className="w-full rounded-lg bg-cyan-800 px-3 py-2 text-xs font-semibold text-white transition hover:bg-cyan-900 disabled:cursor-wait disabled:opacity-60">
             {addingModel ? "Guardando…" : "Dar de alta"}
             </button>
@@ -848,13 +889,16 @@ export default function LedDesigner() {
               <form onSubmit={submitLayout} noValidate className="mt-3 space-y-4">
                 <label className="block text-xs font-medium text-slate-600">
                   Modelo de gabinete
-                  <select aria-label="Modelo de gabinete" value={selectedModelId} onChange={(event) => setSelectedModelId(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-cyan-700">
-                    {(catalog?.models ?? []).map((model) => (
+                  <select aria-label="Modelo de gabinete" value={effectiveModelId} onChange={(event) => setSelectedModelId(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-cyan-700">
+                    {envModels.map((model) => (
                       <option key={model.id} value={model.id}>
                         {model.width_mm} × {model.height_mm} mm · {model.stock_qty === null ? "existencia sin registrar" : `${model.stock_qty} en existencia`}
                       </option>
                     ))}
                   </select>
+                  {envModels.length === 0 && (
+                    <p className="mt-1 text-[11px] text-slate-500">Sin modelos de {screenEnv}. Dalos de alta en CAT.</p>
+                  )}
                 </label>
                 <div className="grid grid-cols-2 gap-3">
                   <label className="text-xs font-medium text-slate-600">
