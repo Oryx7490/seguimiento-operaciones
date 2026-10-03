@@ -89,6 +89,44 @@ function toDisplayError(reason: unknown): DisplayError {
   return { message: "Ocurrió un error inesperado.", issues: [] };
 }
 
+type FitProposal = {
+  rows: number;
+  columns: number;
+  width_mm: number;
+  height_mm: number;
+  diff_width_mm: number;
+  diff_height_mm: number;
+  cabinet_count: number;
+  area_mm2: number;
+  area_m2: number;
+};
+
+type FitResponse = {
+  engine_version: string;
+  target_width_mm: number;
+  target_height_mm: number;
+  model_id: string;
+  proposals: FitProposal[];
+};
+
+async function requestFit(widthMm: number | null, heightMm: number | null): Promise<FitResponse> {
+  const response = await fetch("/api/led-designer/fit", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ target_width_mm: widthMm, target_height_mm: heightMm }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new EngineError(data.error ?? "No se pudieron calcular propuestas.", Array.isArray(data.issues) ? data.issues : []);
+  }
+  return data as FitResponse;
+}
+
+function formatDiff(diffMm: number): string {
+  const sign = diffMm > 0 ? "+" : "";
+  return `${sign}${diffMm} mm (${sign}${(diffMm / 1000).toFixed(2)} m)`;
+}
+
 // Margen derecho reservado para la cota vertical.
 const SVG = { width: 1120, height: 1020, maxDrawingWidth: 860, maxDrawingHeight: 620, rightMargin: 210 };
 
@@ -98,6 +136,12 @@ export default function LedDesigner() {
   const [draftColumns, setDraftColumns] = useState("4");
   const [error, setError] = useState<DisplayError | null>(null);
   const [generating, setGenerating] = useState(true);
+  const [targetWidth, setTargetWidth] = useState("4");
+  const [targetHeight, setTargetHeight] = useState("3");
+  const [targetUnit, setTargetUnit] = useState<"mm" | "m">("m");
+  const [fit, setFit] = useState<FitResponse | null>(null);
+  const [fitError, setFitError] = useState<DisplayError | null>(null);
+  const [fitting, setFitting] = useState(false);
   // Sólo la solicitud más reciente puede actualizar el diseño: una respuesta
   // antigua nunca sustituye el resultado de una edición posterior.
   const latestRequest = useRef<{ id: number; controller: AbortController } | null>(null);
@@ -135,6 +179,33 @@ export default function LedDesigner() {
     void runLayout(parse(draftRows), parse(draftColumns));
   }
 
+  function submitFit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    // La propuesta no modifica el diseño: sólo se aplica al elegir una medida.
+    const toMm = (value: string) => {
+      if (value.trim() === "") return null;
+      const parsed = Number(value);
+      if (!Number.isFinite(parsed)) return null;
+      return Math.round(targetUnit === "m" ? parsed * 1000 : parsed);
+    };
+    const widthMm = toMm(targetWidth);
+    const heightMm = toMm(targetHeight);
+    setFitting(true);
+    setFitError(null);
+    void requestFit(widthMm, heightMm)
+      .then((data) => setFit(data))
+      .catch((reason: unknown) => {
+        setFit(null);
+        setFitError(toDisplayError(reason));
+      })
+      .finally(() => setFitting(false));
+  }
+
+  function applyProposal(proposal: FitProposal) {
+    setGenerating(true);
+    void runLayout(proposal.rows, proposal.columns);
+  }
+
   const document = result?.document;
   const summary = result?.summary;
   const face = document?.faces[0];
@@ -165,7 +236,7 @@ export default function LedDesigner() {
           <div>
             <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-cyan-800">
               <span className="h-2 w-2 rounded-full bg-cyan-600" />
-              Herramienta de diseño · Etapa E02
+              Herramienta de diseño · Etapa E03
             </div>
             <h1 className="text-3xl font-semibold tracking-tight">Diseñador de pantallas LED</h1>
             <p className="mt-1 text-sm text-slate-500">Modulación rectangular · gabinete sintético de 960 × 960 mm</p>
@@ -279,6 +350,73 @@ export default function LedDesigner() {
                 </button>
                 <p className="text-[11px] leading-4 text-slate-500">De 1 a 100 filas o columnas, con un máximo de 5,000 gabinetes. Si una propuesta es inválida, se conserva la pantalla actual.</p>
               </form>
+            </section>
+
+            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Medida objetivo</p>
+              <form onSubmit={submitFit} noValidate className="mt-3 space-y-4">
+                <div className="grid grid-cols-[1fr_1fr_auto] gap-3">
+                  <label className="text-xs font-medium text-slate-600">
+                    Base
+                    <input aria-label="Base objetivo" type="number" inputMode="decimal" min="0" step="any" value={targetWidth} onChange={(event) => setTargetWidth(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base font-semibold text-slate-900 outline-none focus:border-cyan-700 focus:ring-2 focus:ring-cyan-100" />
+                  </label>
+                  <label className="text-xs font-medium text-slate-600">
+                    Altura
+                    <input aria-label="Altura objetivo" type="number" inputMode="decimal" min="0" step="any" value={targetHeight} onChange={(event) => setTargetHeight(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base font-semibold text-slate-900 outline-none focus:border-cyan-700 focus:ring-2 focus:ring-cyan-100" />
+                  </label>
+                  <label className="text-xs font-medium text-slate-600">
+                    Unidad
+                    <select aria-label="Unidad de medida" value={targetUnit} onChange={(event) => setTargetUnit(event.target.value as "mm" | "m")} className="mt-1 block rounded-lg border border-slate-300 bg-white px-2 py-2 text-base font-semibold text-slate-900 outline-none focus:border-cyan-700">
+                      <option value="m">m</option>
+                      <option value="mm">mm</option>
+                    </select>
+                  </label>
+                </div>
+                <button type="submit" disabled={fitting} className="w-full rounded-lg bg-cyan-800 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-cyan-900 disabled:cursor-wait disabled:opacity-60">
+                  {fitting ? "Calculando…" : "Proponer medidas"}
+                </button>
+                <p className="text-[11px] leading-4 text-slate-500">Muestra medidas construibles sin modificar el diseño; tú eliges cuál aplicar.</p>
+              </form>
+              {fitError && (
+                <div role="alert" className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
+                  <strong className="font-semibold">{fitError.message}</strong>
+                  {fitError.issues.length > 0 && (
+                    <ul className="mt-1 list-disc pl-5">
+                      {fitError.issues.map((issue) => (
+                        <li key={`${issue.field}-${issue.message}`}>
+                          {issue.field ? <strong className="font-medium">{issue.field}:</strong> : null} {issue.message}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+              {fit && (
+                <div className="mt-3 space-y-2">
+                  <p className="text-[11px] text-slate-500">
+                    Objetivo: {(fit.target_width_mm / 1000).toFixed(2)} × {(fit.target_height_mm / 1000).toFixed(2)} m
+                  </p>
+                  {fit.proposals.length === 0 && (
+                    <p className="text-xs text-slate-600">Sin propuestas dentro de los límites para esta medida.</p>
+                  )}
+                  {fit.proposals.map((proposal) => (
+                    <div key={`${proposal.rows}x${proposal.columns}`} className="rounded-lg border border-slate-200 px-3 py-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-semibold tabular-nums">
+                          {(proposal.width_mm / 1000).toFixed(2)} × {(proposal.height_mm / 1000).toFixed(2)} m
+                        </span>
+                        <span className="text-xs tabular-nums text-slate-500">{proposal.columns} × {proposal.rows} · {proposal.cabinet_count} gab.</span>
+                      </div>
+                      <p className="mt-0.5 text-[11px] tabular-nums text-slate-500">
+                        Diferencia: {formatDiff(proposal.diff_width_mm)} · {formatDiff(proposal.diff_height_mm)}
+                      </p>
+                      <button type="button" onClick={() => applyProposal(proposal)} disabled={generating} className="mt-2 w-full rounded-lg border border-cyan-800 px-3 py-1.5 text-xs font-semibold text-cyan-900 transition hover:bg-cyan-50 disabled:cursor-wait disabled:opacity-60">
+                        Usar esta medida
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </section>
 
             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">

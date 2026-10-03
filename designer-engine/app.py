@@ -368,11 +368,84 @@ class RectangleRequest(StrictModel):
         return self
 
 
+class FitRequest(StrictModel):
+    """Medida objetivo en mm. La interfaz convierte m a mm antes de llamar."""
+
+    target_width_mm: int = Field(ge=1, le=100_000)
+    target_height_mm: int = Field(ge=1, le=100_000)
+    model_id: str = Field(default="demo-960x960", min_length=1, max_length=80)
+
+
+class FitProposal(StrictModel):
+    rows: int
+    columns: int
+    width_mm: int
+    height_mm: int
+    diff_width_mm: int
+    diff_height_mm: int
+    cabinet_count: int
+    area_mm2: int
+    area_m2: float
+
+
+class FitResponse(StrictModel):
+    engine_version: str
+    target_width_mm: int
+    target_height_mm: int
+    model_id: str
+    proposals: list[FitProposal]
+
+
+def propose_fit(target_width_mm: int, target_height_mm: int, model_id: str = "demo-960x960") -> FitResponse:
+    model = next((m for m in DEMO_CATALOG.models if m.id == model_id), None)
+    if model is None:
+        raise ValueError("El modelo solicitado no está en el catálogo.")
+    target_area = target_width_mm * target_height_mm
+    candidates: dict[tuple[int, int], FitProposal] = {}
+    for columns in {target_width_mm // model.width_mm, -(-target_width_mm // model.width_mm)}:
+        for rows in {target_height_mm // model.height_mm, -(-target_height_mm // model.height_mm)}:
+            if not (1 <= rows <= MAX_GRID and 1 <= columns <= MAX_GRID):
+                continue
+            if rows * columns > MAX_CABINETS:
+                continue
+            width_mm = columns * model.width_mm
+            height_mm = rows * model.height_mm
+            area_mm2 = width_mm * height_mm
+            candidates[(rows, columns)] = FitProposal(
+                rows=rows,
+                columns=columns,
+                width_mm=width_mm,
+                height_mm=height_mm,
+                diff_width_mm=width_mm - target_width_mm,
+                diff_height_mm=height_mm - target_height_mm,
+                cabinet_count=rows * columns,
+                area_mm2=area_mm2,
+                area_m2=mm2_to_m2(area_mm2),
+            )
+    proposals = sorted(
+        candidates.values(),
+        key=lambda p: (abs(p.area_mm2 - target_area), p.cabinet_count, p.columns, p.rows),
+    )
+    return FitResponse(
+        engine_version=ENGINE_VERSION,
+        target_width_mm=target_width_mm,
+        target_height_mm=target_height_mm,
+        model_id=model.id,
+        proposals=proposals,
+    )
+
+
 # --------------------------------------------------------------------------
 # Errores legibles
 # --------------------------------------------------------------------------
 
-FIELD_LABELS = {"rows": "Filas", "columns": "Columnas"}
+FIELD_LABELS = {
+    "rows": "Filas",
+    "columns": "Columnas",
+    "target_width_mm": "Base objetivo",
+    "target_height_mm": "Altura objetivo",
+    "model_id": "Modelo",
+}
 
 
 def _issue_message(error: dict) -> str:
@@ -421,6 +494,14 @@ async def validation_error_handler(_request: Request, exc: RequestValidationErro
     return JSONResponse(status_code=422, content={"error": "Datos no válidos.", "issues": issues})
 
 
+@app.exception_handler(ValueError)
+async def value_error_handler(_request: Request, exc: ValueError) -> JSONResponse:
+    return JSONResponse(
+        status_code=422,
+        content={"error": "Datos no válidos.", "issues": [{"field": "Modelo", "message": str(exc)}]},
+    )
+
+
 @app.get("/health")
 def health() -> dict[str, str | int]:
     return {"status": "ok", "engine_version": ENGINE_VERSION, "schema_version": SCHEMA_VERSION}
@@ -445,3 +526,13 @@ def rectangle(request: RectangleRequest) -> DesignResponse:
 def validate_document(document: ScreenDocument) -> DesignResponse:
     """Valida un documento y devuelve sus resultados calculados."""
     return respond(document)
+
+
+@app.post("/v1/fit", response_model=FitResponse)
+def fit(request: FitRequest) -> FitResponse:
+    """Propone medidas modulables cercanas a la medida objetivo, sin aplicarlas."""
+    return propose_fit(
+        target_width_mm=request.target_width_mm,
+        target_height_mm=request.target_height_mm,
+        model_id=request.model_id,
+    )

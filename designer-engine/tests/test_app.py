@@ -171,3 +171,46 @@ def test_joins_reserved_but_not_accepted_yet():
 
 def test_rejects_old_schema_version():
     _invalid(lambda d: d.update(schema_version=1))
+
+
+def fit(width_mm: int, height_mm: int) -> dict:
+    response = client.post("/v1/fit", json={"target_width_mm": width_mm, "target_height_mm": height_mm})
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def test_fit_acceptance_4x3m():
+    """Objetivo 4000 x 3000 mm con 960 mm: 4 x 3 -> 3840 x 2880, diff -160/-120."""
+    data = fit(4000, 3000)
+    first = data["proposals"][0]
+    assert (first["columns"], first["rows"]) == (4, 3)
+    assert (first["width_mm"], first["height_mm"]) == (3840, 2880)
+    assert (first["diff_width_mm"], first["diff_height_mm"]) == (-160, -120)
+    assert first["cabinet_count"] == 12
+    assert first["area_m2"] == pytest.approx(11.0592)
+    # No se aplica nada: sólo propuestas.
+    assert len(data["proposals"]) == 4
+
+
+def test_fit_exact_target_has_zero_diff():
+    data = fit(3840, 2880)
+    assert data["proposals"][0]["diff_width_mm"] == 0
+    assert data["proposals"][0]["diff_height_mm"] == 0
+
+
+@pytest.mark.parametrize(
+    ("payload", "field"),
+    [
+        ({"target_width_mm": 0, "target_height_mm": 3000}, "Base objetivo"),
+        ({"target_width_mm": -100, "target_height_mm": 3000}, "Base objetivo"),
+        ({"target_width_mm": 4000, "target_height_mm": 2.5}, "Altura objetivo"),
+        ({"target_width_mm": 4000}, "Altura objetivo"),
+        ({"target_width_mm": 4000, "target_height_mm": 3000, "model_id": "no-existe"}, ""),
+    ],
+)
+def test_fit_rejections(payload, field):
+    response = client.post("/v1/fit", json=payload)
+    assert response.status_code == 422
+    body = response.json()
+    if field:
+        assert any(i["field"] == field for i in body["issues"])
