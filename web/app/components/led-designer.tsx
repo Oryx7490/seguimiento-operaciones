@@ -342,7 +342,7 @@ export default function LedDesigner() {
           </div>
         )}
 
-        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="grid gap-5 xl:grid-cols-[320px_minmax(0,1fr)_320px]">
           <section aria-label="Vista 2D de la pantalla" className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
               <div>
@@ -448,7 +448,145 @@ export default function LedDesigner() {
             </div>
           </section>
 
-          <aside className="space-y-5">
+          <aside className="space-y-5 xl:order-first">
+            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Medida objetivo</p>
+            <form onSubmit={submitFit} noValidate className="mt-3 space-y-4">
+            <div className="grid grid-cols-[1fr_1fr_auto] gap-3">
+            <label className="text-xs font-medium text-slate-600">
+            Base
+            <input aria-label="Base objetivo" type="number" inputMode="decimal" min="0" step="any" value={targetWidth} onChange={(event) => setTargetWidth(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base font-semibold text-slate-900 outline-none focus:border-cyan-700 focus:ring-2 focus:ring-cyan-100" />
+            </label>
+            <label className="text-xs font-medium text-slate-600">
+            Altura
+            <input aria-label="Altura objetivo" type="number" inputMode="decimal" min="0" step="any" value={targetHeight} onChange={(event) => setTargetHeight(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base font-semibold text-slate-900 outline-none focus:border-cyan-700 focus:ring-2 focus:ring-cyan-100" />
+            </label>
+            <label className="text-xs font-medium text-slate-600">
+            Unidad
+            <select aria-label="Unidad de medida" value={targetUnit} onChange={(event) => setTargetUnit(event.target.value as "mm" | "m")} className="mt-1 block rounded-lg border border-slate-300 bg-white px-2 py-2 text-base font-semibold text-slate-900 outline-none focus:border-cyan-700">
+            <option value="m">m</option>
+            <option value="mm">mm</option>
+            </select>
+            </label>
+            </div>
+            <button type="submit" disabled={fitting} className="w-full rounded-lg bg-cyan-800 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-cyan-900 disabled:cursor-wait disabled:opacity-60">
+            {fitting ? "Calculando…" : "Proponer medidas"}
+            </button>
+            <p className="text-[11px] leading-4 text-slate-500">Muestra medidas construibles sin modificar el diseño; tú eliges cuál aplicar.</p>
+            </form>
+            {fitError && (
+            <div role="alert" className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
+            <strong className="font-semibold">{fitError.message}</strong>
+            {fitError.issues.length > 0 && (
+            <ul className="mt-1 list-disc pl-5">
+            {fitError.issues.map((issue) => (
+            <li key={`${issue.field}-${issue.message}`}>
+            {issue.field ? <strong className="font-medium">{issue.field}:</strong> : null} {issue.message}
+            </li>
+            ))}
+            </ul>
+            )}
+            </div>
+            )}
+            {fit && (
+            <div className="mt-3 space-y-2">
+            <p className="text-[11px] text-slate-500">
+            Objetivo: {(fit.target_width_mm / 1000).toFixed(2)} × {(fit.target_height_mm / 1000).toFixed(2)} m
+            </p>
+            <label className="flex items-center gap-2 text-xs font-medium text-slate-700">
+            <input type="checkbox" checked={showTarget} onChange={(event) => setShowTarget(event.target.checked)} className="h-4 w-4 accent-rose-700" />
+            Mostrar la medida solicitada sobre el diseño
+            </label>
+            {fit.proposals.length === 0 && (
+            <p className="text-xs text-slate-600">Sin propuestas dentro de los límites para esta medida.</p>
+            )}
+            {fit.proposals.map((proposal) => (
+            <div key={`${proposal.rows}x${proposal.columns}`} className="rounded-lg border border-slate-200 px-3 py-2.5">
+            <div className="flex items-center justify-between gap-2">
+            <span className="text-sm font-semibold tabular-nums">
+            {(proposal.width_mm / 1000).toFixed(2)} × {(proposal.height_mm / 1000).toFixed(2)} m
+            </span>
+            <span className="text-xs tabular-nums text-slate-500">{proposal.columns} × {proposal.rows} · {proposal.cabinet_count} gab.</span>
+            </div>
+            <p className="mt-0.5 text-[11px] tabular-nums text-slate-500">
+            Diferencia: {formatDiff(proposal.diff_width_mm)} · {formatDiff(proposal.diff_height_mm)}
+            </p>
+            <p className="text-[11px] tabular-nums text-slate-500">
+            Área: {proposal.area_m2.toFixed(4)} m² ({areaPct(proposal.area_m2, requestedM2)})
+            </p>
+            <button type="button" onClick={() => applyProposal(proposal)} disabled={generating} className="mt-2 w-full rounded-lg border border-cyan-800 px-3 py-1.5 text-xs font-semibold text-cyan-900 transition hover:bg-cyan-50 disabled:cursor-wait disabled:opacity-60">
+            Usar esta medida
+            </button>
+            </div>
+            )                  )}
+            </div>
+            )}
+            </section>
+
+            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Catálogo de gabinetes</h2>
+            <p className="mt-1 text-[11px] leading-4 text-slate-500">
+            Hierro para exterior{ catalog ? ` · revisión ${catalog.revision}` : ""}. La existencia se captura a mano; el inventario real se vinculará después.
+            </p>
+            <div className="mt-3 space-y-2">
+            {(catalog?.models ?? []).map((model) => (
+            <div key={model.id} className="rounded-lg border border-slate-200 px-3 py-2.5">
+            <div className="flex items-center justify-between gap-2">
+            <span className="text-sm font-semibold tabular-nums">{model.width_mm} × {model.height_mm} mm</span>
+            <span className="text-[11px] text-slate-500">{model.status === "demo" ? "demostración" : model.status}</span>
+            </div>
+            <p className="mt-0.5 text-[11px] text-slate-500">{model.name} · {model.material} · {model.environment}</p>
+            <p className="text-[11px] tabular-nums text-slate-600">
+            Existencia: {model.stock_qty === null ? "sin registrar" : model.stock_qty}
+            </p>
+            </div>
+            ))}
+            </div>
+            <details className="mt-3">
+            <summary className="cursor-pointer text-xs font-medium text-cyan-800">Dar de alta un modelo</summary>
+            <form onSubmit={submitModel} noValidate className="mt-3 space-y-3">
+            <label className="block text-xs font-medium text-slate-600">
+            Nombre
+            <input aria-label="Nombre del modelo" type="text" value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Hierro exterior 500 × 500 mm" className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-cyan-700" />
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+            <label className="text-xs font-medium text-slate-600">
+            Ancho (mm)
+            <input aria-label="Ancho del modelo" type="number" inputMode="numeric" min="1" step="1" value={newWidth} onChange={(event) => setNewWidth(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-cyan-700" />
+            </label>
+            <label className="text-xs font-medium text-slate-600">
+            Alto (mm)
+            <input aria-label="Alto del modelo" type="number" inputMode="numeric" min="1" step="1" value={newHeight} onChange={(event) => setNewHeight(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-cyan-700" />
+            </label>
+            </div>
+            <label className="block text-xs font-medium text-slate-600">
+            Existencia (opcional)
+            <input aria-label="Existencia del modelo" type="number" inputMode="numeric" min="0" step="1" value={newStock} onChange={(event) => setNewStock(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-cyan-700" />
+            </label>
+            <button type="submit" disabled={addingModel} className="w-full rounded-lg bg-cyan-800 px-3 py-2 text-xs font-semibold text-white transition hover:bg-cyan-900 disabled:cursor-wait disabled:opacity-60">
+            {addingModel ? "Guardando…" : "Dar de alta"}
+            </button>
+            </form>
+            </details>
+            {catalogNotice && <p className="mt-2 text-xs text-emerald-800">{catalogNotice}</p>}
+            {catalogError && (
+            <div role="alert" className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
+            <strong className="font-semibold">{catalogError.message}</strong>
+            {catalogError.issues.length > 0 && (
+            <ul className="mt-1 list-disc pl-5">
+            {catalogError.issues.map((issue) => (
+            <li key={`${issue.field}-${issue.message}`}>
+            {issue.field ? <strong className="font-medium">{issue.field}:</strong> : null} {issue.message}
+            </li>
+            ))}
+            </ul>
+            )}
+            </div>
+            )}
+            </section>
+          </aside>
+
+                    <aside className="space-y-5">
             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Modulación</p>
               <form onSubmit={submitLayout} noValidate className="mt-3 space-y-4">
@@ -479,141 +617,7 @@ export default function LedDesigner() {
               </form>
             </section>
 
-            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Medida objetivo</p>
-              <form onSubmit={submitFit} noValidate className="mt-3 space-y-4">
-                <div className="grid grid-cols-[1fr_1fr_auto] gap-3">
-                  <label className="text-xs font-medium text-slate-600">
-                    Base
-                    <input aria-label="Base objetivo" type="number" inputMode="decimal" min="0" step="any" value={targetWidth} onChange={(event) => setTargetWidth(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base font-semibold text-slate-900 outline-none focus:border-cyan-700 focus:ring-2 focus:ring-cyan-100" />
-                  </label>
-                  <label className="text-xs font-medium text-slate-600">
-                    Altura
-                    <input aria-label="Altura objetivo" type="number" inputMode="decimal" min="0" step="any" value={targetHeight} onChange={(event) => setTargetHeight(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base font-semibold text-slate-900 outline-none focus:border-cyan-700 focus:ring-2 focus:ring-cyan-100" />
-                  </label>
-                  <label className="text-xs font-medium text-slate-600">
-                    Unidad
-                    <select aria-label="Unidad de medida" value={targetUnit} onChange={(event) => setTargetUnit(event.target.value as "mm" | "m")} className="mt-1 block rounded-lg border border-slate-300 bg-white px-2 py-2 text-base font-semibold text-slate-900 outline-none focus:border-cyan-700">
-                      <option value="m">m</option>
-                      <option value="mm">mm</option>
-                    </select>
-                  </label>
-                </div>
-                <button type="submit" disabled={fitting} className="w-full rounded-lg bg-cyan-800 px-3 py-2.5 text-sm font-semibold text-white transition hover:bg-cyan-900 disabled:cursor-wait disabled:opacity-60">
-                  {fitting ? "Calculando…" : "Proponer medidas"}
-                </button>
-                <p className="text-[11px] leading-4 text-slate-500">Muestra medidas construibles sin modificar el diseño; tú eliges cuál aplicar.</p>
-              </form>
-              {fitError && (
-                <div role="alert" className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
-                  <strong className="font-semibold">{fitError.message}</strong>
-                  {fitError.issues.length > 0 && (
-                    <ul className="mt-1 list-disc pl-5">
-                      {fitError.issues.map((issue) => (
-                        <li key={`${issue.field}-${issue.message}`}>
-                          {issue.field ? <strong className="font-medium">{issue.field}:</strong> : null} {issue.message}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
-              {fit && (
-                <div className="mt-3 space-y-2">
-                  <p className="text-[11px] text-slate-500">
-                    Objetivo: {(fit.target_width_mm / 1000).toFixed(2)} × {(fit.target_height_mm / 1000).toFixed(2)} m
-                  </p>
-                  <label className="flex items-center gap-2 text-xs font-medium text-slate-700">
-                    <input type="checkbox" checked={showTarget} onChange={(event) => setShowTarget(event.target.checked)} className="h-4 w-4 accent-rose-700" />
-                    Mostrar la medida solicitada sobre el diseño
-                  </label>
-                  {fit.proposals.length === 0 && (
-                    <p className="text-xs text-slate-600">Sin propuestas dentro de los límites para esta medida.</p>
-                  )}
-                  {fit.proposals.map((proposal) => (
-                    <div key={`${proposal.rows}x${proposal.columns}`} className="rounded-lg border border-slate-200 px-3 py-2.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-semibold tabular-nums">
-                          {(proposal.width_mm / 1000).toFixed(2)} × {(proposal.height_mm / 1000).toFixed(2)} m
-                        </span>
-                        <span className="text-xs tabular-nums text-slate-500">{proposal.columns} × {proposal.rows} · {proposal.cabinet_count} gab.</span>
-                      </div>
-                      <p className="mt-0.5 text-[11px] tabular-nums text-slate-500">
-                        Diferencia: {formatDiff(proposal.diff_width_mm)} · {formatDiff(proposal.diff_height_mm)}
-                      </p>
-                      <p className="text-[11px] tabular-nums text-slate-500">
-                        Área: {proposal.area_m2.toFixed(4)} m² ({areaPct(proposal.area_m2, requestedM2)})
-                      </p>
-                      <button type="button" onClick={() => applyProposal(proposal)} disabled={generating} className="mt-2 w-full rounded-lg border border-cyan-800 px-3 py-1.5 text-xs font-semibold text-cyan-900 transition hover:bg-cyan-50 disabled:cursor-wait disabled:opacity-60">
-                        Usar esta medida
-                      </button>
-                    </div>
-                  )                  )}
-                </div>
-              )}
-            </section>
-
-            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Catálogo de gabinetes</h2>
-              <p className="mt-1 text-[11px] leading-4 text-slate-500">
-                Hierro para exterior{ catalog ? ` · revisión ${catalog.revision}` : ""}. La existencia se captura a mano; el inventario real se vinculará después.
-              </p>
-              <div className="mt-3 space-y-2">
-                {(catalog?.models ?? []).map((model) => (
-                  <div key={model.id} className="rounded-lg border border-slate-200 px-3 py-2.5">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-sm font-semibold tabular-nums">{model.width_mm} × {model.height_mm} mm</span>
-                      <span className="text-[11px] text-slate-500">{model.status === "demo" ? "demostración" : model.status}</span>
-                    </div>
-                    <p className="mt-0.5 text-[11px] text-slate-500">{model.name} · {model.material} · {model.environment}</p>
-                    <p className="text-[11px] tabular-nums text-slate-600">
-                      Existencia: {model.stock_qty === null ? "sin registrar" : model.stock_qty}
-                    </p>
-                  </div>
-                ))}
-              </div>
-              <details className="mt-3">
-                <summary className="cursor-pointer text-xs font-medium text-cyan-800">Dar de alta un modelo</summary>
-                <form onSubmit={submitModel} noValidate className="mt-3 space-y-3">
-                  <label className="block text-xs font-medium text-slate-600">
-                    Nombre
-                    <input aria-label="Nombre del modelo" type="text" value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Hierro exterior 500 × 500 mm" className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-cyan-700" />
-                  </label>
-                  <div className="grid grid-cols-2 gap-3">
-                    <label className="text-xs font-medium text-slate-600">
-                      Ancho (mm)
-                      <input aria-label="Ancho del modelo" type="number" inputMode="numeric" min="1" step="1" value={newWidth} onChange={(event) => setNewWidth(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-cyan-700" />
-                    </label>
-                    <label className="text-xs font-medium text-slate-600">
-                      Alto (mm)
-                      <input aria-label="Alto del modelo" type="number" inputMode="numeric" min="1" step="1" value={newHeight} onChange={(event) => setNewHeight(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-cyan-700" />
-                    </label>
-                  </div>
-                  <label className="block text-xs font-medium text-slate-600">
-                    Existencia (opcional)
-                    <input aria-label="Existencia del modelo" type="number" inputMode="numeric" min="0" step="1" value={newStock} onChange={(event) => setNewStock(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-cyan-700" />
-                  </label>
-                  <button type="submit" disabled={addingModel} className="w-full rounded-lg bg-cyan-800 px-3 py-2 text-xs font-semibold text-white transition hover:bg-cyan-900 disabled:cursor-wait disabled:opacity-60">
-                    {addingModel ? "Guardando…" : "Dar de alta"}
-                  </button>
-                </form>
-              </details>
-              {catalogNotice && <p className="mt-2 text-xs text-emerald-800">{catalogNotice}</p>}
-              {catalogError && (
-                <div role="alert" className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
-                  <strong className="font-semibold">{catalogError.message}</strong>
-                  {catalogError.issues.length > 0 && (
-                    <ul className="mt-1 list-disc pl-5">
-                      {catalogError.issues.map((issue) => (
-                        <li key={`${issue.field}-${issue.message}`}>
-                          {issue.field ? <strong className="font-medium">{issue.field}:</strong> : null} {issue.message}
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              )}
-            </section>
+            
 
             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Resumen del diseño</p>
