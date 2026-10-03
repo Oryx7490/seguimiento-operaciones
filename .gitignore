@@ -30,3 +30,6 @@ db/backup/restore-test/
 # Logs
 *.log
 npm-debug.log*
+
+# Catálogo editable del diseñador (dato local, se regenera solo)
+designer-engine/catalog.json
