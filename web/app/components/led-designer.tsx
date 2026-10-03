@@ -388,7 +388,7 @@ export default function LedDesigner() {
                     <g>
                       <rect
                         x={x(0)}
-                        y={y(fit.target_height_mm)}
+                        y={y(face.height_mm)}
                         width={fit.target_width_mm * scale}
                         height={fit.target_height_mm * scale}
                         fill="none"
@@ -396,8 +396,8 @@ export default function LedDesigner() {
                         strokeWidth="2.5"
                         strokeDasharray="10 7"
                       />
-                      <rect x={x(0)} y={y(0) + 8} width="330" height="28" rx="6" fill="white" opacity="0.92" />
-                      <text x={x(0) + 10} y={y(0) + 29} fill="#e11d48" fontSize="17" fontWeight="700">
+                      <rect x={x(0)} y={y(face.height_mm) + fit.target_height_mm * scale + 8} width="330" height="28" rx="6" fill="white" opacity="0.92" />
+                      <text x={x(0) + 10} y={y(face.height_mm) + fit.target_height_mm * scale + 29} fill="#e11d48" fontSize="17" fontWeight="700">
                         Medida solicitada: {(fit.target_width_mm / 1000).toFixed(2)} × {(fit.target_height_mm / 1000).toFixed(2)} m
                       </text>
                     </g>
