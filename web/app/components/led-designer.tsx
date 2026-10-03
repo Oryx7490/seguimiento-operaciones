@@ -145,6 +145,7 @@ export default function LedDesigner() {
   const [fit, setFit] = useState<FitResponse | null>(null);
   const [fitError, setFitError] = useState<DisplayError | null>(null);
   const [fitting, setFitting] = useState(false);
+  const [showTarget, setShowTarget] = useState(true);
   const [catalog, setCatalog] = useState<{ revision: string; models: CabinetModel[] } | null>(null);
   const [selectedModelId, setSelectedModelId] = useState("hierro-960x960");
   const [newName, setNewName] = useState("");
@@ -383,6 +384,25 @@ export default function LedDesigner() {
                     );
                   })}
 
+                  {fit && showTarget && (
+                    <g>
+                      <rect
+                        x={x(0)}
+                        y={y(fit.target_height_mm)}
+                        width={fit.target_width_mm * scale}
+                        height={fit.target_height_mm * scale}
+                        fill="none"
+                        stroke="#e11d48"
+                        strokeWidth="2.5"
+                        strokeDasharray="10 7"
+                      />
+                      <rect x={x(0)} y={y(0) + 8} width="330" height="28" rx="6" fill="white" opacity="0.92" />
+                      <text x={x(0) + 10} y={y(0) + 29} fill="#e11d48" fontSize="17" fontWeight="700">
+                        Medida solicitada: {(fit.target_width_mm / 1000).toFixed(2)} × {(fit.target_height_mm / 1000).toFixed(2)} m
+                      </text>
+                    </g>
+                  )}
+
                   <path d={`M ${originX} ${originY - 16} V ${originY - 51} M ${originX + drawingWidth} ${originY - 16} V ${originY - 51}`} stroke="#94a3b8" strokeWidth="1.5" />
                   <line x1={originX} y1={originY - 40} x2={originX + drawingWidth} y2={originY - 40} stroke="#0e7490" strokeWidth="2" markerStart="url(#dimension-arrow)" markerEnd="url(#dimension-arrow)" />
                   <rect x={originX + drawingWidth / 2 - 108} y={originY - 66} width="216" height="30" rx="6" fill="white" />
@@ -478,6 +498,10 @@ export default function LedDesigner() {
                   <p className="text-[11px] text-slate-500">
                     Objetivo: {(fit.target_width_mm / 1000).toFixed(2)} × {(fit.target_height_mm / 1000).toFixed(2)} m
                   </p>
+                  <label className="flex items-center gap-2 text-xs font-medium text-slate-700">
+                    <input type="checkbox" checked={showTarget} onChange={(event) => setShowTarget(event.target.checked)} className="h-4 w-4 accent-rose-700" />
+                    Mostrar la medida solicitada sobre el diseño
+                  </label>
                   {fit.proposals.length === 0 && (
                     <p className="text-xs text-slate-600">Sin propuestas dentro de los límites para esta medida.</p>
                   )}
