@@ -1,0 +1,53 @@
+{
+  "revision": "disenador-2026-10-03",
+  "models": [
+    {
+      "id": "hierro-640x640",
+      "name": "Hierro exterior 640 × 640 mm",
+      "width_mm": 640,
+      "height_mm": 640,
+      "depth_mm": null,
+      "status": "demo",
+      "source": "Gabinete genérico de hierro para exterior; no es de marca específica",
+      "material": "hierro (lámina)",
+      "environment": "exterior",
+      "stock_qty": null
+    },
+    {
+      "id": "hierro-640x960",
+      "name": "Hierro exterior 640 × 960 mm",
+      "width_mm": 640,
+      "height_mm": 960,
+      "depth_mm": null,
+      "status": "demo",
+      "source": "Gabinete genérico de hierro para exterior; no es de marca específica",
+      "material": "hierro (lámina)",
+      "environment": "exterior",
+      "stock_qty": null
+    },
+    {
+      "id": "hierro-960x960",
+      "name": "Hierro exterior 960 × 960 mm",
+      "width_mm": 960,
+      "height_mm": 960,
+      "depth_mm": null,
+      "status": "demo",
+      "source": "Gabinete genérico de hierro para exterior; no es de marca específica",
+      "material": "hierro (lámina)",
+      "environment": "exterior",
+      "stock_qty": null
+    },
+    {
+      "id": "hierro-1280x960",
+      "name": "Hierro exterior 1280 × 960 mm",
+      "width_mm": 1280,
+      "height_mm": 960,
+      "depth_mm": null,
+      "status": "demo",
+      "source": "Gabinete genérico de hierro para exterior; no es de marca específica",
+      "material": "hierro (lámina)",
+      "environment": "exterior",
+      "stock_qty": null
+    }
+  ]
+}

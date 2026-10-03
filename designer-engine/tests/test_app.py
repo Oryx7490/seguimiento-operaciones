@@ -6,9 +6,19 @@ import copy
 import pytest
 from fastapi.testclient import TestClient
 
+import app as engine
 from app import app
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def isolated_catalog(tmp_path, monkeypatch):
+    """Cada prueba usa un catálogo temporal; no toca el catalog.json real."""
+    monkeypatch.setenv("LED_CATALOG_PATH", str(tmp_path / "catalog.json"))
+    engine.reset_catalog_cache()
+    yield
+    engine.reset_catalog_cache()
 CABINET_MM2 = 960 * 960
 
 
@@ -56,8 +66,8 @@ def test_rectangle_acceptance(rows, columns, count, width, height, area_mm2, are
     assert summary["active_area_m2"] == pytest.approx(area_m2)
     assert summary["models"] == [
         {
-            "model_id": "demo-960x960",
-            "name": "Gabinete demostración 960 × 960 mm",
+            "model_id": "hierro-960x960",
+            "name": "Hierro exterior 960 × 960 mm",
             "status": "demo",
             "width_mm": 960,
             "height_mm": 960,
@@ -75,9 +85,9 @@ def test_document_structure_and_grid_labels():
     assert document["units"] == "mm"
     assert document["template"] == {
         "type": "rectangle",
-        "params": {"rows": 3, "columns": 4, "model_id": "demo-960x960"},
+        "params": {"rows": 3, "columns": 4, "model_id": "hierro-960x960"},
     }
-    assert document["catalog"]["revision"] == "demo-2026-10-02"
+    assert document["catalog"]["revision"] == "disenador-2026-10-03"
     assert document["joins"] == []
     face = document["faces"][0]
     assert face["normal"] == [0.0, 0.0, 1.0]
@@ -214,3 +224,49 @@ def test_fit_rejections(payload, field):
     body = response.json()
     if field:
         assert any(i["field"] == field for i in body["issues"])
+
+
+def test_catalog_lists_iron_models():
+    data = client.get("/v1/catalog").json()
+    assert [m["id"] for m in data["models"]] == [
+        "hierro-640x640", "hierro-640x960", "hierro-960x960", "hierro-1280x960",
+    ]
+    assert all(m["material"] == "hierro (lámina)" and m["environment"] == "exterior" for m in data["models"])
+
+
+def test_add_model_and_modulate_with_it():
+    created = client.post("/v1/catalog/models", json={
+        "name": "Hierro exterior 500 × 500 mm",
+        "width_mm": 500, "height_mm": 500, "stock_qty": 2000,
+    })
+    assert created.status_code == 200, created.text
+    model = created.json()
+    assert model["id"] == "custom-hierro-exterior-500-500-mm"
+    assert model["status"] == "reference"
+    data = client.post("/v1/rectangle", json={"rows": 26, "columns": 70, "model_id": model["id"]}).json()
+    assert data["summary"]["cabinet_count"] == 1820
+    assert (data["summary"]["faces"][0]["width_mm"], data["summary"]["faces"][0]["height_mm"]) == (35_000, 13_000)
+
+
+def test_add_model_rejections():
+    assert client.post("/v1/catalog/models", json={"name": "X", "width_mm": 0, "height_mm": 500}).status_code == 422
+    assert client.post("/v1/catalog/models", json={"width_mm": 500, "height_mm": 500}).status_code == 422
+
+
+def test_fit_with_1280_model():
+    """4 x 3 m con 1280 x 960: 3 x 3 -> 3840 x 2880, 9 piezas."""
+    response = client.post("/v1/fit", json={"target_width_mm": 4000, "target_height_mm": 3000, "model_id": "hierro-1280x960"})
+    assert response.status_code == 200, response.text
+    first = response.json()["proposals"][0]
+    assert (first["columns"], first["rows"]) == (3, 3)
+    assert (first["width_mm"], first["height_mm"]) == (3840, 2880)
+    assert first["cabinet_count"] == 9
+
+
+def test_fit_with_640_model():
+    """4 x 3 m con 640 x 640: primera propuesta 6 x 5 -> 3840 x 3200, 30 piezas."""
+    response = client.post("/v1/fit", json={"target_width_mm": 4000, "target_height_mm": 3000, "model_id": "hierro-640x640"})
+    assert response.status_code == 200, response.text
+    first = response.json()["proposals"][0]
+    assert (first["columns"], first["rows"]) == (6, 5)
+    assert first["cabinet_count"] == 30

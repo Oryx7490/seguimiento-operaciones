@@ -12,6 +12,9 @@ type CabinetModel = {
   depth_mm: number | null;
   status: "demo" | "reference" | "verified" | "approved";
   source: string;
+  material: string;
+  environment: "interior" | "exterior";
+  stock_qty: number | null;
 };
 
 type Placement = {
@@ -69,11 +72,11 @@ class EngineError extends Error {
 
 type DisplayError = { message: string; issues: Issue[] };
 
-async function requestRectangle(rows: number | null, columns: number | null, signal: AbortSignal): Promise<DesignResponse> {
+async function requestRectangle(rows: number | null, columns: number | null, modelId: string, signal: AbortSignal): Promise<DesignResponse> {
   const response = await fetch("/api/led-designer/rectangle", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ rows, columns }),
+    body: JSON.stringify({ rows, columns, model_id: modelId }),
     signal,
   });
   const data = await response.json().catch(() => ({}));
@@ -109,11 +112,11 @@ type FitResponse = {
   proposals: FitProposal[];
 };
 
-async function requestFit(widthMm: number | null, heightMm: number | null): Promise<FitResponse> {
+async function requestFit(widthMm: number | null, heightMm: number | null, modelId: string): Promise<FitResponse> {
   const response = await fetch("/api/led-designer/fit", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ target_width_mm: widthMm, target_height_mm: heightMm }),
+    body: JSON.stringify({ target_width_mm: widthMm, target_height_mm: heightMm, model_id: modelId }),
   });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -142,22 +145,32 @@ export default function LedDesigner() {
   const [fit, setFit] = useState<FitResponse | null>(null);
   const [fitError, setFitError] = useState<DisplayError | null>(null);
   const [fitting, setFitting] = useState(false);
+  const [catalog, setCatalog] = useState<{ revision: string; models: CabinetModel[] } | null>(null);
+  const [selectedModelId, setSelectedModelId] = useState("hierro-960x960");
+  const [newName, setNewName] = useState("");
+  const [newWidth, setNewWidth] = useState("");
+  const [newHeight, setNewHeight] = useState("");
+  const [newStock, setNewStock] = useState("");
+  const [catalogError, setCatalogError] = useState<DisplayError | null>(null);
+  const [catalogNotice, setCatalogNotice] = useState<string | null>(null);
+  const [addingModel, setAddingModel] = useState(false);
   // Sólo la solicitud más reciente puede actualizar el diseño: una respuesta
   // antigua nunca sustituye el resultado de una edición posterior.
   const latestRequest = useRef<{ id: number; controller: AbortController } | null>(null);
 
-  async function runLayout(rows: number | null, columns: number | null) {
+  async function runLayout(rows: number | null, columns: number | null, modelId: string) {
     latestRequest.current?.controller.abort();
     const request = { id: (latestRequest.current?.id ?? 0) + 1, controller: new AbortController() };
     latestRequest.current = request;
     const isCurrent = () => latestRequest.current === request;
     try {
-      const data = await requestRectangle(rows, columns, request.controller.signal);
+      const data = await requestRectangle(rows, columns, modelId, request.controller.signal);
       if (!isCurrent()) return;
       setResult(data);
       setError(null);
       setDraftRows(String(data.document.template.params.rows));
       setDraftColumns(String(data.document.template.params.columns));
+      setSelectedModelId(data.document.template.params.model_id);
     } catch (reason: unknown) {
       if (isCurrent()) setError(toDisplayError(reason));
     } finally {
@@ -166,8 +179,32 @@ export default function LedDesigner() {
   }
 
   useEffect(() => {
-    void runLayout(3, 4);
-    return () => latestRequest.current?.controller.abort();
+    let active = true;
+    fetch("/api/led-designer/catalog", { cache: "no-store" })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new EngineError(data.error ?? "No se pudo leer el catálogo.");
+        return data as { revision: string; models: CabinetModel[] };
+      })
+      .then((data) => {
+        if (!active) return;
+        setCatalog(data);
+        const fallback = data.models.some((model) => model.id === "hierro-960x960")
+          ? "hierro-960x960"
+          : (data.models[0]?.id ?? "hierro-960x960");
+        setSelectedModelId(fallback);
+        void runLayout(3, 4, fallback);
+      })
+      .catch((reason: unknown) => {
+        if (active) {
+          setError(toDisplayError(reason));
+          setGenerating(false);
+        }
+      });
+    return () => {
+      active = false;
+      latestRequest.current?.controller.abort();
+    };
   }, []);
 
   function submitLayout(event: React.FormEvent<HTMLFormElement>) {
@@ -176,7 +213,42 @@ export default function LedDesigner() {
     // Un valor vacío o no numérico viaja como null y se rechaza allí.
     const parse = (value: string) => (value.trim() === "" ? null : Number(value));
     setGenerating(true);
-    void runLayout(parse(draftRows), parse(draftColumns));
+    void runLayout(parse(draftRows), parse(draftColumns), selectedModelId);
+  }
+
+  function submitModel(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const width = newWidth.trim() === "" ? null : Number(newWidth);
+    const height = newHeight.trim() === "" ? null : Number(newHeight);
+    const stock = newStock.trim() === "" ? null : Number(newStock);
+    setAddingModel(true);
+    setCatalogError(null);
+    setCatalogNotice(null);
+    fetch("/api/led-designer/catalog", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: newName.trim(), width_mm: width, height_mm: height, stock_qty: stock }),
+    })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new EngineError(data.error ?? "No se pudo dar de alta el modelo.", Array.isArray(data.issues) ? data.issues : []);
+        }
+        return data as CabinetModel;
+      })
+      .then((model) => {
+        setCatalog((previous) =>
+          previous ? { ...previous, models: [...previous.models, model] } : previous,
+        );
+        setSelectedModelId(model.id);
+        setNewName("");
+        setNewWidth("");
+        setNewHeight("");
+        setNewStock("");
+        setCatalogNotice(`Modelo «${model.name}» dado de alta.`);
+      })
+      .catch((reason: unknown) => setCatalogError(toDisplayError(reason)))
+      .finally(() => setAddingModel(false));
   }
 
   function submitFit(event: React.FormEvent<HTMLFormElement>) {
@@ -192,7 +264,7 @@ export default function LedDesigner() {
     const heightMm = toMm(targetHeight);
     setFitting(true);
     setFitError(null);
-    void requestFit(widthMm, heightMm)
+    void requestFit(widthMm, heightMm, selectedModelId)
       .then((data) => setFit(data))
       .catch((reason: unknown) => {
         setFit(null);
@@ -203,7 +275,7 @@ export default function LedDesigner() {
 
   function applyProposal(proposal: FitProposal) {
     setGenerating(true);
-    void runLayout(proposal.rows, proposal.columns);
+    void runLayout(proposal.rows, proposal.columns, fit?.model_id ?? selectedModelId);
   }
 
   const document = result?.document;
@@ -236,10 +308,10 @@ export default function LedDesigner() {
           <div>
             <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-cyan-800">
               <span className="h-2 w-2 rounded-full bg-cyan-600" />
-              Herramienta de diseño · Etapa E03
+              Herramienta de diseño · Etapa E03B
             </div>
             <h1 className="text-3xl font-semibold tracking-tight">Diseñador de pantallas LED</h1>
-            <p className="mt-1 text-sm text-slate-500">Modulación rectangular · gabinete sintético de 960 × 960 mm</p>
+            <p className="mt-1 text-sm text-slate-500">Modulación rectangular · catálogo de hierro para exterior</p>
           </div>
           <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800">
             Prototipo · datos de demostración
@@ -335,6 +407,16 @@ export default function LedDesigner() {
             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Modulación</p>
               <form onSubmit={submitLayout} noValidate className="mt-3 space-y-4">
+                <label className="block text-xs font-medium text-slate-600">
+                  Modelo de gabinete
+                  <select aria-label="Modelo de gabinete" value={selectedModelId} onChange={(event) => setSelectedModelId(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-cyan-700">
+                    {(catalog?.models ?? []).map((model) => (
+                      <option key={model.id} value={model.id}>
+                        {model.width_mm} × {model.height_mm} mm · {model.stock_qty === null ? "existencia sin registrar" : `${model.stock_qty} en existencia`}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <div className="grid grid-cols-2 gap-3">
                   <label className="text-xs font-medium text-slate-600">
                     Columnas
@@ -414,7 +496,69 @@ export default function LedDesigner() {
                         Usar esta medida
                       </button>
                     </div>
-                  ))}
+                  )                  )}
+                </div>
+              )}
+            </section>
+
+            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Catálogo de gabinetes</h2>
+              <p className="mt-1 text-[11px] leading-4 text-slate-500">
+                Hierro para exterior{ catalog ? ` · revisión ${catalog.revision}` : ""}. La existencia se captura a mano; el inventario real se vinculará después.
+              </p>
+              <div className="mt-3 space-y-2">
+                {(catalog?.models ?? []).map((model) => (
+                  <div key={model.id} className="rounded-lg border border-slate-200 px-3 py-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-semibold tabular-nums">{model.width_mm} × {model.height_mm} mm</span>
+                      <span className="text-[11px] text-slate-500">{model.status === "demo" ? "demostración" : model.status}</span>
+                    </div>
+                    <p className="mt-0.5 text-[11px] text-slate-500">{model.name} · {model.material} · {model.environment}</p>
+                    <p className="text-[11px] tabular-nums text-slate-600">
+                      Existencia: {model.stock_qty === null ? "sin registrar" : model.stock_qty}
+                    </p>
+                  </div>
+                ))}
+              </div>
+              <details className="mt-3">
+                <summary className="cursor-pointer text-xs font-medium text-cyan-800">Dar de alta un modelo</summary>
+                <form onSubmit={submitModel} noValidate className="mt-3 space-y-3">
+                  <label className="block text-xs font-medium text-slate-600">
+                    Nombre
+                    <input aria-label="Nombre del modelo" type="text" value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="Hierro exterior 500 × 500 mm" className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-cyan-700" />
+                  </label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="text-xs font-medium text-slate-600">
+                      Ancho (mm)
+                      <input aria-label="Ancho del modelo" type="number" inputMode="numeric" min="1" step="1" value={newWidth} onChange={(event) => setNewWidth(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-cyan-700" />
+                    </label>
+                    <label className="text-xs font-medium text-slate-600">
+                      Alto (mm)
+                      <input aria-label="Alto del modelo" type="number" inputMode="numeric" min="1" step="1" value={newHeight} onChange={(event) => setNewHeight(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-cyan-700" />
+                    </label>
+                  </div>
+                  <label className="block text-xs font-medium text-slate-600">
+                    Existencia (opcional)
+                    <input aria-label="Existencia del modelo" type="number" inputMode="numeric" min="0" step="1" value={newStock} onChange={(event) => setNewStock(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-cyan-700" />
+                  </label>
+                  <button type="submit" disabled={addingModel} className="w-full rounded-lg bg-cyan-800 px-3 py-2 text-xs font-semibold text-white transition hover:bg-cyan-900 disabled:cursor-wait disabled:opacity-60">
+                    {addingModel ? "Guardando…" : "Dar de alta"}
+                  </button>
+                </form>
+              </details>
+              {catalogNotice && <p className="mt-2 text-xs text-emerald-800">{catalogNotice}</p>}
+              {catalogError && (
+                <div role="alert" className="mt-2 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
+                  <strong className="font-semibold">{catalogError.message}</strong>
+                  {catalogError.issues.length > 0 && (
+                    <ul className="mt-1 list-disc pl-5">
+                      {catalogError.issues.map((issue) => (
+                        <li key={`${issue.field}-${issue.message}`}>
+                          {issue.field ? <strong className="font-medium">{issue.field}:</strong> : null} {issue.message}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
               )}
             </section>

@@ -4,7 +4,11 @@ Unidades: longitudes en milímetros (enteros en el plano de la cara) y áreas en
 mm². Los m² se derivan dividiendo entre 1,000,000 sólo para presentación.
 """
 
+import json
 import math
+import os
+import re
+from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, Request
@@ -12,7 +16,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-ENGINE_VERSION = "0.2.0"
+ENGINE_VERSION = "0.3.0"
 SCHEMA_VERSION = 2
 # Pantalla más grande registrada: 35 m × 13 m. Con gabinetes de 500 mm son
 # 70 × 26 = 1,820 piezas; los límites dejan margen para casos mayores.
@@ -44,6 +48,11 @@ class CabinetModel(StrictModel):
     depth_mm: float | None = Field(default=None, gt=0, le=2_000)
     status: Literal["demo", "reference", "verified", "approved"]
     source: str = Field(min_length=1, max_length=200)
+    material: str = Field(default="hierro (lámina)", min_length=1, max_length=80)
+    environment: Literal["interior", "exterior"] = "exterior"
+    # Existencia capturada a mano; None = sin registrar. El enlace con el
+    # inventario real queda para una etapa posterior.
+    stock_qty: int | None = Field(default=None, ge=0)
 
 
 class CatalogSnapshot(StrictModel):
@@ -294,20 +303,126 @@ def respond(document: ScreenDocument) -> DesignResponse:
 # Plantillas
 # --------------------------------------------------------------------------
 
-DEMO_CATALOG = CatalogSnapshot(
-    revision="demo-2026-10-02",
-    models=[
+CATALOG_REVISION = "disenador-2026-10-03"
+DEFAULT_MODEL_ID = "hierro-960x960"
+
+IRON_SOURCE = "Gabinete genérico de hierro para exterior; no es de marca específica"
+
+
+def _default_models() -> list[CabinetModel]:
+    return [
         CabinetModel(
-            id="demo-960x960",
-            name="Gabinete demostración 960 × 960 mm",
+            id="hierro-640x640",
+            name="Hierro exterior 640 × 640 mm",
+            width_mm=640,
+            height_mm=640,
+            depth_mm=None,
+            status="demo",
+            source=IRON_SOURCE,
+        ),
+        CabinetModel(
+            id="hierro-640x960",
+            name="Hierro exterior 640 × 960 mm",
+            width_mm=640,
+            height_mm=960,
+            depth_mm=None,
+            status="demo",
+            source=IRON_SOURCE,
+        ),
+        CabinetModel(
+            id="hierro-960x960",
+            name="Hierro exterior 960 × 960 mm",
             width_mm=960,
             height_mm=960,
             depth_mm=None,
             status="demo",
-            source="Sintético para pruebas del diseñador; no es un modelo comercial",
-        )
-    ],
-)
+            source=IRON_SOURCE,
+        ),
+        CabinetModel(
+            id="hierro-1280x960",
+            name="Hierro exterior 1280 × 960 mm",
+            width_mm=1280,
+            height_mm=960,
+            depth_mm=None,
+            status="demo",
+            source=IRON_SOURCE,
+        ),
+    ]
+
+
+def _catalog_path() -> Path:
+    return Path(os.environ.get("LED_CATALOG_PATH", Path(__file__).with_name("catalog.json")))
+
+
+_catalog_cache: CatalogSnapshot | None = None
+
+
+def reset_catalog_cache() -> None:
+    global _catalog_cache
+    _catalog_cache = None
+
+
+def get_catalog() -> CatalogSnapshot:
+    """Catálogo editable guardado en `catalog.json` (volumen del servicio)."""
+    global _catalog_cache
+    if _catalog_cache is not None:
+        return _catalog_cache
+    path = _catalog_path()
+    if path.exists():
+        data = json.loads(path.read_text(encoding="utf-8"))
+        _catalog_cache = CatalogSnapshot.model_validate(data)
+    else:
+        _catalog_cache = CatalogSnapshot(revision=CATALOG_REVISION, models=_default_models())
+        path.write_text(_catalog_cache.model_dump_json(indent=2, ensure_ascii=False), encoding="utf-8")
+    return _catalog_cache
+
+
+def save_catalog(catalog: CatalogSnapshot) -> None:
+    global _catalog_cache
+    _catalog_cache = catalog
+    _catalog_path().write_text(catalog.model_dump_json(indent=2, ensure_ascii=False), encoding="utf-8")
+
+
+def slugify(text: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", text.strip().lower())
+    return slug.strip("-") or "modelo"
+
+
+class AddModelRequest(StrictModel):
+    """Alta manual de un modelo. El ID se genera del nombre si no se indica."""
+
+    id: str | None = Field(default=None, min_length=1, max_length=80)
+    name: str = Field(min_length=1, max_length=120)
+    width_mm: int = Field(gt=0, le=20_000)
+    height_mm: int = Field(gt=0, le=20_000)
+    depth_mm: float | None = Field(default=None, gt=0, le=2_000)
+    material: str = Field(default="hierro (lámina)", min_length=1, max_length=80)
+    environment: Literal["interior", "exterior"] = "exterior"
+    stock_qty: int | None = Field(default=None, ge=0)
+
+
+def add_model(request: AddModelRequest) -> CabinetModel:
+    catalog = get_catalog()
+    taken = {model.id for model in catalog.models}
+    candidate = request.id.strip() if request.id else f"custom-{slugify(request.name)}"
+    model_id, suffix = candidate, 2
+    while model_id in taken:
+        model_id = f"{candidate}-{suffix}"
+        suffix += 1
+    model = CabinetModel(
+        id=model_id,
+        name=request.name,
+        width_mm=request.width_mm,
+        height_mm=request.height_mm,
+        depth_mm=request.depth_mm,
+        status="reference",
+        source="Alta manual en el diseñador",
+        material=request.material,
+        environment=request.environment,
+        stock_qty=request.stock_qty,
+    )
+    save_catalog(catalog.model_copy(update={"models": [*catalog.models, model]}))
+    return model
 
 FRONT_FACE_AXES = {
     "origin_mm": (0.0, 0.0, 0.0),
@@ -317,8 +432,8 @@ FRONT_FACE_AXES = {
 }
 
 
-def build_rectangle(rows: int, columns: int, model_id: str = "demo-960x960") -> ScreenDocument:
-    catalog = DEMO_CATALOG
+def build_rectangle(rows: int, columns: int, model_id: str = DEFAULT_MODEL_ID) -> ScreenDocument:
+    catalog = get_catalog()
     model = next((m for m in catalog.models if m.id == model_id), None)
     if model is None:
         raise ValueError("El modelo solicitado no está en el catálogo.")
@@ -360,6 +475,7 @@ def build_rectangle(rows: int, columns: int, model_id: str = "demo-960x960") -> 
 class RectangleRequest(StrictModel):
     rows: int = Field(ge=1, le=MAX_GRID)
     columns: int = Field(ge=1, le=MAX_GRID)
+    model_id: str = Field(default=DEFAULT_MODEL_ID, min_length=1, max_length=80)
 
     @model_validator(mode="after")
     def cabinet_limit(self) -> "RectangleRequest":
@@ -373,7 +489,7 @@ class FitRequest(StrictModel):
 
     target_width_mm: int = Field(ge=1, le=100_000)
     target_height_mm: int = Field(ge=1, le=100_000)
-    model_id: str = Field(default="demo-960x960", min_length=1, max_length=80)
+    model_id: str = Field(default=DEFAULT_MODEL_ID, min_length=1, max_length=80)
 
 
 class FitProposal(StrictModel):
@@ -396,8 +512,8 @@ class FitResponse(StrictModel):
     proposals: list[FitProposal]
 
 
-def propose_fit(target_width_mm: int, target_height_mm: int, model_id: str = "demo-960x960") -> FitResponse:
-    model = next((m for m in DEMO_CATALOG.models if m.id == model_id), None)
+def propose_fit(target_width_mm: int, target_height_mm: int, model_id: str = DEFAULT_MODEL_ID) -> FitResponse:
+    model = next((m for m in get_catalog().models if m.id == model_id), None)
     if model is None:
         raise ValueError("El modelo solicitado no está en el catálogo.")
     target_area = target_width_mm * target_height_mm
@@ -519,7 +635,21 @@ def reference() -> DesignResponse:
 @app.post("/v1/rectangle", response_model=DesignResponse)
 def rectangle(request: RectangleRequest) -> DesignResponse:
     """Genera una retícula rectangular y sus resultados calculados."""
-    return respond(build_rectangle(rows=request.rows, columns=request.columns))
+    return respond(
+        build_rectangle(rows=request.rows, columns=request.columns, model_id=request.model_id)
+    )
+
+
+@app.get("/v1/catalog", response_model=CatalogSnapshot)
+def catalog() -> CatalogSnapshot:
+    """Catálogo editable de gabinetes."""
+    return get_catalog()
+
+
+@app.post("/v1/catalog/models", response_model=CabinetModel)
+def create_model(request: AddModelRequest) -> CabinetModel:
+    """Da de alta un modelo en el catálogo."""
+    return add_model(request)
 
 
 @app.post("/v1/validate", response_model=DesignResponse)
