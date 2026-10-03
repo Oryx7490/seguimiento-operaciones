@@ -184,6 +184,19 @@ export default function LedDesigner() {
   const [newHeight, setNewHeight] = useState("");
   const [newStock, setNewStock] = useState("");
   const [newEnv, setNewEnv] = useState<"interior" | "exterior">("exterior");
+  const [newDepth, setNewDepth] = useState("");
+  const [newMaterial, setNewMaterial] = useState("hierro");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editName, setEditName] = useState("");
+  const [editWidth, setEditWidth] = useState("");
+  const [editHeight, setEditHeight] = useState("");
+  const [editDepth, setEditDepth] = useState("");
+  const [editMaterial, setEditMaterial] = useState("hierro");
+  const [editEnv, setEditEnv] = useState<"interior" | "exterior">("exterior");
+  const [editStock, setEditStock] = useState("");
+  const [savingEdit, setSavingEdit] = useState(false);
+
+  const MATERIALS = ["hierro", "aluminio", "aluminio maquinado"];
   // Tipo de pantalla: filtra el catálogo por entorno.
   const [screenEnv, setScreenEnv] = useState<"interior" | "exterior">("exterior");
   const [catalogError, setCatalogError] = useState<DisplayError | null>(null);
@@ -256,13 +269,14 @@ export default function LedDesigner() {
     const width = newWidth.trim() === "" ? null : Number(newWidth);
     const height = newHeight.trim() === "" ? null : Number(newHeight);
     const stock = newStock.trim() === "" ? null : Number(newStock);
+    const depth = newDepth.trim() === "" ? null : Number(newDepth);
     setAddingModel(true);
     setCatalogError(null);
     setCatalogNotice(null);
     fetch("/api/led-designer/catalog", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name: newName.trim(), width_mm: width, height_mm: height, stock_qty: stock, environment: newEnv }),
+      body: JSON.stringify({ name: newName.trim(), width_mm: width, height_mm: height, stock_qty: stock, environment: newEnv, depth_mm: depth, material: newMaterial }),
     })
       .then(async (response) => {
         const data = await response.json().catch(() => ({}));
@@ -280,10 +294,62 @@ export default function LedDesigner() {
         setNewWidth("");
         setNewHeight("");
         setNewStock("");
+        setNewDepth("");
         setCatalogNotice(`Modelo «${model.name}» dado de alta.`);
       })
       .catch((reason: unknown) => setCatalogError(toDisplayError(reason)))
       .finally(() => setAddingModel(false));
+  }
+
+  function startEdit(model: CabinetModel) {
+    setEditingId(model.id);
+    setCatalogError(null);
+    setCatalogNotice(null);
+    setEditName(model.name);
+    setEditWidth(String(model.width_mm));
+    setEditHeight(String(model.height_mm));
+    setEditDepth(model.depth_mm === null ? "" : String(model.depth_mm));
+    setEditMaterial(model.material);
+    setEditEnv(model.environment);
+    setEditStock(model.stock_qty === null ? "" : String(model.stock_qty));
+  }
+
+  function submitEdit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingId) return;
+    const num = (value: string) => (value.trim() === "" ? null : Number(value));
+    setSavingEdit(true);
+    setCatalogError(null);
+    setCatalogNotice(null);
+    fetch(`/api/led-designer/catalog/${encodeURIComponent(editingId)}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        name: editName.trim() === "" ? null : editName.trim(),
+        width_mm: num(editWidth),
+        height_mm: num(editHeight),
+        depth_mm: num(editDepth),
+        material: editMaterial,
+        environment: editEnv,
+        stock_qty: editStock.trim() === "" ? null : Number(editStock),
+      }),
+    })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new EngineError(data.error ?? "No se pudo guardar el modelo.", Array.isArray(data.issues) ? data.issues : []);
+        }
+        return data as CabinetModel;
+      })
+      .then((model) => {
+        setCatalog((previous) =>
+          previous ? { ...previous, models: previous.models.map((item) => (item.id === model.id ? model : item)) } : previous,
+        );
+        setEditingId(null);
+        setCatalogNotice(`Modelo «${model.name}» actualizado.`);
+      })
+      .catch((reason: unknown) => setCatalogError(toDisplayError(reason)))
+      .finally(() => setSavingEdit(false));
   }
 
   function submitFit(event: React.FormEvent<HTMLFormElement>) {
@@ -820,14 +886,71 @@ export default function LedDesigner() {
             <div className="mt-3 space-y-2">
             {(catalog?.models ?? []).map((model) => (
             <div key={model.id} className="rounded-lg border border-slate-200 px-3 py-2.5">
+            {editingId === model.id ? (
+            <form onSubmit={submitEdit} noValidate className="space-y-2">
+            <label className="block text-[11px] font-medium text-slate-600">
+            Nombre
+            <input aria-label="Editar nombre" type="text" value={editName} onChange={(event) => setEditName(event.target.value)} className="mt-0.5 block w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900 outline-none focus:border-cyan-700" />
+            </label>
+            <div className="grid grid-cols-3 gap-2">
+            <label className="text-[11px] font-medium text-slate-600">
+            Ancho
+            <input aria-label="Editar ancho" type="number" inputMode="numeric" min="1" step="1" value={editWidth} onChange={(event) => setEditWidth(event.target.value)} className="mt-0.5 block w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900 outline-none focus:border-cyan-700" />
+            </label>
+            <label className="text-[11px] font-medium text-slate-600">
+            Alto
+            <input aria-label="Editar alto" type="number" inputMode="numeric" min="1" step="1" value={editHeight} onChange={(event) => setEditHeight(event.target.value)} className="mt-0.5 block w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900 outline-none focus:border-cyan-700" />
+            </label>
+            <label className="text-[11px] font-medium text-slate-600">
+            Prof.
+            <input aria-label="Editar profundidad" type="number" inputMode="decimal" min="0" step="any" value={editDepth} onChange={(event) => setEditDepth(event.target.value)} placeholder="—" className="mt-0.5 block w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900 outline-none focus:border-cyan-700" />
+            </label>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+            <label className="text-[11px] font-medium text-slate-600">
+            Material
+            <select aria-label="Editar material" value={editMaterial} onChange={(event) => setEditMaterial(event.target.value)} className="mt-0.5 block w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold text-slate-900 outline-none focus:border-cyan-700">
+            {MATERIALS.map((material) => <option key={material} value={material}>{material}</option>)}
+            </select>
+            </label>
+            <label className="text-[11px] font-medium text-slate-600">
+            Entorno
+            <select aria-label="Editar entorno" value={editEnv} onChange={(event) => setEditEnv(event.target.value as "interior" | "exterior")} className="mt-0.5 block w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs font-semibold text-slate-900 outline-none focus:border-cyan-700">
+            <option value="exterior">Exterior</option>
+            <option value="interior">Interior</option>
+            </select>
+            </label>
+            </div>
+            <label className="block text-[11px] font-medium text-slate-600">
+            Existencia
+            <input aria-label="Editar existencia" type="number" inputMode="numeric" min="0" step="1" value={editStock} onChange={(event) => setEditStock(event.target.value)} className="mt-0.5 block w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-xs text-slate-900 outline-none focus:border-cyan-700" />
+            </label>
+            <div className="flex gap-2">
+            <button type="submit" disabled={savingEdit} className="flex-1 rounded-lg bg-cyan-800 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-cyan-900 disabled:opacity-60">
+            {savingEdit ? "Guardando…" : "Guardar"}
+            </button>
+            <button type="button" onClick={() => setEditingId(null)} className="flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">
+            Cancelar
+            </button>
+            </div>
+            </form>
+            ) : (
+            <>
             <div className="flex items-center justify-between gap-2">
             <span className="text-sm font-semibold tabular-nums">{model.width_mm} × {model.height_mm} mm</span>
             <span className="text-[11px] text-slate-500">{model.status === "demo" ? "demostración" : model.status}</span>
             </div>
-            <p className="mt-0.5 text-[11px] text-slate-500">{model.name} · {model.material} · {model.environment}</p>
+            <p className="mt-0.5 text-[11px] text-slate-500">{model.name} · {model.material} · {model.environment} · prof. {model.depth_mm === null ? "desconocida" : `${model.depth_mm} mm`}</p>
+            <div className="mt-1 flex items-center justify-between gap-2">
             <p className="text-[11px] tabular-nums text-slate-600">
             Existencia: {model.stock_qty === null ? "sin registrar" : model.stock_qty}
             </p>
+            <button type="button" onClick={() => startEdit(model)} className="rounded-lg border border-slate-300 px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50">
+            Editar
+            </button>
+            </div>
+            </>
+            )}
             </div>
             ))}
             </div>
@@ -848,6 +971,18 @@ export default function LedDesigner() {
             <input aria-label="Alto del modelo" type="number" inputMode="numeric" min="1" step="1" value={newHeight} onChange={(event) => setNewHeight(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-cyan-700" />
             </label>
             </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="text-xs font-medium text-slate-600">
+                      Material
+                      <select aria-label="Material del modelo" value={newMaterial} onChange={(event) => setNewMaterial(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-cyan-700">
+                        {MATERIALS.map((material) => <option key={material} value={material}>{material}</option>)}
+                      </select>
+                    </label>
+                    <label className="text-xs font-medium text-slate-600">
+                      Profundidad mm (opcional)
+                      <input aria-label="Profundidad del modelo" type="number" inputMode="decimal" min="0" step="any" value={newDepth} onChange={(event) => setNewDepth(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-cyan-700" />
+                    </label>
+                  </div>
                   <label className="block text-xs font-medium text-slate-600">
                     Existencia (opcional)
                     <input aria-label="Existencia del modelo" type="number" inputMode="numeric" min="0" step="1" value={newStock} onChange={(event) => setNewStock(event.target.value)} className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-cyan-700" />

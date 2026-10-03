@@ -231,7 +231,7 @@ def test_catalog_lists_iron_models():
     assert [m["id"] for m in data["models"]] == [
         "hierro-640x640", "hierro-640x960", "hierro-960x960", "hierro-1280x960",
     ]
-    assert all(m["material"] == "hierro (lámina)" and m["environment"] == "exterior" for m in data["models"])
+    assert all(m["material"] == "hierro" and m["environment"] == "exterior" for m in data["models"])
 
 
 def test_add_model_and_modulate_with_it():
@@ -246,6 +246,34 @@ def test_add_model_and_modulate_with_it():
     data = client.post("/v1/rectangle", json={"rows": 26, "columns": 70, "model_id": model["id"]}).json()
     assert data["summary"]["cabinet_count"] == 1820
     assert (data["summary"]["faces"][0]["width_mm"], data["summary"]["faces"][0]["height_mm"]) == (35_000, 13_000)
+
+
+def test_edit_model():
+    created = client.post("/v1/catalog/models", json={
+        "name": "Aluminio 640 x 640 mm", "width_mm": 640, "height_mm": 640,
+        "material": "aluminio", "environment": "interior", "stock_qty": 50,
+    })
+    assert created.status_code == 200, created.text
+    model_id = created.json()["id"]
+    updated = client.put(f"/v1/catalog/models/{model_id}", json={
+        "height_mm": 960, "material": "aluminio maquinado", "stock_qty": 40,
+    })
+    assert updated.status_code == 200, updated.text
+    body = updated.json()
+    assert (body["height_mm"], body["material"], body["stock_qty"]) == (960, "aluminio maquinado", 40)
+    assert body["width_mm"] == 640 and body["environment"] == "interior"
+    # El catálogo refleja el cambio.
+    ids = [m["id"] for m in client.get("/v1/catalog").json()["models"]]
+    assert model_id in ids
+
+
+def test_edit_model_rejections():
+    assert client.put("/v1/catalog/models/no-existe", json={"height_mm": 960}).status_code == 422
+    created = client.post("/v1/catalog/models", json={
+        "name": "Hierro 500", "width_mm": 500, "height_mm": 500,
+    }).json()
+    assert client.put(f"/v1/catalog/models/{created['id']}", json={"material": "madera"}).status_code == 422
+    assert client.put(f"/v1/catalog/models/{created['id']}", json={"width_mm": 0}).status_code == 422
 
 
 def test_add_model_rejections():

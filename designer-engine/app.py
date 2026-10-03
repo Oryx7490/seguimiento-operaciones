@@ -48,7 +48,7 @@ class CabinetModel(StrictModel):
     depth_mm: float | None = Field(default=None, gt=0, le=2_000)
     status: Literal["demo", "reference", "verified", "approved"]
     source: str = Field(min_length=1, max_length=200)
-    material: str = Field(default="hierro (lámina)", min_length=1, max_length=80)
+    material: Literal["hierro", "aluminio", "aluminio maquinado"] = "hierro"
     environment: Literal["interior", "exterior"] = "exterior"
     # Existencia capturada a mano; None = sin registrar. El enlace con el
     # inventario real queda para una etapa posterior.
@@ -370,7 +370,12 @@ def get_catalog() -> CatalogSnapshot:
     path = _catalog_path()
     if path.exists():
         data = json.loads(path.read_text(encoding="utf-8"))
+        # Migración: el material libre "hierro (lámina)" pasa a "hierro".
+        for model in data.get("models", []):
+            if model.get("material") == "hierro (lámina)":
+                model["material"] = "hierro"
         _catalog_cache = CatalogSnapshot.model_validate(data)
+        path.write_text(_catalog_cache.model_dump_json(indent=2, ensure_ascii=False), encoding="utf-8")
     else:
         _catalog_cache = CatalogSnapshot(revision=CATALOG_REVISION, models=_default_models())
         path.write_text(_catalog_cache.model_dump_json(indent=2, ensure_ascii=False), encoding="utf-8")
@@ -396,9 +401,35 @@ class AddModelRequest(StrictModel):
     width_mm: int = Field(gt=0, le=20_000)
     height_mm: int = Field(gt=0, le=20_000)
     depth_mm: float | None = Field(default=None, gt=0, le=2_000)
-    material: str = Field(default="hierro (lámina)", min_length=1, max_length=80)
+    material: Literal["hierro", "aluminio", "aluminio maquinado"] = "hierro"
     environment: Literal["interior", "exterior"] = "exterior"
     stock_qty: int | None = Field(default=None, ge=0)
+
+
+class UpdateModelRequest(StrictModel):
+    """Edición parcial de un modelo dado de alta."""
+
+    name: str | None = Field(default=None, min_length=1, max_length=120)
+    width_mm: int | None = Field(default=None, gt=0, le=20_000)
+    height_mm: int | None = Field(default=None, gt=0, le=20_000)
+    depth_mm: float | None = Field(default=None, gt=0, le=2_000)
+    material: Literal["hierro", "aluminio", "aluminio maquinado"] | None = None
+    environment: Literal["interior", "exterior"] | None = None
+    stock_qty: int | None = Field(default=None, ge=0)
+
+
+def update_model(model_id: str, request: UpdateModelRequest) -> CabinetModel:
+    catalog = get_catalog()
+    index = next((i for i, m in enumerate(catalog.models) if m.id == model_id), None)
+    if index is None:
+        raise ValueError("El modelo no existe en el catálogo.")
+    current = catalog.models[index].model_dump()
+    changes = {k: v for k, v in request.model_dump().items() if v is not None}
+    updated = CabinetModel.model_validate({**current, **changes})
+    models = list(catalog.models)
+    models[index] = updated
+    save_catalog(catalog.model_copy(update={"models": models}))
+    return updated
 
 
 def add_model(request: AddModelRequest) -> CabinetModel:
@@ -650,6 +681,12 @@ def catalog() -> CatalogSnapshot:
 def create_model(request: AddModelRequest) -> CabinetModel:
     """Da de alta un modelo en el catálogo."""
     return add_model(request)
+
+
+@app.put("/v1/catalog/models/{model_id}", response_model=CabinetModel)
+def edit_model(model_id: str, request: UpdateModelRequest) -> CabinetModel:
+    """Edita las características de un modelo del catálogo."""
+    return update_model(model_id, request)
 
 
 @app.post("/v1/validate", response_model=DesignResponse)
