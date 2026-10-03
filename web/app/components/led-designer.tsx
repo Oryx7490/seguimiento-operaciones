@@ -446,7 +446,7 @@ export default function LedDesigner() {
           <section aria-label="Vista 2D de la pantalla" className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
               <div>
-                <h2 className="text-sm font-semibold">{mode === "manual" ? "Área a cubrir · vista 2D" : "Frente · vista 2D"}</h2>
+                <h2 className="text-sm font-semibold"><span className="mr-2 rounded bg-slate-800 px-1.5 py-0.5 align-middle font-mono text-[10px] font-semibold tracking-wide text-white">VISTA</span>{mode === "manual" ? "Área a cubrir · vista 2D" : "Frente · vista 2D"}</h2>
                 <p className="mt-0.5 text-xs text-slate-500">
                   {mode === "manual"
                     ? "Arrastra gabinetes del catálogo al área"
@@ -650,7 +650,7 @@ export default function LedDesigner() {
 
           <aside className="space-y-5 xl:order-first">
             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Medida objetivo</p>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-400"><span className="mr-2 rounded bg-slate-800 px-1.5 py-0.5 align-middle font-mono text-[10px] font-semibold tracking-wide text-white">OBJ</span>Medida objetivo</p>
             <form onSubmit={submitFit} noValidate className="mt-3 space-y-4">
             <div className="grid grid-cols-[1fr_1fr_auto] gap-3">
             <label className="text-xs font-medium text-slate-600">
@@ -725,7 +725,7 @@ export default function LedDesigner() {
 
             {mode === "manual" && (
             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Gabinetes para arrastrar</h2>
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400"><span className="mr-2 rounded bg-slate-800 px-1.5 py-0.5 align-middle font-mono text-[10px] font-semibold tracking-wide text-white">PAL</span>Gabinetes para arrastrar</h2>
             <p className="mt-1 text-[11px] leading-4 text-slate-500">Arrastra un gabinete al área. La esquina superior izquierda de la pieza queda donde sueltes.</p>
             <div className="mt-3 space-y-2">
             {(catalog?.models ?? []).map((model) => {
@@ -779,7 +779,7 @@ export default function LedDesigner() {
             </section>
             )}
             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Catálogo de gabinetes</h2>
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400"><span className="mr-2 rounded bg-slate-800 px-1.5 py-0.5 align-middle font-mono text-[10px] font-semibold tracking-wide text-white">CAT</span>Catálogo de gabinetes</h2>
             <p className="mt-1 text-[11px] leading-4 text-slate-500">
             Hierro para exterior{ catalog ? ` · revisión ${catalog.revision}` : ""}. La existencia se captura a mano; el inventario real se vinculará después.
             </p>
@@ -844,7 +844,7 @@ export default function LedDesigner() {
                     <aside className="space-y-5">
             {mode === "auto" && (
             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Modulación</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400"><span className="mr-2 rounded bg-slate-800 px-1.5 py-0.5 align-middle font-mono text-[10px] font-semibold tracking-wide text-white">MOD</span>Modulación</p>
               <form onSubmit={submitLayout} noValidate className="mt-3 space-y-4">
                 <label className="block text-xs font-medium text-slate-600">
                   Modelo de gabinete
@@ -877,7 +877,7 @@ export default function LedDesigner() {
             
 
             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Resumen del diseño</p>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-400"><span className="mr-2 rounded bg-slate-800 px-1.5 py-0.5 align-middle font-mono text-[10px] font-semibold tracking-wide text-white">RES</span>Resumen del diseño</p>
               <h2 className="mt-2 text-lg font-semibold">{mode === "manual" ? "Armado manual" : (document?.name ?? "Pantalla rectangular")}</h2>
               <div className="mt-4 divide-y divide-slate-100">
                 <Metric label="Medida total" value={mode === "manual"
@@ -898,7 +898,7 @@ export default function LedDesigner() {
             </section>
 
             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Listado de gabinetes</h2>
+              <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400"><span className="mr-2 rounded bg-slate-800 px-1.5 py-0.5 align-middle font-mono text-[10px] font-semibold tracking-wide text-white">LST</span>Listado de gabinetes</h2>
               {mode === "manual" ? (
               <div className="mt-3 overflow-hidden rounded-lg border border-slate-100">
                 <div className="grid grid-cols-[1fr_auto_auto] gap-3 bg-slate-50 px-3 py-2 text-[11px] font-medium text-slate-500">
