@@ -136,6 +136,31 @@ function areaPct(areaM2: number, targetM2: number): string {
   return `${pct >= 0 ? "+" : ""}${pct.toFixed(2)} %`;
 }
 
+type ManualPlacement = { key: number; model_id: string; x_mm: number; y_mm: number };
+
+const MODEL_COLORS: Record<string, { fill: string; stroke: string; text: string }> = {
+  "hierro-640x640": { fill: "#e0f2fe", stroke: "#0284c7", text: "#075985" },
+  "hierro-640x960": { fill: "#ede9fe", stroke: "#7c3aed", text: "#5b21b6" },
+  "hierro-960x960": { fill: "#ccfbf1", stroke: "#0d9488", text: "#0f766e" },
+  "hierro-1280x960": { fill: "#fef3c7", stroke: "#d97706", text: "#92400e" },
+};
+
+const FALLBACK_COLORS = [
+  { fill: "#fce7f3", stroke: "#db2777", text: "#9d174d" },
+  { fill: "#ecfccb", stroke: "#65a30d", text: "#3f6212" },
+  { fill: "#e0e7ff", stroke: "#4f46e5", text: "#3730a3" },
+  { fill: "#ffedd5", stroke: "#ea580c", text: "#9a3412" },
+  { fill: "#f3e8ff", stroke: "#9333ea", text: "#6b21a8" },
+];
+
+function modelColor(modelId: string): { fill: string; stroke: string; text: string } {
+  const known = MODEL_COLORS[modelId];
+  if (known) return known;
+  let hash = 0;
+  for (const char of modelId) hash = (hash * 31 + char.charCodeAt(0)) % 997;
+  return FALLBACK_COLORS[hash % FALLBACK_COLORS.length];
+}
+
 // Margen derecho reservado para la cota vertical.
 const SVG = { width: 1120, height: 1020, maxDrawingWidth: 860, maxDrawingHeight: 620, rightMargin: 210 };
 
@@ -285,6 +310,70 @@ export default function LedDesigner() {
     void runLayout(proposal.rows, proposal.columns, fit?.model_id ?? selectedModelId);
   }
 
+  const [mode, setMode] = useState<"auto" | "manual">("auto");
+  const [manualPlacements, setManualPlacements] = useState<ManualPlacement[]>([]);
+  const [selectedKey, setSelectedKey] = useState<number | null>(null);
+  const [manualMsg, setManualMsg] = useState<string | null>(null);
+  const keyCounter = useRef(1);
+
+  // El área a cubrir en modo manual sale de base/altura objetivo.
+  const canvasMm = (() => {
+    const factor = targetUnit === "m" ? 1000 : 1;
+    const width = Math.round(Number(targetWidth) * factor);
+    const height = Math.round(Number(targetHeight) * factor);
+    if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+    return { width, height };
+  })();
+
+  const catalogModels = catalog?.models ?? [];
+  const modelById = (id: string) => catalogModels.find((model) => model.id === id);
+
+  const manualAreaM2 =
+    manualPlacements.reduce((area, placement) => {
+      const model = modelById(placement.model_id);
+      return model ? area + (model.width_mm * model.height_mm) / 1_000_000 : area;
+    }, 0);
+  const canvasM2 = canvasMm ? (canvasMm.width * canvasMm.height) / 1_000_000 : 0;
+
+  function dropPlacement(event: React.DragEvent<SVGSVGElement>) {
+    event.preventDefault();
+    const modelId = event.dataTransfer.getData("text/model-id");
+    const model = modelId ? modelById(modelId) : undefined;
+    if (!model || !canvasMm) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const mScale = Math.min(SVG.maxDrawingWidth / canvasMm.width, SVG.maxDrawingHeight / canvasMm.height);
+    const mOriginX = Math.max(30, (SVG.width - SVG.rightMargin - canvasMm.width * mScale) / 2);
+    const mOriginY = 190 + (SVG.maxDrawingHeight + 10 - canvasMm.height * mScale) / 2;
+    const svgX = ((event.clientX - rect.left) / rect.width) * SVG.width;
+    const svgY = ((event.clientY - rect.top) / rect.height) * SVG.height;
+    const xMm = Math.round((svgX - mOriginX) / mScale);
+    // El cursor marca la esquina superior izquierda de la pieza.
+    const yMm = Math.round(canvasMm.height - (svgY - mOriginY) / mScale - model.height_mm);
+    if (xMm < 0 || yMm < 0 || xMm + model.width_mm > canvasMm.width || yMm + model.height_mm > canvasMm.height) {
+      setManualMsg("Fuera del área a cubrir: la pieza no cabe en ese punto.");
+      return;
+    }
+    const overlaps = manualPlacements.some((placement) => {
+      const other = modelById(placement.model_id);
+      if (!other) return false;
+      return (
+        xMm < placement.x_mm + other.width_mm &&
+        placement.x_mm < xMm + model.width_mm &&
+        yMm < placement.y_mm + other.height_mm &&
+        placement.y_mm < yMm + model.height_mm
+      );
+    });
+    if (overlaps) {
+      setManualMsg("Esa posición se traslapa con otra pieza.");
+      return;
+    }
+    setManualMsg(null);
+    const key = keyCounter.current++;
+    setManualPlacements((previous) => [...previous, { key, model_id: model.id, x_mm: xMm, y_mm: yMm }]);
+    setSelectedKey(key);
+  }
+
   const document = result?.document;
   const summary = result?.summary;
   const face = document?.faces[0];
@@ -309,6 +398,17 @@ export default function LedDesigner() {
       )
     : 1000;
 
+  // Geometría del lienzo manual (área objetivo).
+  const mScale = canvasMm
+    ? Math.min(SVG.maxDrawingWidth / canvasMm.width, SVG.maxDrawingHeight / canvasMm.height)
+    : 0;
+  const mDrawingWidth = canvasMm ? canvasMm.width * mScale : 0;
+  const mDrawingHeight = canvasMm ? canvasMm.height * mScale : 0;
+  const mOriginX = Math.max(30, (SVG.width - SVG.rightMargin - mDrawingWidth) / 2);
+  const mOriginY = 190 + (SVG.maxDrawingHeight + 10 - mDrawingHeight) / 2;
+  const mx = (value: number) => mOriginX + value * mScale;
+  const my = (value: number) => mOriginY + (canvasMm ? canvasMm.height - value : 0) * mScale;
+
   return (
     <div className="min-h-screen bg-[#f4f6f8] px-5 py-7 text-slate-900 sm:px-8">
       <div className="mx-auto max-w-[1440px]">
@@ -316,10 +416,10 @@ export default function LedDesigner() {
           <div>
             <div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-cyan-800">
               <span className="h-2 w-2 rounded-full bg-cyan-600" />
-              Herramienta de diseño · Etapa E03B
+              Herramienta de diseño · Etapa E03C
             </div>
             <h1 className="text-3xl font-semibold tracking-tight">Diseñador de pantallas LED</h1>
-            <p className="mt-1 text-sm text-slate-500">Modulación rectangular · catálogo de hierro para exterior</p>
+            <p className="mt-1 text-sm text-slate-500">Automático y diseñador manual · catálogo de hierro para exterior</p>
           </div>
           <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-800">
             Prototipo · datos de demostración
@@ -346,31 +446,131 @@ export default function LedDesigner() {
           <section aria-label="Vista 2D de la pantalla" className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
               <div>
-                <h2 className="text-sm font-semibold">Frente · vista 2D</h2>
-                <p className="mt-0.5 text-xs text-slate-500">Proyección ortográfica · cada gabinete aparece delimitado</p>
+                <h2 className="text-sm font-semibold">{mode === "manual" ? "Área a cubrir · vista 2D" : "Frente · vista 2D"}</h2>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  {mode === "manual"
+                    ? "Arrastra gabinetes del catálogo al área"
+                    : "Proyección ortográfica · cada gabinete aparece delimitado"}
+                </p>
               </div>
-              <span className="rounded-md bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">1 cara</span>
+              <div className="flex items-center gap-2">
+                <div role="group" aria-label="Modo de operación" className="flex overflow-hidden rounded-lg border border-slate-300 text-xs font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => setMode("auto")}
+                    aria-pressed={mode === "auto"}
+                    className={`px-3 py-1.5 ${mode === "auto" ? "bg-cyan-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                  >
+                    Automático
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMode("manual")}
+                    aria-pressed={mode === "manual"}
+                    className={`px-3 py-1.5 ${mode === "manual" ? "bg-cyan-800 text-white" : "bg-white text-slate-600 hover:bg-slate-50"}`}
+                  >
+                    Diseñador
+                  </button>
+                </div>
+                <span className="rounded-md bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">1 cara</span>
+              </div>
             </div>
-            {fit && face && summary && (
+            {((mode === "auto" && fit && face && summary) || (mode === "manual" && canvasMm)) && (
               <div className="grid grid-cols-3 divide-x divide-slate-100 border-b border-slate-100 bg-slate-50/60 px-5 py-3 text-center">
                 <div>
                   <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Solicitada</p>
-                  <p className="text-base font-semibold tabular-nums text-slate-800">{requestedM2.toFixed(4)} m²</p>
+                  <p className="text-base font-semibold tabular-nums text-slate-800">
+                    {(mode === "manual" ? canvasM2 : requestedM2).toFixed(4)} m²
+                  </p>
                 </div>
                 <div>
                   <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Propuesta vigente</p>
-                  <p className="text-base font-semibold tabular-nums text-slate-800">{summary.active_area_m2.toFixed(4)} m²</p>
+                  <p className="text-base font-semibold tabular-nums text-slate-800">
+                    {(mode === "manual" ? manualAreaM2 : (summary?.active_area_m2 ?? 0)).toFixed(4)} m²
+                  </p>
                 </div>
                 <div>
                   <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Diferencia</p>
-                  <p className={`text-base font-semibold tabular-nums ${summary.active_area_m2 >= requestedM2 ? "text-emerald-700" : "text-rose-700"}`}>
-                    {areaPct(summary.active_area_m2, requestedM2)}
+                  <p className={`text-base font-semibold tabular-nums ${(mode === "manual" ? manualAreaM2 : (summary?.active_area_m2 ?? 0)) >= (mode === "manual" ? canvasM2 : requestedM2) ? "text-emerald-700" : "text-rose-700"}`}>
+                    {areaPct(
+                      mode === "manual" ? manualAreaM2 : (summary?.active_area_m2 ?? 0),
+                      mode === "manual" ? canvasM2 : requestedM2,
+                    )}
                   </p>
                 </div>
               </div>
             )}
             <div className="bg-[linear-gradient(#f8fafc_1px,transparent_1px),linear-gradient(90deg,#f8fafc_1px,transparent_1px)] bg-[size:24px_24px] px-3 py-2 sm:px-8">
-              {!face || !document ? (
+              {mode === "manual" ? (
+                !canvasMm ? (
+                  <div className="flex h-[min(68vh,720px)] min-h-[420px] items-center justify-center text-sm text-slate-500">
+                    Captura base y altura objetivo para definir el área a cubrir.
+                  </div>
+                ) : (
+                  <svg
+                    viewBox={`0 0 ${SVG.width} ${SVG.height}`}
+                    className="mx-auto block max-h-[min(68vh,720px)] min-h-[420px] w-full"
+                    role="img"
+                    aria-label={`Área a cubrir de ${canvasMm.width} por ${canvasMm.height} mm con ${manualPlacements.length} gabinetes`}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={dropPlacement}
+                  >
+                    <text x={mOriginX} y="68" fill="#64748b" fontSize="18" fontWeight="600">
+                      ÁREA A CUBRIR · {canvasMm.width} × {canvasMm.height} mm
+                    </text>
+                    <rect
+                      x={mOriginX}
+                      y={my(canvasMm.height)}
+                      width={mDrawingWidth}
+                      height={mDrawingHeight}
+                      fill="#ffffff"
+                      fillOpacity="0.6"
+                      stroke="#64748b"
+                      strokeWidth="2"
+                      strokeDasharray="12 8"
+                    />
+                    {manualPlacements.map((placement, index) => {
+                      const model = modelById(placement.model_id);
+                      if (!model) return null;
+                      const colors = modelColor(placement.model_id);
+                      const px = mx(placement.x_mm);
+                      const py = my(placement.y_mm + model.height_mm);
+                      const pw = model.width_mm * mScale;
+                      const ph = model.height_mm * mScale;
+                      const selected = placement.key === selectedKey;
+                      const labelSize = Math.min(17, ph / 5, pw / 6);
+                      return (
+                        <g
+                          key={placement.key}
+                          onClick={() => {
+                            setSelectedKey(placement.key);
+                            setManualMsg(null);
+                          }}
+                          className="cursor-pointer"
+                        >
+                          <title>{`${model.width_mm} × ${model.height_mm} mm · ${model.name}`}</title>
+                          <rect
+                            x={px}
+                            y={py}
+                            width={pw}
+                            height={ph}
+                            rx="3"
+                            fill={colors.fill}
+                            stroke={selected ? "#ea580c" : colors.stroke}
+                            strokeWidth={selected ? 4 : 2.5}
+                          />
+                          {labelSize >= 7 && (
+                            <text x={px + pw / 2} y={py + ph / 2 + labelSize * 0.35} textAnchor="middle" fill={colors.text} fontSize={labelSize} fontWeight="700">
+                              P{index + 1}
+                            </text>
+                          )}
+                        </g>
+                      );
+                    })}
+                    <text x="560" y="990" textAnchor="middle" fill="#94a3b8" fontSize="14">Origen local: esquina inferior izquierda · unidad: mm</text>
+                  </svg>
+                )
+              ) : !face || !document ? (
                 <div className="flex h-[min(68vh,720px)] min-h-[420px] items-center justify-center text-sm text-slate-500">
                   {generating ? "Generando pantalla…" : "El motor no devolvió una cara dibujable."}
                 </div>
@@ -409,7 +609,7 @@ export default function LedDesigner() {
                     );
                   })}
 
-                  {fit && showTarget && (
+                  {fit && showTarget && mode === "auto" && (
                     <g>
                       <rect
                         x={x(0)}
@@ -488,7 +688,7 @@ export default function LedDesigner() {
             )}
             </div>
             )}
-            {fit && (
+            {fit && mode === "auto" && (
             <div className="mt-3 space-y-2">
             <p className="text-[11px] text-slate-500">
             Objetivo: {(fit.target_width_mm / 1000).toFixed(2)} × {(fit.target_height_mm / 1000).toFixed(2)} m
@@ -523,6 +723,61 @@ export default function LedDesigner() {
             )}
             </section>
 
+            {mode === "manual" && (
+            <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Gabinetes para arrastrar</h2>
+            <p className="mt-1 text-[11px] leading-4 text-slate-500">Arrastra un gabinete al área. La esquina superior izquierda de la pieza queda donde sueltes.</p>
+            <div className="mt-3 space-y-2">
+            {(catalog?.models ?? []).map((model) => {
+              const colors = modelColor(model.id);
+              return (
+                <div
+                  key={model.id}
+                  draggable
+                  onDragStart={(event) => {
+                    event.dataTransfer.setData("text/model-id", model.id);
+                    event.dataTransfer.effectAllowed = "copy";
+                  }}
+                  className="flex cursor-grab items-center gap-3 rounded-lg border border-slate-200 px-3 py-2.5 active:cursor-grabbing"
+                >
+                  <span className="h-6 w-6 shrink-0 rounded-md border" style={{ backgroundColor: colors.fill, borderColor: colors.stroke }} />
+                  <span>
+                    <span className="block text-sm font-semibold tabular-nums text-slate-800">{model.width_mm} × {model.height_mm} mm</span>
+                    <span className="block text-[11px] text-slate-500">{model.stock_qty === null ? "existencia sin registrar" : `${model.stock_qty} en existencia`}</span>
+                  </span>
+                </div>
+              );
+            })}
+            </div>
+            {manualMsg && (
+              <div role="alert" className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">{manualMsg}</div>
+            )}
+            {selectedKey !== null && (() => {
+              const selected = manualPlacements.find((placement) => placement.key === selectedKey);
+              if (!selected) return null;
+              const model = modelById(selected.model_id);
+              if (!model) return null;
+              return (
+                <div className="mt-3 rounded-lg border border-orange-200 bg-orange-50 px-3 py-2.5">
+                  <p className="text-xs font-semibold text-orange-900">Pieza seleccionada</p>
+                  <p className="mt-0.5 text-[11px] tabular-nums text-orange-900">
+                    {model.width_mm} × {model.height_mm} mm · X {selected.x_mm} · Y {selected.y_mm}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setManualPlacements((previous) => previous.filter((placement) => placement.key !== selectedKey));
+                      setSelectedKey(null);
+                    }}
+                    className="mt-2 w-full rounded-lg border border-orange-700 px-3 py-1.5 text-xs font-semibold text-orange-900 transition hover:bg-orange-100"
+                  >
+                    Quitar pieza
+                  </button>
+                </div>
+              );
+            })()}
+            </section>
+            )}
             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Catálogo de gabinetes</h2>
             <p className="mt-1 text-[11px] leading-4 text-slate-500">
@@ -587,6 +842,7 @@ export default function LedDesigner() {
           </aside>
 
                     <aside className="space-y-5">
+            {mode === "auto" && (
             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Modulación</p>
               <form onSubmit={submitLayout} noValidate className="mt-3 space-y-4">
@@ -616,18 +872,25 @@ export default function LedDesigner() {
                 <p className="text-[11px] leading-4 text-slate-500">De 1 a 100 filas o columnas, con un máximo de 5,000 gabinetes. Si una propuesta es inválida, se conserva la pantalla actual.</p>
               </form>
             </section>
+            )}
 
             
 
             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-400">Resumen del diseño</p>
-              <h2 className="mt-2 text-lg font-semibold">{document?.name ?? "Pantalla rectangular"}</h2>
+              <h2 className="mt-2 text-lg font-semibold">{mode === "manual" ? "Armado manual" : (document?.name ?? "Pantalla rectangular")}</h2>
               <div className="mt-4 divide-y divide-slate-100">
-                <Metric label="Medida total" value={face ? `${(face.width_mm / 1000).toFixed(2)} × ${(face.height_mm / 1000).toFixed(2)} m` : "—"} />
-                <Metric label="Gabinetes" value={summary ? String(summary.cabinet_count) : "—"} />
-                <Metric label="Área LED total" value={summary ? `${summary.active_area_m2.toFixed(4)} m²` : "—"} />
+                <Metric label="Medida total" value={mode === "manual"
+                  ? (canvasMm ? `${(canvasMm.width / 1000).toFixed(2)} × ${(canvasMm.height / 1000).toFixed(2)} m` : "—")
+                  : (face ? `${(face.width_mm / 1000).toFixed(2)} × ${(face.height_mm / 1000).toFixed(2)} m` : "—")} />
+                <Metric label="Gabinetes" value={mode === "manual" ? String(manualPlacements.length) : (summary ? String(summary.cabinet_count) : "—")} />
+                <Metric label="Área LED total" value={mode === "manual" ? `${manualAreaM2.toFixed(4)} m²` : (summary ? `${summary.active_area_m2.toFixed(4)} m²` : "—")} />
               </div>
-              {summary && summary.warnings.length > 0 && (
+              {mode === "manual" ? (
+                <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-4 text-amber-900">
+                  Armado manual sin guardar: las piezas se pierden al recargar. El guardado llega en E10.
+                </p>
+              ) : summary && summary.warnings.length > 0 && (
                 <ul className="mt-4 space-y-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-4 text-amber-900">
                   {summary.warnings.map((warning) => <li key={warning}>{warning}</li>)}
                 </ul>
@@ -636,6 +899,42 @@ export default function LedDesigner() {
 
             <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <h2 className="text-xs font-semibold uppercase tracking-wide text-slate-400">Listado de gabinetes</h2>
+              {mode === "manual" ? (
+              <div className="mt-3 overflow-hidden rounded-lg border border-slate-100">
+                <div className="grid grid-cols-[1fr_auto_auto] gap-3 bg-slate-50 px-3 py-2 text-[11px] font-medium text-slate-500">
+                  <span>Modelo</span><span>Área</span><span>Cantidad</span>
+                </div>
+                {(() => {
+                  const groups = new Map<string, { model: CabinetModel; quantity: number }>();
+                  for (const placement of manualPlacements) {
+                    const model = modelById(placement.model_id);
+                    if (!model) continue;
+                    const entry = groups.get(model.id) ?? { model, quantity: 0 };
+                    entry.quantity += 1;
+                    groups.set(model.id, entry);
+                  }
+                  if (groups.size === 0) {
+                    return <p className="px-3 py-3 text-xs text-slate-500">Sin piezas todavía. Arrastra gabinetes al área.</p>;
+                  }
+                  return [...groups.values()].map(({ model, quantity }) => {
+                    const colors = modelColor(model.id);
+                    return (
+                      <div key={model.id} className="grid grid-cols-[1fr_auto_auto] items-center gap-3 border-t border-slate-100 px-3 py-3 text-sm first:border-t-0">
+                        <span className="flex items-center gap-2">
+                          <span className="h-5 w-5 shrink-0 rounded border" style={{ backgroundColor: colors.fill, borderColor: colors.stroke }} />
+                          <span>
+                            <span className="block font-medium text-slate-700">{model.width_mm} × {model.height_mm} mm</span>
+                            <span className="block text-[11px] text-slate-500">{model.name}</span>
+                          </span>
+                        </span>
+                        <span className="tabular-nums text-xs text-slate-600">{((model.width_mm * model.height_mm * quantity) / 1_000_000).toFixed(4)} m²</span>
+                        <span className="font-semibold tabular-nums">{quantity}</span>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+              ) : (
               <div className="mt-3 overflow-hidden rounded-lg border border-slate-100">
                 <div className="grid grid-cols-[1fr_auto_auto] gap-3 bg-slate-50 px-3 py-2 text-[11px] font-medium text-slate-500">
                   <span>Modelo</span><span>Área</span><span>Cantidad</span>
@@ -651,8 +950,9 @@ export default function LedDesigner() {
                   </div>
                 ))}
               </div>
-              {document && <p className="mt-2 text-[11px] text-slate-500">Catálogo: {document.catalog.revision} · motor {result?.engine_version}</p>}
-              {face && (
+              )}
+              {document && mode === "auto" && <p className="mt-2 text-[11px] text-slate-500">Catálogo: {document.catalog.revision} · motor {result?.engine_version}</p>}
+              {face && mode === "auto" && (
                 <details className="mt-3">
                   <summary className="cursor-pointer text-xs font-medium text-cyan-800">Ver posiciones de los {placements.length} gabinetes</summary>
                   <div className="mt-2 max-h-52 overflow-auto rounded-lg border border-slate-100">
@@ -664,10 +964,25 @@ export default function LedDesigner() {
                   <p className="mt-1 text-[10px] text-slate-400">Coordenadas X/Y en mm, con origen en la esquina inferior izquierda.</p>
                 </details>
               )}
+              {mode === "manual" && manualPlacements.length > 0 && (
+                <details className="mt-3">
+                  <summary className="cursor-pointer text-xs font-medium text-cyan-800">Ver posiciones de las {manualPlacements.length} piezas</summary>
+                  <div className="mt-2 max-h-52 overflow-auto rounded-lg border border-slate-100">
+                    <table className="w-full text-left text-[11px] tabular-nums">
+                      <thead className="sticky top-0 bg-slate-50 text-slate-500"><tr><th className="px-2 py-1.5">Pieza</th><th className="px-2 py-1.5">Modelo</th><th className="px-2 py-1.5">X</th><th className="px-2 py-1.5">Y</th></tr></thead>
+                      <tbody>{manualPlacements.map((placement, index) => {
+                        const model = modelById(placement.model_id);
+                        return <tr key={placement.key} className="border-t border-slate-100"><td className="px-2 py-1.5 text-slate-700">P{index + 1}</td><td className="px-2 py-1.5">{model ? `${model.width_mm} × ${model.height_mm}` : "—"}</td><td className="px-2 py-1.5">{placement.x_mm}</td><td className="px-2 py-1.5">{placement.y_mm}</td></tr>;
+                      })}</tbody>
+                    </table>
+                  </div>
+                  <p className="mt-1 text-[10px] text-slate-400">Coordenadas X/Y en mm, con origen en la esquina inferior izquierda.</p>
+                </details>
+              )}
             </section>
 
             <section className="rounded-xl border border-cyan-100 bg-cyan-50/70 px-4 py-3 text-xs leading-5 text-cyan-950">
-              <strong>Referencia sintética.</strong> No representa una ficha comercial real. La edición pieza por pieza y el visor 3D vendrán en etapas posteriores.
+              <strong>Referencia sintética.</strong> No representa una ficha comercial real. El modo Diseñador no guarda todavía y el visor 3D vendrá en E04.
             </section>
           </aside>
         </div>
