@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import Link from "next/link";
 import { fetchJson, useResource } from "@/app/lib/client";
 import { ticketStatusLabel } from "@/app/lib/format";
-import { Field, Modal, PrimaryButton, SecondaryButton, Select, Spinner, TextInput } from "@/app/components/ui";
+import { dateAtNoon, todayIso } from "@/app/lib/time";
+import { Field, Modal, PrimaryButton, SecondaryButton, Select, Spinner, TextInput, UiMark } from "@/app/components/ui";
 
 type ScaleKey = "week" | "biweek" | "month";
 
@@ -34,6 +35,18 @@ const TICKET_STATUS_STYLE: Record<string, string> = {
 
 const WEEKDAYS = ["D", "L", "M", "M", "J", "V", "S"];
 const LANE_H = 26;
+
+const EDITABLE_TICKET_STATUSES = [
+  "new",
+  "to_review",
+  "unassigned",
+  "scheduled",
+  "in_progress",
+  "waiting_client",
+  "waiting_material",
+  "waiting_access",
+  "resolved_pending_validation",
+];
 
 interface TicketItem {
   id: string;
@@ -74,10 +87,10 @@ interface AssignmentRow {
 }
 
 function mondayRef(): Date {
-  const d = new Date();
+  const d = dateAtNoon(todayIso());
   const day = (d.getDay() + 6) % 7;
   d.setDate(d.getDate() - day);
-  d.setHours(0, 0, 0, 0);
+  d.setHours(12, 0, 0, 0);
   return d;
 }
 
@@ -132,13 +145,16 @@ export default function TicketGanttView() {
   const [search, setSearch] = useState("");
   const [status, setStatus] = useState("");
   const [assigningId, setAssigningId] = useState<string | null>(null);
+  const [schedulingId, setSchedulingId] = useState<string | null>(null);
+  const [statusId, setStatusId] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{ ticket: TicketRow; rect: DOMRect } | null>(null);
   const [saveErr, setSaveErr] = useState<string | null>(null);
 
   const scale = SCALES[scaleKey];
   const baseMonday = useMemo(() => mondayRef(), []);
   const from = useMemo(() => addDays(baseMonday, dayOffset), [baseMonday, dayOffset]);
   const days = useMemo(() => Array.from({ length: scale.days }, (_, i) => i), [scale.days]);
-  const todayIdx = diffDays(from, isoDate(new Date()));
+  const todayIdx = diffDays(from, todayIso());
 
   const tickets = useMemo(() => {
     const q = search.trim().toLocaleLowerCase("es");
@@ -147,6 +163,13 @@ export default function TicketGanttView() {
       .filter((ticket) => !q || [ticket.code, ticket.title, ticket.client_name]
         .some((value) => (value ?? "").toLocaleLowerCase("es").includes(q)))
       .sort((a, b) => {
+        const tier = (ticket: TicketRow) => {
+          if (ticket.status === "resolved_pending_validation") return 2;
+          if (ticket.items.length === 0 && ticket.assignments.length === 0) return 0;
+          return 1;
+        };
+        const tierDiff = tier(a) - tier(b);
+        if (tierDiff !== 0) return tierDiff;
         const aStart = a.items.map((item) => item.start_date).sort()[0] ?? "9999-12-31";
         const bStart = b.items.map((item) => item.start_date).sort()[0] ?? "9999-12-31";
         return aStart.localeCompare(bStart) || a.code.localeCompare(b.code);
@@ -154,6 +177,8 @@ export default function TicketGanttView() {
   }, [data, search, status]);
 
   const assigning = data?.tickets.find((ticket) => ticket.id === assigningId) ?? null;
+  const scheduling = data?.tickets.find((ticket) => ticket.id === schedulingId) ?? null;
+  const statusTicket = data?.tickets.find((ticket) => ticket.id === statusId) ?? null;
 
   async function moveActivity(item: TicketItem, start: string, end: string | null) {
     if (item.kind !== "activity") return;
@@ -180,7 +205,7 @@ export default function TicketGanttView() {
             </p>
           </div>
           <div className="flex gap-2">
-            <Link href="/" className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50">
+            <Link href="/agenda" className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50">
               Agenda semanal
             </Link>
             <Link href="/tickets" className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50">
@@ -189,12 +214,12 @@ export default function TicketGanttView() {
           </div>
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center gap-2">
-          <TextInput value={search} onChange={setSearch} placeholder="Buscar ticket, título o cliente…" className="w-64" />
+        <div className="mt-3 flex flex-nowrap items-center gap-2 overflow-x-auto pb-1">
+          <TextInput value={search} onChange={setSearch} placeholder="Buscar ticket…" className="w-52 shrink-0" />
           <select
             value={status}
             onChange={(e) => setStatus(e.target.value)}
-            className="rounded-md border border-zinc-300 bg-white px-2.5 py-1.5 text-sm text-zinc-700"
+            className="w-44 shrink-0 rounded-md border border-zinc-300 bg-white px-2.5 py-1.5 text-sm text-zinc-700"
           >
             <option value="">Todos los estados abiertos</option>
             <option value="new">Nuevo</option>
@@ -207,22 +232,22 @@ export default function TicketGanttView() {
             <option value="waiting_access">Esperando acceso</option>
             <option value="resolved_pending_validation">Resuelto / Pendiente validación</option>
           </select>
-          <span className="ml-1 text-xs text-zinc-500">Escala:</span>
+          <span className="shrink-0 text-xs text-zinc-500">Escala:</span>
           {(Object.keys(SCALES) as ScaleKey[]).map((key) => (
             <button
               key={key}
               type="button"
               onClick={() => setScaleKey(key)}
-              className={`rounded-md border px-3 py-1.5 text-sm ${
+              className={`shrink-0 rounded-md border px-3 py-1.5 text-sm ${
                 scaleKey === key ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-300 bg-white text-zinc-700"
               }`}
             >
               {SCALES[key].label}
             </button>
           ))}
-          <button type="button" onClick={() => setDayOffset((v) => v - 1)} className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm">← Día</button>
-          <button type="button" onClick={() => setDayOffset(0)} className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm">Hoy</button>
-          <button type="button" onClick={() => setDayOffset((v) => v + 1)} className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm">Día →</button>
+          <button type="button" onClick={() => setDayOffset((v) => v - 1)} className="shrink-0 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm">← Día</button>
+          <button type="button" onClick={() => setDayOffset(0)} className="shrink-0 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm">Hoy</button>
+          <button type="button" onClick={() => setDayOffset((v) => v + 1)} className="shrink-0 rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-sm">Día →</button>
         </div>
       </header>
 
@@ -241,7 +266,7 @@ export default function TicketGanttView() {
                     return (
                       <div key={index} className="border-l border-zinc-100 px-0.5 py-1 text-center text-xs text-zinc-500" style={{ width: scale.px }}>
                         <span className="block font-medium">{day.getDate()}</span>
-                        <span className="block text-[9px] font-semibold uppercase text-zinc-400">{WEEKDAYS[day.getDay()]} · {day.getMonth() + 1}</span>
+                        <span className="block text-[9px] font-semibold uppercase text-zinc-400">{WEEKDAYS[day.getDay()]}</span>
                       </div>
                     );
                   })}
@@ -256,9 +281,25 @@ export default function TicketGanttView() {
                 return (
                   <div key={ticket.id} className="flex border-b border-zinc-100 last:border-0">
                     <div className="flex w-[300px] shrink-0 flex-col justify-center border-r border-zinc-100 px-4 py-2" style={{ minHeight: rowHeight }}>
-                      <Link href={`/tickets/${ticket.id}`} className="truncate font-medium text-zinc-800 hover:underline">
-                        <span className="font-mono text-xs text-sky-700">{ticket.code}</span> {ticket.title}
-                      </Link>
+                      <div className="flex items-start gap-1">
+                        <Link href={`/tickets/${ticket.id}`} className="min-w-0 flex-1 truncate font-medium text-zinc-800 hover:underline">
+                          <span className="font-mono text-xs text-sky-700">{ticket.code}</span> {ticket.title}
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setMenu(menu?.ticket.id === ticket.id ? null : { ticket, rect: e.currentTarget.getBoundingClientRect() });
+                          }}
+                          aria-label={`Acciones de ${ticket.code}`}
+                          aria-haspopup="menu"
+                          aria-expanded={menu?.ticket.id === ticket.id}
+                          className="shrink-0 rounded px-1.5 text-base leading-5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700"
+                        >
+                          ⋮
+                        </button>
+                      </div>
                       <p className="truncate text-xs text-zinc-400">{ticket.client_name ?? "Sin cliente"}</p>
                       <div className="mt-1 flex items-center gap-2">
                         <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${TICKET_STATUS_STYLE[ticket.status] ?? "bg-zinc-100 text-zinc-600"}`}>
@@ -272,13 +313,6 @@ export default function TicketGanttView() {
                             ? ticket.assignments.map((assignment) => assignment.technician_name).join(", ")
                             : "Sin técnico asignado"}
                         </span>
-                        <button
-                          type="button"
-                          onClick={() => setAssigningId(ticket.id)}
-                          className="shrink-0 rounded border border-zinc-200 px-1.5 py-0.5 text-[10px] text-zinc-600 hover:bg-zinc-100"
-                        >
-                          Asignar
-                        </button>
                       </div>
                     </div>
                     <div className="relative flex" style={{ minHeight: rowHeight, width: scale.days * scale.px }}>
@@ -319,6 +353,39 @@ export default function TicketGanttView() {
           technicians={data.technicians}
           onClose={() => setAssigningId(null)}
           onChanged={reload}
+        />
+      )}
+      {scheduling && data && (
+        <ScheduleTicketModal
+          key={scheduling.id}
+          ticket={scheduling}
+          technicians={data.technicians}
+          onClose={() => setSchedulingId(null)}
+          onSaved={() => {
+            setSchedulingId(null);
+            reload();
+          }}
+        />
+      )}
+      {statusTicket && (
+        <TicketStatusModal
+          key={statusTicket.id}
+          ticket={statusTicket}
+          onClose={() => setStatusId(null)}
+          onSaved={() => {
+            setStatusId(null);
+            reload();
+          }}
+        />
+      )}
+      {menu && (
+        <TicketRowMenu
+          ticket={menu.ticket}
+          rect={menu.rect}
+          onClose={() => setMenu(null)}
+          onStatus={() => setStatusId(menu.ticket.id)}
+          onSchedule={() => setSchedulingId(menu.ticket.id)}
+          onAssign={() => setAssigningId(menu.ticket.id)}
         />
       )}
     </div>
@@ -400,6 +467,223 @@ function TicketBar({
     >
       <span className="truncate">{width > 60 ? item.label : ""}</span>
     </div>
+  );
+}
+
+function TicketRowMenu({
+  ticket,
+  rect,
+  onClose,
+  onStatus,
+  onSchedule,
+  onAssign,
+}: {
+  ticket: TicketRow;
+  rect: DOMRect;
+  onClose: () => void;
+  onStatus: () => void;
+  onSchedule: () => void;
+  onAssign: () => void;
+}) {
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    function dismiss() {
+      onClose();
+    }
+    document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", dismiss, true);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", dismiss, true);
+    };
+  }, [onClose]);
+
+  const width = 220;
+  const left = Math.max(8, Math.min(rect.right - width, window.innerWidth - width - 8));
+  const itemCls = "block w-full px-3 py-1.5 text-left text-xs text-zinc-700 hover:bg-zinc-100";
+
+  return (
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose} aria-hidden />
+      <div
+        role="menu"
+        aria-label={`Acciones de ${ticket.code}`}
+        style={{ top: rect.bottom + 4, left, width }}
+        className="fixed z-50 overflow-hidden rounded-md border border-zinc-200 bg-white py-1 shadow-xl"
+      >
+        <span className="absolute right-1.5 top-1"><UiMark id="N10" /></span>
+        <p className="px-3 pb-1 pt-0.5 font-mono text-[10px] font-semibold uppercase tracking-wide text-zinc-400">{ticket.code}</p>
+        <button role="menuitem" className={itemCls} onClick={() => { onStatus(); onClose(); }}>Cambiar estado</button>
+        <button role="menuitem" className={itemCls} onClick={() => { onSchedule(); onClose(); }}>Programar actividad</button>
+        <button role="menuitem" className={itemCls} onClick={() => { onAssign(); onClose(); }}>Asignar técnicos</button>
+        <Link role="menuitem" href={`/tickets/${ticket.id}`} className={itemCls} onClick={onClose}>Abrir detalle</Link>
+      </div>
+    </>
+  );
+}
+
+function TicketStatusModal({
+  ticket,
+  onClose,
+  onSaved,
+}: {
+  ticket: TicketRow;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [status, setStatus] = useState(ticket.status);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function save() {
+    if (status === ticket.status) return;
+    setSaving(true);
+    setErr(null);
+    try {
+      await fetchJson(`/api/tickets/${ticket.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      });
+      onSaved();
+    } catch (error) {
+      setErr(String(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      mark="W43"
+      open={true}
+      onClose={onClose}
+      title={`Cambiar estado · ${ticket.code}`}
+      footer={
+        <>
+          <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
+          <PrimaryButton onClick={() => void save()} disabled={saving || status === ticket.status}>
+            {saving ? "Guardando…" : "Guardar"}
+          </PrimaryButton>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <Field label="Estado">
+          <Select
+            value={status}
+            onChange={setStatus}
+            options={EDITABLE_TICKET_STATUSES.map((value) => ({ value, label: ticketStatusLabel(value) }))}
+          />
+        </Field>
+        <p className="text-[11px] text-zinc-400">El estado Cerrado se establece desde el cierre del ticket en V6.</p>
+        {err && <p className="text-xs text-red-600">{err}</p>}
+      </div>
+    </Modal>
+  );
+}
+
+function ScheduleTicketModal({
+  ticket,
+  technicians,
+  onClose,
+  onSaved,
+}: {
+  ticket: TicketRow;
+  technicians: { id: string; display_name: string }[];
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [date, setDate] = useState(todayIso());
+  const [endDate, setEndDate] = useState("");
+  const [description, setDescription] = useState(ticket.title);
+  const [hours, setHours] = useState("8");
+  const [technicianIds, setTechnicianIds] = useState<string[]>(ticket.assignments.map((a) => a.technician_id));
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  function toggleTechnician(id: string) {
+    setTechnicianIds((current) => current.includes(id) ? current.filter((value) => value !== id) : [...current, id]);
+  }
+
+  async function save() {
+    if (!date) return setErr("Selecciona una fecha");
+    if (!description.trim()) return setErr("La descripción es obligatoria");
+    if (endDate && endDate < date) return setErr("La fecha final no puede ser anterior al inicio");
+    if (technicianIds.length === 0) return setErr("Selecciona al menos un técnico");
+    setSaving(true);
+    setErr(null);
+    try {
+      await fetchJson("/api/ticket-gantt/schedule", {
+        method: "POST",
+        body: JSON.stringify({
+          ticket_id: ticket.id,
+          date,
+          end_date: endDate || null,
+          description: description.trim(),
+          planned_hours: Number(hours) || 0,
+          technician_ids: technicianIds,
+        }),
+      });
+      onSaved();
+    } catch (error) {
+      setErr(String(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      mark="W42"
+      open={true}
+      onClose={onClose}
+      title={`Programar · ${ticket.code}`}
+      wide
+      footer={
+        <>
+          <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
+          <PrimaryButton onClick={() => void save()} disabled={saving}>
+            {saving ? "Programando…" : "Programar"}
+          </PrimaryButton>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        <Field label="Descripción">
+          <TextInput value={description} onChange={setDescription} />
+        </Field>
+        <div className="grid gap-3 sm:grid-cols-3">
+          <Field label="Fecha de inicio">
+            <TextInput type="date" value={date} onChange={setDate} />
+          </Field>
+          <Field label="Fecha de fin (opcional)">
+            <TextInput type="date" value={endDate} onChange={setEndDate} />
+          </Field>
+          <Field label="Horas planeadas">
+            <TextInput type="number" value={hours} onChange={setHours} />
+          </Field>
+        </div>
+        <Field label="Técnicos">
+          <div className="grid max-h-52 gap-2 overflow-y-auto rounded-md border border-zinc-200 p-3 sm:grid-cols-2">
+            {technicians.map((technician) => (
+              <label key={technician.id} className="flex cursor-pointer items-center gap-2 text-sm text-zinc-700">
+                <input
+                  type="checkbox"
+                  checked={technicianIds.includes(technician.id)}
+                  onChange={() => toggleTechnician(technician.id)}
+                  className="h-4 w-4 rounded border-zinc-300"
+                />
+                {technician.display_name}
+              </label>
+            ))}
+          </div>
+        </Field>
+        <p className="text-[11px] text-zinc-400">Los técnicos seleccionados también quedarán asignados al ticket. Tickets nuevos pasan a Programado.</p>
+        {err && <p className="text-xs text-red-600">{err}</p>}
+      </div>
+    </Modal>
   );
 }
 

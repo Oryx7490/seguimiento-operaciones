@@ -1,19 +1,12 @@
 import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
-import { jsonOk, jsonError, parseId } from "@/app/lib/api";
+import { getCurrentUserId, jsonError, jsonOk, parseId } from "@/app/lib/api";
+import { logActivity } from "@/app/lib/audit";
 
 const ACTIVITY_STATUS = ["planned", "in_progress", "completed", "cancelled"];
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 
-async function getActorId(body?: { actor_id?: string }): Promise<string | null> {
-  if (body?.actor_id) {
-    const { rows } = await pool.query(`SELECT id FROM users WHERE id = $1`, [body.actor_id]);
-    if (rows.length > 0) return rows[0].id;
-  }
-  const { rows } = await pool.query(`SELECT id FROM users WHERE role = 'admin' ORDER BY created_at LIMIT 1`);
-  return rows.length > 0 ? rows[0].id : null;
-}
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -177,7 +170,7 @@ export async function POST(req: NextRequest) {
   if (planned < 0) return jsonError("planned_hours no puede ser negativo");
   const status = body.status && ACTIVITY_STATUS.includes(body.status) ? body.status : "planned";
 
-  const actorId = await getActorId(body);
+  const actorId = await getCurrentUserId();
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -214,6 +207,15 @@ export async function POST(req: NextRequest) {
         [activityId, tid]
       );
     }
+    await logActivity(client, {
+      entity_type: "activity",
+      entity_id: activityId,
+      action: "create",
+      summary: `Actividad creada: ${description || "sin descripción"}`,
+      details: { date, end_date: endDate, status, planned_hours: planned, technicians: techIds.length, projects: projectIds.length },
+      ticket_id: hasTicket ? body.ticket_id ?? null : null,
+      actor_id: actorId,
+    });
     await client.query("COMMIT");
     return jsonOk({ activity: { id: activityId, date, description, status, planned_hours: planned } }, 201);
   } catch (err) {

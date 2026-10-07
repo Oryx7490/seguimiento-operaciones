@@ -1,5 +1,6 @@
 import pool from "@/app/lib/db";
 import { ServiceError } from "@/app/lib/services/errors";
+import { logActivity } from "@/app/lib/audit";
 
 export interface PhaseInput {
   name?: string;
@@ -100,6 +101,23 @@ export async function createProject(
         [projectId, actorId, reason]
       );
     }
+
+    await logActivity(client, {
+      entity_type: "project",
+      entity_id: projectId,
+      entity_label: projectRes.rows[0].code,
+      action: "create",
+      summary: `Proyecto ${projectRes.rows[0].code} creado: ${projectRes.rows[0].name}`,
+      details: {
+        name: projectRes.rows[0].name,
+        client_id: input.client_id || null,
+        phases: (phases ?? []).length,
+        planned_start_date: input.planned_start_date ?? null,
+        planned_end_date: input.planned_end_date ?? null,
+      },
+      project_id: projectId,
+      actor_id: actorId,
+    });
 
     await client.query("COMMIT");
     return projectRes.rows[0];

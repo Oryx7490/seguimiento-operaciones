@@ -1,7 +1,8 @@
 import { NextRequest } from "next/server";
 import { randomUUID } from "crypto";
 import pool from "@/app/lib/db";
-import { jsonError, jsonOk, parseId } from "@/app/lib/api";
+import { getCurrentUserId, jsonError, jsonOk, parseId } from "@/app/lib/api";
+import { logActivityAsync } from "@/app/lib/audit";
 import { deleteStorageObject, putStorageObject } from "@/app/lib/storage";
 
 const ATTACHMENT_TYPES = [
@@ -27,14 +28,6 @@ function formString(form: FormData, key: string): string | null {
   return typeof v === "string" && v.trim() ? v.trim() : null;
 }
 
-async function getActorId(value: FormDataEntryValue | null): Promise<string | null> {
-  if (typeof value === "string" && value) {
-    const { rows } = await pool.query(`SELECT id FROM users WHERE id = $1`, [value]);
-    if (rows.length > 0) return rows[0].id;
-  }
-  const { rows } = await pool.query(`SELECT id FROM users WHERE role = 'admin' ORDER BY created_at LIMIT 1`);
-  return rows.length > 0 ? rows[0].id : null;
-}
 
 export async function POST(req: NextRequest) {
   const form = await req.formData().catch(() => null);
@@ -72,7 +65,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const actorId = await getActorId(form.get("actor_id"));
+  const actorId = await getCurrentUserId();
   if (!actorId) return jsonError("Sin usuario registrado para la subida");
 
   const buffer = Buffer.from(await file.arrayBuffer());
@@ -101,6 +94,17 @@ export async function POST(req: NextRequest) {
        RETURNING id, project_id, ticket_id, screen_id, file_name, attachment_type, mime_type, size_bytes, created_at`,
       [id, projectUuid, ticketUuid, screenUuid, file.name, storageKey, file.type || null, file.size, attachmentType, actorId]
     );
+    await logActivityAsync({
+      entity_type: "attachment",
+      entity_id: id,
+      entity_label: file.name,
+      action: "upload",
+      summary: `Archivo subido: ${file.name}`,
+      details: { attachment_type: attachmentType, size_bytes: file.size, mime_type: file.type || null },
+      project_id: projectUuid ?? null,
+      ticket_id: ticketUuid ?? null,
+      actor_id: actorId,
+    });
     return jsonOk({ attachment: rows[0] }, 201);
   } catch (err) {
     try {

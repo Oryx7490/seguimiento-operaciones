@@ -25,6 +25,7 @@ import type {
   ProjectDetail,
   ProjectPhase,
   ProjectScreen,
+  Location,
   Technician,
   TechniciansResponse,
 } from "@/app/lib/types";
@@ -125,6 +126,15 @@ export default function ProjectDetailPage() {
             {p.priority_name && <span>· {p.priority_name}</span>}
             {p.coordinator_name && <span>· Coord: {p.coordinator_name}</span>}
           </div>
+          <ProjectLocationSelector
+            key={`${id}-${p.location_id ?? "none"}`}
+            projectId={id}
+            clientId={p.client_id}
+            locationId={p.location_id}
+            locationName={p.location_name}
+            city={p.city}
+            onSaved={reload}
+          />
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => router.back()} className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50">
@@ -343,7 +353,14 @@ export default function ProjectDetailPage() {
         status={detail.project.status}
         closure={detail.closure as never}
         attachments={detail.attachments}
-        screens={detail.screens.map((s) => ({ id: s.id, screen_type: s.screen_type, cancelled: Boolean(s.cancelled) }))}
+        screens={detail.screens.map((s) => ({
+          id: s.id,
+          screen_type: s.screen_type,
+          cancelled: Boolean(s.cancelled),
+          m2: Number(s.m2) || 0,
+          m2_exact: s.m2_exact != null ? String(s.m2_exact) : undefined,
+          quantity: Number(s.quantity) || 1,
+        }))}
         closureControllers={detail.closure_controllers}
         closureModuleLots={detail.closure_module_lots}
         defaultOpen={detail.project.status !== "closed"}
@@ -355,6 +372,69 @@ export default function ProjectDetailPage() {
 
       {/* Comments */}
       <CommentSection kind="project" entityId={id} comments={detail.comments} defaultOpen={detail.comments.length === 0} onSaved={reload} />
+    </div>
+  );
+}
+
+function ProjectLocationSelector({
+  projectId,
+  clientId,
+  locationId,
+  locationName,
+  city,
+  onSaved,
+}: {
+  projectId: string;
+  clientId: string | null;
+  locationId: string | null;
+  locationName: string | null;
+  city: string | null;
+  onSaved: () => void;
+}) {
+  const { data } = useResource<{ locations: Location[] }>("/api/locations");
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(locationId ?? "");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const locations = (data?.locations ?? []).filter((location) => location.active && (!clientId || location.client_id === clientId));
+
+  async function save() {
+    setSaving(true);
+    setErr(null);
+    try {
+      await fetchJson(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ location_id: value || null }),
+      });
+      setEditing(false);
+      onSaved();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-zinc-500">
+      <span>📍 {locationName ? `${locationName}${city ? ` · ${city}` : ""}` : "Sin sucursal asignada"}</span>
+      <button type="button" onClick={() => setEditing((current) => !current)} className="rounded border border-zinc-300 px-2 py-1 text-[11px] text-zinc-600 hover:bg-zinc-50">
+        {editing ? "Cerrar" : "Asignar sucursal"}
+      </button>
+      {editing && (
+        <div className="flex flex-wrap items-center gap-2">
+          <select value={value} onChange={(event) => setValue(event.target.value)} className="rounded border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-800">
+            <option value="">Sin sucursal</option>
+            {locations.map((location) => (
+              <option key={location.id} value={location.id}>{location.name}{location.city ? ` · ${location.city}` : ""}</option>
+            ))}
+          </select>
+          <SecondaryButton onClick={() => void save()} disabled={saving} className="px-2 py-1 text-[11px]">
+            {saving ? "Guardando…" : "Guardar"}
+          </SecondaryButton>
+          {err && <span className="text-[11px] text-red-600">{err}</span>}
+        </div>
+      )}
     </div>
   );
 }
@@ -834,6 +914,7 @@ function AddAssignment({ projectId, onSaved }: { projectId: string; onSaved: () 
 interface ScreenPatchInput {
   id?: string;
   screen_type: string;
+  screen_catalog_id?: string | null;
   environment: string | null;
   quantity: number;
   width_m: number | null;
@@ -868,6 +949,7 @@ function ScreensSection({ projectId, detail, onSaved, summary, defaultOpen }: { 
         : {
             id: s.id,
             screen_type: s.screen_type,
+            screen_catalog_id: s.screen_catalog_id ?? null,
             environment: s.environment,
             quantity: s.quantity,
             width_m: s.width_m,
@@ -895,6 +977,7 @@ function ScreensSection({ projectId, detail, onSaved, summary, defaultOpen }: { 
         ? {
             id: s.id,
             screen_type: s.screen_type,
+            screen_catalog_id: s.screen_catalog_id ?? null,
             environment: s.environment,
             quantity: s.quantity,
             width_m: s.width_m,
@@ -908,6 +991,7 @@ function ScreensSection({ projectId, detail, onSaved, summary, defaultOpen }: { 
         : {
             id: s.id,
             screen_type: s.screen_type,
+            screen_catalog_id: s.screen_catalog_id ?? null,
             environment: s.environment,
             quantity: s.quantity,
             width_m: s.width_m,
@@ -949,6 +1033,7 @@ function ScreensSection({ projectId, detail, onSaved, summary, defaultOpen }: { 
           editing={editing}
           setEditing={setEditing}
           onSaved={save}
+          clientId={detail.project.client_id}
         />
       </div>
       {open && <div className="border-t border-zinc-100 p-4">
@@ -1221,10 +1306,12 @@ function ScreenForm({
   editing,
   setEditing,
   onSaved,
+  clientId,
 }: {
   editing: ProjectScreen | "new" | null;
   setEditing: (s: ProjectScreen | "new" | null) => void;
   onSaved: (screen: ProjectScreen | null, patch: Omit<ScreenPatchInput, "id" | "_deleted">) => Promise<void>;
+  clientId: string | null;
 }) {
   return (
     <>
@@ -1233,6 +1320,7 @@ function ScreenForm({
         <ScreenModal
           key={editing === "new" ? "new" : editing.id}
           editing={editing}
+          clientId={clientId}
           onClose={() => setEditing(null)}
           onSaved={onSaved}
         />
@@ -1241,16 +1329,58 @@ function ScreenForm({
   );
 }
 
+interface CatalogScreenOption {
+  id: string;
+  name: string;
+  width_m: number | null;
+  height_m: number | null;
+  area_m2: number | null;
+  pitch_mm: number | null;
+  is_irregular: boolean;
+  voltage: string | null;
+  environment: string | null;
+  active: boolean;
+}
+
 function ScreenModal({
   editing,
+  clientId,
   onClose,
   onSaved,
 }: {
   editing: ProjectScreen | "new";
+  clientId: string | null;
   onClose: () => void;
   onSaved: (screen: ProjectScreen | null, patch: Omit<ScreenPatchInput, "id" | "_deleted">) => Promise<void>;
 }) {
   const [screenType, setScreenType] = useState(editing === "new" ? "" : editing.screen_type);
+  const [catalogId, setCatalogId] = useState<string>(
+    editing === "new" ? "" : editing.screen_catalog_id ?? ""
+  );
+  const catalog = useResource<{ screens: CatalogScreenOption[] }>(
+    `/api/screen-catalog?client_id=${clientId}`
+  );
+  const catalogOptions = (catalog.data?.screens ?? []).filter((c) => c.active || c.id === catalogId);
+  const chosen = catalogOptions.find((c) => c.id === catalogId) ?? null;
+
+  // Traer specs es explícito: el catálogo nunca sobrescribe medidas por su cuenta.
+  function pullCatalogSpecs() {
+    if (!chosen) return;
+    setScreenType(chosen.name);
+    setIrregular(chosen.is_irregular);
+    if (chosen.is_irregular) {
+      setArea(chosen.area_m2 ? String(chosen.area_m2) : "");
+      setWidth("");
+      setHeight("");
+    } else {
+      setWidth(chosen.width_m ? String(chosen.width_m) : "");
+      setHeight(chosen.height_m ? String(chosen.height_m) : "");
+      setArea(chosen.area_m2 ? String(chosen.area_m2) : "");
+    }
+    if (chosen.pitch_mm !== null) setPitch(String(chosen.pitch_mm));
+    if (chosen.voltage) setVoltage(chosen.voltage);
+    if (chosen.environment) setEnvironment(chosen.environment);
+  }
   const [environment, setEnvironment] = useState(editing === "new" ? "" : editing.environment ?? "");
   const [quantity, setQuantity] = useState(editing === "new" ? "1" : String(editing.quantity));
   const [irregular, setIrregular] = useState<boolean>(editing !== "new" && editing.is_irregular);
@@ -1282,6 +1412,7 @@ function ScreenModal({
     }
     const patch: Omit<ScreenPatchInput, "id" | "_deleted"> = {
       screen_type: screenType.trim(),
+      screen_catalog_id: catalogId || null,
       environment: environment ? environment : null,
       quantity: qty,
       width_m: null,
@@ -1350,6 +1481,36 @@ function ScreenModal({
               { value: "interior_flexible", label: "Interior Flexible" },
             ]}
           />
+        </Field>
+        <Field
+          label="Pantalla del catálogo"
+          hint={
+            catalog.error
+              ? "No se pudo cargar el catálogo de la cuenta."
+              : catalogOptions.length === 0
+                ? clientId
+                  ? "Esta cuenta todavía no tiene pantallas en el catálogo (Configuración → Catálogos → Pantallas)."
+                  : "El proyecto no tiene cuenta, así que no hay catálogo disponible."
+                : "Víncula con la pantalla definida para esta cuenta. Las medidas solo se copian si pulsas «Traer specs»."
+          }
+        >
+          <div className="flex gap-2">
+            <Select
+              value={catalogId}
+              onChange={setCatalogId}
+              placeholder="Sin catálogo (pantalla propia)"
+              options={[
+                { value: "", label: "Sin catálogo (pantalla propia)" },
+                ...catalogOptions.map((c) => ({
+                  value: c.id,
+                  label: `${c.name}${c.is_irregular ? " · irregular" : c.width_m && c.height_m ? ` · ${c.width_m}×${c.height_m} m` : ""}`,
+                })),
+              ]}
+            />
+            <SecondaryButton onClick={pullCatalogSpecs} disabled={!chosen}>
+              Traer specs
+            </SecondaryButton>
+          </div>
         </Field>
         <Field label="Descripción">
           <TextInput value={screenType} onChange={setScreenType} placeholder="P. ej. LED interior" />

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useRef, type PointerEvent as ReactPointer
 import Link from "next/link";
 import { fetchJson, useResource } from "@/app/lib/client";
 import { phaseStatusLabel } from "@/app/lib/format";
+import { dateAtNoon, todayIso } from "@/app/lib/time";
 import { Modal, Field, TextInput, Textarea, Select, PrimaryButton, SecondaryButton, UiMark } from "@/app/components/ui";
 
 type GanttKind =
@@ -165,10 +166,10 @@ function assignLanes(
 }
 
 function mondayRef(): Date {
-  const d = new Date();
+  const d = dateAtNoon(todayIso());
   const day = (d.getDay() + 6) % 7;
   d.setDate(d.getDate() - day);
-  d.setHours(0, 0, 0, 0);
+  d.setHours(12, 0, 0, 0);
   return d;
 }
 
@@ -379,7 +380,7 @@ export default function GanttView() {
           </div>
           <nav className="flex items-center gap-2">
             <Link
-              href="/"
+              href="/agenda"
               className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50"
             >
               ← Agenda semanal
@@ -503,7 +504,7 @@ export default function GanttView() {
                       >
                         <span className="block">{day.getDate()}</span>
                         <span className="block text-[9px] font-semibold uppercase text-zinc-400">
-                          {WEEKDAYS[day.getDay()]} · {day.getMonth() + 1}
+                          {WEEKDAYS[day.getDay()]}
                         </span>
                       </div>
                     );
@@ -1099,8 +1100,7 @@ function addDaysIso(iso: string, n: number): string {
 }
 
 function isoToday(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return todayIso();
 }
 
 function formatDay(d: Date): string {

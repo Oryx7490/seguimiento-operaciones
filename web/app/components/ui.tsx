@@ -186,53 +186,50 @@ export function Modal({
   wide?: boolean;
   mark?: string;
 }) {
-  const ref = useRef<HTMLDialogElement>(null);
-
   useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    if (open && !el.open) el.showModal();
-    if (!open && el.open) el.close();
-  }, [open]);
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [open, onClose]);
+
+  if (!open) return null;
 
   return (
-    <dialog
-      ref={ref}
-      onClick={(e) => {
-        if (e.target === ref.current) onClose();
-      }}
-      className={`fixed left-1/2 top-1/2 m-0 max-h-[90vh] w-[calc(100%-2rem)] -translate-x-1/2 -translate-y-1/2 overflow-y-auto rounded-lg border border-zinc-200 bg-white p-0 shadow-xl ${wide ? "max-w-2xl" : "max-w-md"} backdrop:backdrop-blur-sm`}
-    >
-      {mark && (
-        <span className="pointer-events-none absolute left-2 top-1.5 z-10">
-          <UiMark id={mark} />
-        </span>
-      )}
-      <form
-        method="dialog"
-        onSubmit={(e) => {
-          e.preventDefault();
-          onClose();
-        }}
-        className="p-5"
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      <div className="absolute inset-0 bg-zinc-900/40" onClick={onClose} aria-hidden="true" />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        className={`relative z-10 max-h-[90vh] w-[calc(100%-2rem)] overflow-y-auto rounded-lg border border-zinc-200 bg-white p-0 shadow-xl ${wide ? "max-w-2xl" : "max-w-md"}`}
       >
-        <div className="flex items-center justify-between gap-2">
-          <h2 className="text-base font-semibold text-zinc-900">{title}</h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md p-1 text-zinc-400 hover:text-zinc-700"
-            aria-label="Cerrar"
-          >
-            <svg className="h-5 w-5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
-              <path d="M4 4l8 8M12 4l-8 8" />
-            </svg>
-          </button>
+        {mark && (
+          <span className="pointer-events-none absolute left-2 top-1.5 z-10">
+            <UiMark id={mark} />
+          </span>
+        )}
+        <div className="p-5">
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-base font-semibold text-zinc-900">{title}</h2>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-md p-1 text-zinc-400 hover:text-zinc-700"
+              aria-label="Cerrar"
+            >
+              <svg className="h-5 w-5" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+                <path d="M4 4l8 8M12 4l-8 8" />
+              </svg>
+            </button>
+          </div>
+          <div className="mt-4 text-sm text-zinc-700">{children}</div>
+          {footer && <div className="mt-5 flex flex-wrap justify-end gap-2 border-t border-zinc-100 pt-4">{footer}</div>}
         </div>
-        <div className="mt-4 text-sm text-zinc-700">{children}</div>
-        {footer && <div className="mt-5 flex flex-wrap justify-end gap-2 border-t border-zinc-100 pt-4">{footer}</div>}
-      </form>
-    </dialog>
+      </div>
+    </div>
   );
 }
 

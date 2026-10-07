@@ -19,7 +19,7 @@ import {
 } from "@/app/components/ui";
 import { projectStatusLabel } from "@/app/lib/format";
 import { ColumnSelector } from "@/app/components/column-selector";
-import type { CatalogItem, CatalogsResponse, Client, ClientsResponse, Project, ProjectsResponse } from "@/app/lib/types";
+import type { CatalogItem, CatalogsResponse, Client, ClientsResponse, Location, LocationsResponse, Project, ProjectsResponse } from "@/app/lib/types";
 
 const PROJECT_COLUMNS = [
   { key: "codigo", label: "Código" },
@@ -186,6 +186,8 @@ function NewProjectModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
   const [priorities, setPriorities] = useState<CatalogItem[]>([]);
   const [name, setName] = useState("");
   const [clientId, setClientId] = useState("");
+  const [locationId, setLocationId] = useState("");
+  const [locations, setLocations] = useState<Location[]>([]);
   const [priorityId, setPriorityId] = useState("");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -205,11 +207,13 @@ function NewProjectModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
     Promise.all([
       fetchJson<ClientsResponse>("/api/clients"),
       fetchJson<CatalogsResponse>("/api/catalogs"),
+      fetchJson<LocationsResponse>("/api/locations"),
     ])
-      .then(([c, cat]) => {
+      .then(([c, cat, loc]) => {
         if (cancelled) return;
         setClients(c.clients);
         setPriorities(cat.priorities);
+        setLocations(loc.locations.filter((location) => location.active));
       })
       .catch(() => {});
     return () => {
@@ -251,6 +255,7 @@ function NewProjectModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
         body: JSON.stringify({
           name,
           client_id: clientId || undefined,
+          location_id: locationId || undefined,
           priority_id: priorityId || undefined,
           planned_start_date: startDate || undefined,
           planned_end_date: endDate || undefined,
@@ -286,6 +291,9 @@ function NewProjectModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
               onChange={(value) => {
                 setClientId(value);
                 setClientDraft(null);
+                if (locationId && value && locations.find((location) => location.id === locationId)?.client_id !== value) {
+                  setLocationId("");
+                }
               }}
               placeholder="Buscar cliente…"
               clearLabel="— Sin cliente —"
@@ -301,6 +309,19 @@ function NewProjectModal({ onClose, onSaved }: { onClose: () => void; onSaved: (
                 setClientErr(null);
                 setClientDraft({ name: query, contactName: "", contactEmail: "", contactPhone: "" });
               }}
+            />
+          </Field>
+          <Field label="Sucursal / ubicación">
+            <Select
+              value={locationId}
+              onChange={setLocationId}
+              placeholder="Selecciona una sucursal…"
+              options={locations
+                .filter((location) => !clientId || location.client_id === clientId)
+                .map((location) => ({
+                  value: location.id,
+                  label: `${location.name}${location.city ? ` · ${location.city}` : ""}`,
+                }))}
             />
           </Field>
           <Field label="Prioridad">

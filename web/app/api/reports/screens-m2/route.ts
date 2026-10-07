@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
 import { jsonOk, jsonError } from "@/app/lib/api";
+import { isoDateLocal, todayIso } from "@/app/lib/time";
 
 // Devuelve proyectos con pantallas cuyo planned_end_date cae en el rango [from, to].
 // Parámetros:
@@ -10,12 +11,11 @@ import { jsonOk, jsonError } from "@/app/lib/api";
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const months = Math.max(1, Math.min(24, Number(searchParams.get("months") || 6)));
-  const anchorParam = searchParams.get("anchor");
 
   // Calcular rango
-  const anchor = anchorParam
-    ? new Date(anchorParam + "T00:00:00")
-    : new Date();
+  const anchorParam = searchParams.get("anchor") ?? todayIso();
+  const parsed = new Date(`${anchorParam}T00:00:00`);
+  const anchor = isNaN(parsed.getTime()) ? new Date(`${todayIso()}T00:00:00`) : parsed;
   anchor.setDate(1); // inicio de mes
   anchor.setHours(0, 0, 0, 0);
 
@@ -24,8 +24,8 @@ export async function GET(req: NextRequest) {
   rangeEnd.setDate(0); // último día del mes anterior al siguiente
   rangeEnd.setHours(23, 59, 59, 999);
 
-  const from = anchor.toISOString().slice(0, 10);
-  const to = rangeEnd.toISOString().slice(0, 10);
+  const from = isoDateLocal(anchor);
+  const to = isoDateLocal(rangeEnd);
 
   try {
     const { rows } = await pool.query<{

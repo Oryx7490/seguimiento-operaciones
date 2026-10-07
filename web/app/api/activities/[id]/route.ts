@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
 import { getCurrentUserId, jsonOk, jsonError, parseId } from "@/app/lib/api";
+import { logActivity } from "@/app/lib/audit";
 
 const ACTIVITY_STATUS = ["planned", "in_progress", "completed", "cancelled"];
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -25,9 +26,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const setters: string[] = [];
   const values: unknown[] = [id];
+  const changedFields: string[] = [];
   const push = (col: string, val: unknown) => {
     setters.push(`${col} = $${values.length + 1}`);
     values.push(val);
+    if (!changedFields.includes(col)) changedFields.push(col);
   };
 
   if (body.status !== undefined) {
@@ -116,6 +119,24 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
          VALUES ('activity', $1, $2, $3, $4, $5)`,
         [id, fromStatus, body.status, actorId, "Cambio de estado"]
       );
+      await logActivity(client, {
+        entity_type: "activity",
+        entity_id: id,
+        action: "status_change",
+        summary: `Actividad ${fromStatus} → ${body.status}`,
+        details: { from: fromStatus, to: body.status },
+        actor_id: actorId,
+      });
+    }
+    if (changedFields.length > 0) {
+      await logActivity(client, {
+        entity_type: "activity",
+        entity_id: id,
+        action: "update",
+        summary: `Actividad actualizada: ${changedFields.join(", ")}`,
+        details: { fields: changedFields },
+        actor_id: actorId,
+      });
     }
 
     await client.query("COMMIT");
@@ -155,6 +176,14 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
          VALUES ('activity', $1, $2, 'cancelled', $3, $4)`,
         [id, fromStatus, actorId, "Cancelación de actividad"]
       );
+      await logActivity(client, {
+        entity_type: "activity",
+        entity_id: id,
+        action: "cancel",
+        summary: `Actividad cancelada (${fromStatus} → cancelled)`,
+        details: { from: fromStatus, to: "cancelled" },
+        actor_id: actorId,
+      });
     }
     await client.query("COMMIT");
     return jsonOk({ cancelled: id });

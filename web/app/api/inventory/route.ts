@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
 import { jsonError, jsonOk } from "@/app/lib/api";
+import { logActivityAsync } from "@/app/lib/audit";
 import { SELECT_INVENTORY, validateInventoryLot, type ValidLot } from "@/app/lib/inventory";
 
 const UPSERT = `INSERT INTO inventory_lots
@@ -80,7 +81,27 @@ export async function POST(req: NextRequest) {
   if (!v.ok) return jsonError(v.error);
 
   try {
+    const existing = await pool.query(
+      `SELECT id FROM inventory_lots WHERE LOWER(manufacturer_brand) = LOWER($1) AND LOWER(lot_number) = LOWER($2)`,
+      [v.lot.brand, v.lot.lot]
+    );
     const { rows } = await pool.query(UPSERT, toParams(v.lot));
+    await logActivityAsync({
+      entity_type: "inventory",
+      entity_id: rows[0].id,
+      entity_label: `${v.lot.brand} · ${v.lot.lot}`,
+      action: existing.rows.length > 0 ? "update" : "create",
+      summary: existing.rows.length > 0
+        ? `Lote de inventario actualizado: ${v.lot.brand} · ${v.lot.lot}`
+        : `Lote de inventario creado: ${v.lot.brand} · ${v.lot.lot}`,
+      details: {
+        module_count: v.lot.count,
+        status: v.lot.status,
+        expected_arrival: v.lot.eta,
+        width_mm: v.lot.widthMm,
+        height_mm: v.lot.heightMm,
+      },
+    });
     return jsonOk({ lot: rows[0] }, 201);
   } catch (err) {
     return jsonError("No se pudo guardar el lote", 500, String(err));

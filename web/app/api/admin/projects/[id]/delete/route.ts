@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
 import { jsonOk, jsonError, parseId } from "@/app/lib/api";
+import { logActivity } from "@/app/lib/audit";
 
 async function getActorId(): Promise<string | null> {
   const { rows } = await pool.query(
@@ -60,6 +61,15 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     );
 
     await client.query(`DELETE FROM projects WHERE id = $1`, [id]);
+    await logActivity(client, {
+      entity_type: "project",
+      entity_id: id,
+      entity_label: rows[0].code,
+      action: "delete",
+      summary: `Proyecto eliminado definitivamente: ${rows[0].code}`,
+      details: { code: rows[0].code, name: rows[0].name ?? null },
+      actor_id: actorId,
+    });
     await client.query("COMMIT");
     return jsonOk({ deleted: id, code: rows[0].code });
   } catch (err) {

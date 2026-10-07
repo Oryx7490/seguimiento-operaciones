@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { fetchJson, useResource } from "@/app/lib/client";
 import { formatDate } from "@/app/lib/format";
+import { decimalText, modulesForArea, multiplyDecimalText } from "@/app/lib/decimal";
 import { Field, PrimaryButton, SecondaryButton, TextInput } from "@/app/components/ui";
 import ProjectClosureFiles from "@/app/components/project-closure-files";
 import type { ClosureController, ClosureModuleLot, Controller } from "@/app/lib/types";
@@ -30,6 +31,9 @@ interface ScreenRef {
   id: string;
   screen_type: string;
   cancelled?: boolean;
+  m2?: number;
+  m2_exact?: string;
+  quantity?: number;
 }
 
 interface Row {
@@ -47,6 +51,19 @@ interface LotRow {
   manufacturer_brand: string;
   lot_number: string;
   module_count: string;
+  module_count_auto?: boolean;
+}
+
+interface ClosureInventoryLot {
+  id: string;
+  manufacturer_brand: string;
+  lot_number: string;
+  module_count: number;
+  status: string;
+  available_modules: number;
+  module_m2: number;
+  module_m2_exact?: string;
+  available_m2: number;
 }
 
 const REQUIREMENTS: Array<{ key: keyof Closure; label: string }> = [
@@ -123,7 +140,9 @@ export default function ProjectClosure({
   const [open, setOpen] = useState(defaultOpen);
 
   const catalog = useResource<{ controllers: Controller[] }>("/api/controllers");
+  const inventoryResource = useResource<{ inventory: ClosureInventoryLot[] }>(`/api/projects/${projectId}/closure-inventory`);
   const controllers = catalog.data?.controllers ?? [];
+  const inventoryLots = inventoryResource.data?.inventory ?? [];
   const isClosed = status === "closed";
   const activeScreens = screens.filter((s) => !s.cancelled);
   const screenName = (id: string) => screens.find((s) => s.id === id)?.screen_type ?? "General";
@@ -143,6 +162,52 @@ export default function ProjectClosure({
   const closureSummary = isClosed
     ? "Cerrado"
     : `${closureChecks.filter(Boolean).length}/${closureChecks.length} requisitos completos`;
+
+  function inventoryKey(brand: string, lot: string): string {
+    return `${brand.toLowerCase()}\u0001${lot.toLowerCase()}`;
+  }
+
+  function inventoryForRow(row: LotRow): ClosureInventoryLot | undefined {
+    return inventoryLots.find((lot) => inventoryKey(lot.manufacturer_brand, lot.lot_number) === inventoryKey(row.manufacturer_brand, row.lot_number));
+  }
+
+  function screenById(id: string): ScreenRef | undefined {
+    return activeScreens.find((s) => s.id === id);
+  }
+
+  /**
+   * Módulos teóricos que cubre el área de la pantalla.
+   * Pantalla en m² exactos (`m2_exact`, texto decimal de Postgres: width_m × height_m
+   * o area_m2 en irregulares) multiplicado por `quantity`, porque una fila puede
+   * representar N pantallas idénticas.
+   * Módulo en m² exactos (`module_m2_exact` = width_mm × height_mm / 1e6, p. ej. 0.0512).
+   * La división es decimal exacta (`modulesForArea`), no coma flotante: con `Math.ceil`
+   * un ratio exacto como 13 salía como 13.000000000000002 y devolvía 14 módulos de más.
+   */
+  function suggestedModuleCount(screen: ScreenRef | undefined, lot: ClosureInventoryLot | undefined): number | null {
+    if (!screen || !lot) return null;
+    return modulesForArea(
+      screen.m2_exact ?? screen.m2,
+      screen.quantity || 1,
+      lot.module_m2_exact ?? lot.module_m2
+    );
+  }
+
+  function screenAreaText(screen: ScreenRef): string {
+    return decimalText(screen.m2_exact ?? screen.m2);
+  }
+
+  function autoModuleCount(screenId: string, lot: ClosureInventoryLot | undefined): string | null {
+    const suggested = suggestedModuleCount(screenById(screenId), lot);
+    return suggested != null ? String(suggested) : null;
+  }
+
+  function recalculateLotRow(row: LotRow) {
+    const lot = inventoryForRow(row);
+    const next = autoModuleCount(row.screen_id, lot);
+    if (next == null) return;
+    updateLotRow(row.key, { module_count: next, module_count_auto: true });
+  }
 
   async function confirmarDePlaneacion() {
     setErr(null);
@@ -265,21 +330,22 @@ export default function ProjectClosure({
       if (!brand) return { __error: "Cada lote de módulos requiere la marca del fabricante" };
       if (!lotNo) return { __error: `La marca "${brand}" requiere el número de lote` };
       if (!l.screen_id) return { __error: `El lote "${lotNo}" debe asociarse a una pantalla` };
+      const inventoryLot = inventoryForRow(l);
+      if (!inventoryLot) return { __error: `Selecciona un lote vigente del inventario para "${brand} ${lotNo}"` };
+      const moduleCount = Number(countStr);
+      if (!countStr || !Number.isInteger(moduleCount) || moduleCount <= 0) {
+        return { __error: `El lote "${lotNo}" requiere una cantidad de módulos entera > 0` };
+      }
+      if (moduleCount > inventoryLot.available_modules) {
+        return { __error: `El lote "${lotNo}" solo tiene ${inventoryLot.available_modules} módulos disponibles` };
+      }
       if (!activeScreens.some((s) => s.id === l.screen_id)) {
         return { __error: `La pantalla seleccionada para el lote "${lotNo}" no está activa` };
       }
-      let moduleCount: number | null = null;
-      if (countStr) {
-        const n = Number(countStr);
-        if (!Number.isInteger(n) || n <= 0) {
-          return { __error: `El lote "${lotNo}" requiere una cantidad de módulos entera > 0` };
-        }
-        moduleCount = n;
-      }
       out.push({
         screen_id: l.screen_id,
-        manufacturer_brand: brand,
-        lot_number: lotNo,
+        manufacturer_brand: inventoryLot.manufacturer_brand,
+        lot_number: inventoryLot.lot_number,
         module_count: moduleCount,
       });
     }
@@ -594,7 +660,7 @@ export default function ProjectClosure({
                 </button>
               </div>
               <p className="mt-1 text-[11px] text-zinc-400">
-                Cada pantalla activa debe tener al menos un lote de módulos registrado para poder cerrar el proyecto.
+                Selecciona una marca y lote del inventario disponible. La cantidad se calcula por área de pantalla y se descontará al calcular existencias y m² usados.
               </p>
               <p className="mt-1 text-[11px] text-zinc-500">
                 Pantallas con lote: {new Set(
@@ -612,9 +678,10 @@ export default function ProjectClosure({
                     <thead className="bg-zinc-50 text-[10px] uppercase tracking-wide text-zinc-500">
                       <tr>
                         <th className="px-2 py-1.5 text-left">Pantalla</th>
-                        <th className="px-2 py-1.5 text-left">Marca del fabricante</th>
-                        <th className="px-2 py-1.5 text-left">Lote</th>
-                        <th className="px-2 py-1.5 text-center">Cantidad de módulos</th>
+                        <th className="px-2 py-1.5 text-left">Marca y lote del inventario</th>
+                        <th className="px-2 py-1.5 text-left">Cant. módulos</th>
+                        <th className="px-2 py-1.5 text-right">Disponible</th>
+                        <th className="px-2 py-1.5 text-left">Observaciones</th>
                         <th className="px-2 py-1.5"></th>
                       </tr>
                     </thead>
@@ -624,7 +691,15 @@ export default function ProjectClosure({
                           <td className="px-2 py-1.5">
                             <select
                               value={l.screen_id}
-                              onChange={(e) => updateLotRow(l.key, { screen_id: e.target.value })}
+                              onChange={(e) => {
+                                const nextScreenId = e.target.value;
+                                const canAuto = l.module_count_auto === true || l.module_count.trim() === "";
+                                const next = canAuto ? autoModuleCount(nextScreenId, inventoryForRow(l)) : null;
+                                updateLotRow(l.key, {
+                                  screen_id: nextScreenId,
+                                  ...(next != null ? { module_count: next, module_count_auto: true } : {}),
+                                });
+                              }}
                               className="rounded border border-zinc-300 bg-white px-1.5 py-1 text-xs text-zinc-800"
                             >
                               {activeScreens.map((s) => (
@@ -633,32 +708,105 @@ export default function ProjectClosure({
                             </select>
                           </td>
                           <td className="px-2 py-1.5">
-                            <input
-                              value={l.manufacturer_brand}
-                              onChange={(e) => updateLotRow(l.key, { manufacturer_brand: e.target.value })}
-                              placeholder="P. ej. Novastar / ROE"
-                              className="w-44 rounded border border-zinc-300 bg-white px-1.5 py-1 text-xs text-zinc-800"
-                            />
+                            <select
+                              value={inventoryForRow(l) ? inventoryKey(l.manufacturer_brand, l.lot_number) : ""}
+                              onChange={(e) => {
+                                const selected = inventoryLots.find((lot) => inventoryKey(lot.manufacturer_brand, lot.lot_number) === e.target.value);
+                                if (selected) {
+                                  const suggested = autoModuleCount(l.screen_id, selected);
+                                  updateLotRow(l.key, {
+                                    manufacturer_brand: selected.manufacturer_brand,
+                                    lot_number: selected.lot_number,
+                                    module_count: suggested ?? (l.module_count || (selected.available_modules > 0 ? "1" : "")),
+                                    module_count_auto: suggested != null,
+                                  });
+                                }
+                              }}
+                              className="w-56 rounded border border-zinc-300 bg-white px-1.5 py-1 text-xs text-zinc-800"
+                            >
+                              <option value="">Selecciona marca y lote…</option>
+                              {inventoryLots.map((lot) => (
+                                <option
+                                  key={lot.id}
+                                  value={inventoryKey(lot.manufacturer_brand, lot.lot_number)}
+                                  disabled={lot.available_modules <= 0 && inventoryKey(l.manufacturer_brand, l.lot_number) !== inventoryKey(lot.manufacturer_brand, lot.lot_number)}
+                                >
+                                  {lot.manufacturer_brand} · {lot.lot_number}
+                                </option>
+                              ))}
+                            </select>
                           </td>
                           <td className="px-2 py-1.5">
-                            <input
-                              value={l.lot_number}
-                              onChange={(e) => updateLotRow(l.key, { lot_number: e.target.value })}
-                              placeholder="P. ej. LOT-2024-01"
-                              className="w-44 rounded border border-zinc-300 bg-white px-1.5 py-1 text-xs text-zinc-800"
-                            />
+                            <div className="flex items-center gap-1">
+                              <input
+                                type="number"
+                                min={1}
+                                value={l.module_count}
+                                max={inventoryForRow(l)?.available_modules}
+                                onChange={(e) => updateLotRow(l.key, { module_count: e.target.value, module_count_auto: false })}
+                                placeholder="Cant."
+                                className="w-16 rounded border border-zinc-300 bg-white px-1.5 py-1 text-left text-xs text-zinc-800"
+                              />
+                              {inventoryForRow(l) && suggestedModuleCount(screenById(l.screen_id), inventoryForRow(l)) != null && (
+                                <button
+                                  type="button"
+                                  onClick={() => recalculateLotRow(l)}
+                                  title={`Calcular ${suggestedModuleCount(screenById(l.screen_id), inventoryForRow(l))} módulos para el área de la pantalla`}
+                                  className="rounded border border-zinc-300 px-1.5 py-1 text-[11px] text-zinc-600 hover:bg-zinc-100"
+                                >
+                                  Auto
+                                </button>
+                              )}
+                            </div>
                           </td>
-                          <td className="px-2 py-1.5 text-center">
-                            <input
-                              type="number"
-                              min={1}
-                              value={l.module_count}
-                              onChange={(e) => updateLotRow(l.key, { module_count: e.target.value })}
-                              placeholder="—"
-                              className="w-20 rounded border border-zinc-300 bg-white px-1.5 py-1 text-center text-xs text-zinc-800"
-                            />
+                          <td className="px-2 py-1.5 text-right align-top text-[11px] text-zinc-500">
+                            {inventoryForRow(l) ? (
+                              <>
+                                <span className="block whitespace-nowrap">
+                                  {inventoryForRow(l)!.available_modules} módulos
+                                </span>
+                                <span className="block whitespace-nowrap text-zinc-400">
+                                  {multiplyDecimalText(inventoryForRow(l)!.module_m2_exact ?? inventoryForRow(l)!.module_m2, inventoryForRow(l)!.available_modules)} m²
+                                </span>
+                              </>
+                            ) : (
+                              <span className="text-zinc-300">—</span>
+                            )}
                           </td>
-                          <td className="px-2 py-1.5 text-right">
+                          <td className="px-2 py-1.5 align-top text-[10px] leading-4 text-zinc-400">
+                            {(() => {
+                              const lot = inventoryForRow(l);
+                              const screen = screenById(l.screen_id);
+                              if (!lot || !screen) return <span className="text-zinc-300">—</span>;
+                              const areaText = screenAreaText(screen);
+                              const unitText = decimalText(lot.module_m2_exact ?? lot.module_m2);
+                              const suggested = suggestedModuleCount(screen, lot);
+                              const usedText = multiplyDecimalText(lot.module_m2_exact ?? lot.module_m2, Number(l.module_count) || 0);
+                              const totalAreaText = multiplyDecimalText(screen.m2_exact ?? screen.m2, screen.quantity || 1);
+                              const count = Number(l.module_count) || 0;
+                              return (
+                                <>
+                                  <span className="block">
+                                    Área {areaText} m²{(screen.quantity || 1) > 1 ? ` × ${screen.quantity} = ${totalAreaText} m²` : ""}
+                                  </span>
+                                  <span className="block">
+                                    Módulo {unitText} m² · usar {usedText} m²{suggested != null ? ` · exacto ${suggested}` : ""}
+                                  </span>
+                                  {suggested != null && count > 0 && count < suggested && (
+                                    <span className="block text-amber-600">
+                                      Faltan {suggested - count} módulos para cubrir el área exacta
+                                    </span>
+                                  )}
+                                  {suggested != null && count > suggested && (
+                                    <span className="block">
+                                      Excede el mínimo exacto en {count - suggested} módulos
+                                    </span>
+                                  )}
+                                </>
+                              );
+                            })()}
+                          </td>
+                          <td className="px-2 py-1.5 text-right align-top">
                             <button
                               type="button"
                               onClick={() => removeLotRow(l.key)}

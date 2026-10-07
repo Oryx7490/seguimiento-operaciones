@@ -5,6 +5,7 @@ import { UiMark } from "@/app/components/ui";
 
 const PAGES: { path: string; id: string; exact?: boolean }[] = [
   { path: "/", id: "V1", exact: true },
+  { path: "/agenda", id: "V35" },
   { path: "/gantt-tickets", id: "V34" },
   { path: "/gantt", id: "V2", exact: true },
   { path: "/proyectos", id: "V3", exact: true },
@@ -26,6 +27,7 @@ const PAGES: { path: string; id: string; exact?: boolean }[] = [
   { path: "/admin/especialidades", id: "V19" },
   { path: "/admin/calendario", id: "V20" },
   { path: "/admin/controladores", id: "V21" },
+  { path: "/admin/catalogo-pantallas", id: "V37" },
   { path: "/admin/inventario", id: "V22" },
   { path: "/admin/planeacion", id: "V23" },
   { path: "/admin/cierre", id: "V24" },
@@ -38,6 +40,7 @@ const PAGES: { path: string; id: string; exact?: boolean }[] = [
   { path: "/admin/proyeccion", id: "V31" },
   { path: "/admin/proyectos", id: "V32" },
   { path: "/admin/mejoras", id: "V33" },
+  { path: "/bitacora", id: "V36" },
 ];
 
 export function pageMark(path: string): string | null {

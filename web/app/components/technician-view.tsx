@@ -10,6 +10,7 @@ import {
   isToday,
   WEEKDAY_SHORT,
 } from "@/app/lib/prototype-data";
+import { dateAtNoon, todayIso } from "@/app/lib/time";
 import {
   Field,
   Modal,
@@ -64,7 +65,7 @@ export default function TechnicianView({
   initialTechId: string;
   technicians: Technician[];
 }) {
-  const [monday, setMonday] = useState(() => mondayOfWeek(new Date()));
+  const [monday, setMonday] = useState(() => mondayOfWeek(dateAtNoon(todayIso())));
   const [techId, setTechId] = useState(initialTechId);
   const [selected, setSelected] = useState<Activity | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
@@ -141,7 +142,7 @@ export default function TechnicianView({
             ←
           </button>
           <button
-            onClick={() => setMonday(mondayOfWeek(new Date()))}
+            onClick={() => setMonday(mondayOfWeek(dateAtNoon(todayIso())))}
             className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50"
           >
             Hoy
@@ -405,7 +406,7 @@ function ActivityCard({ activity, onClick }: { activity: Activity; onClick: () =
   const code = activityCode(activity);
   const endIso = activity.end_date && activity.end_date > activity.date ? activity.end_date : activity.date;
   const overdue =
-    endIso < isoDate(new Date()) && (activity.status === "planned" || activity.status === "in_progress");
+    endIso < todayIso() && (activity.status === "planned" || activity.status === "in_progress");
   const hours =
     activity.worked_hours > 0
       ? `${activity.worked_hours} h reg · ${activity.planned_hours} h plan`

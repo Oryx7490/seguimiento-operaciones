@@ -1,5 +1,105 @@
 # Constraints & Decisions Log
 
+## 0.4.5 — RC (2026-10-07)
+
+> Release candidato que lleva a GitHub: catálogo de pantallas por cuenta (V37), corrección de zona horaria y de la línea «Hoy» del Gantt (V39), y arreglo del modal que dejaba los clics bloqueados hasta un F5 (véase secciones abajo). El nav sigue leyendo la versión desde `web/package.json` (v0.4.5).
+
+### Fix de clics bloqueados tras cerrar un modal
+- El `Modal` usaba el `<dialog>` nativo: si se navegaba o volvía (historial) con un modal abierto, el navegador lo dejaba en el "top layer" y la cortina invisible seguía capturando todos los clics hasta recargar con F5.
+- Reescrito en `ui.tsx` como overlay controlado (fondo + panel fijos, cierre por clic en el fondo, ✕ o tecla Escape), ajeno al top layer nativo. Misma API (`open`, `onClose`, `title`, `footer`, `children`, `wide`, `mark`), sin cambios en los consumidores.
+- Tras crear una tarea y volver, el botón vuelve a responder al instante, sin refrescar.
+
+## Zona horaria y línea «Hoy» del Gantt (V39) — sin commit
+
+> La unidad de negocio es CDMX. Nunca se deriva una fecha calendario de `toISOString()` (el host corre en UTC): entre las 18:00 y las 23:59 hora CDMX, UTC ya es «mañana». Tampoco se resta una medianoche de un mediodía (o viceversa): `Math.round((mediodía − medianoche) / 86400000)` redondea `N + 0.5 → N + 1` y corre la línea «Hoy» y las barras un día.
+
+### Causas raíz
+- Línea roja en el Gantt (tickets y actividades): `diffDays` anclaba el día objetivo al **mediodía** pero el lunes base a la **medianoche**; el `Math.round` convertía `N + 0.5` en `N + 1`. Como México no usa DST, el desfase era fijo: martes → miércoles. **No era un problema de zona horaria.**
+- El «hoy» del servidor (reportes de esfuerzo, proyección de m², m² por mes) se derivaba de `toISOString()` (UTC) en vez de la fecha calendario de CDMX.
+
+### Cambios
+- Nuevo `web/app/lib/time.ts`: `todayIso()` (siempre `America/Mexico_City`, independiente de la TZ del proceso), `mondayIsoOfWeek(iso)`, `dateAtNoon(iso)`, `isoDateLocal(date)`.
+- Regla nueva en ambos Gantts (`gantt-view.tsx`, `ticket-gantt-view.tsx`): **lunes base y días objetivo se anclan al mediodía** (12:00), así `diffDays` da días exactos y `Math.round` es inocuo. El «hoy» se lee de `todayIso()` en vez de la hora local del navegador.
+- `week-agenda.tsx` (día inicial, «Hoy», etiquetas y conteo de vencidas) y `technician-view.tsx` (lunes inicial, botón Hoy, vencidas) usan `todayIso()`/`mondayOfWeek(dateAtNoon(todayIso()))`.
+- Reportes con «hoy» implícito en CDMX: `api/reports/effort` (`?date` por omisión), `api/reports/screen-projection` y `api/reports/screens-m2` (anclas y rangos `[from,to]` calculados con `isoDateLocal`, no `toISOString`).
+- `lib/overtime.ts` … `isoWeekKey` **no se tocó**: agrupa fechas calendario ya existentes y el día de la semana de una fecha es invariable a la zona horaria; no deriva «hoy».
+- El host del servidor **debe** correr `sudo timedatectl set-timezone America/Mexico_City` (pendiente: requiere sudo interactivo). El contenedor ya lleva `TZ`/`PGTZ`/`DEFAULT_TIMEZONE=America/Mexico_City` en `compose.yaml`.
+
+### Verificación
+- `todayIso()` (UTC host) = `2026-10-06` (martes) vs `toISOString()` = `2026-10-07`.
+- Con las reglas nuevas: `from` = lunes 2026-10-05 12:00, martes → `todayIdx = 1` → columna Martes.
+- `GET /api/reports/effort?scale=week` sin `date` → `{start: "2026-10-05", end: "2026-10-11"}` (semana CDMX del martes).
+- `tsc --noEmit` sin errores; ESLint sin errores (4 warnings pre-existentes de variables sin usar en `week-agenda`).
+
+## Catálogo de pantallas por cuenta (V37) — sin commit
+
+> Cada cuenta define una sola vez sus pantallas (medidas, pitch, ambiente, voltaje) y sus proyectos las reutilizan. Vincular no copia nada: el usuario decide cuándo tomar las specs del catálogo.
+
+### Migraciones `052_screen_catalog.sql` y `053_screen_catalog_active_unique.sql` (aplicadas, sin commit)
+- `screen_catalog`: `client_id` (NOT NULL, FK `clients`), `name`, `width_m`, `height_m`, `area_m2`, `pitch_mm`, `is_irregular`, `environment`, `voltage`, `notes`, `active`, `created_at`, `updated_at`. Índice por `(client_id, active)` y de búsqueda por nombre.
+- `project_screens.screen_catalog_id` nullable, FK `ON DELETE SET NULL`: borrar o desactivar una pantalla del catálogo nunca borra el proyecto.
+- **Decisión 053:** el índice único es parcial (`WHERE active`). Con el índice único total, desactivar una pantalla bloqueaba para siempre volver a crear ese mismo nombre en la cuenta, porque el borrado del catálogo es lógico.
+- **Decisión:** la unicidad usa `lower(name)`, igual que `idx_inventory_lots_brand_lot`. No normaliza acentos: «Cenefa» y «cenefa» chocan, «Lácteos» y «lacteos» no. Es el mismo criterio del resto del sistema.
+
+### API
+- `GET /api/screen-catalog?client_id=&q=&include_inactive=` — `q` busca por nombre de pantalla, por **nombre de cuenta** y por notas. `client_id` presente y vacío devuelve lista vacía (proyecto sin cuenta no debe ver el catálogo de otras cuentas).
+- `POST /api/screen-catalog` — alta; 409 si el nombre ya existe entre las activas de la cuenta.
+- `GET/PATCH/DELETE /api/screen-catalog/[id]` — PATCH edita y reactiva; DELETE es baja lógica (`active = false`), nunca borra una pantalla ya usada por proyectos. `used_in_projects` indica cuántas pantallas la referencian.
+- `PATCH /api/projects/[id]` acepta `screen_catalog_id` y `apply_catalog_specs` por pantalla.
+  - `screen_catalog_id` se valida contra `p.client_id`: una pantalla de otra cuenta responde «La pantalla del catálogo no existe o no pertenece a la cuenta del proyecto».
+  - `apply_catalog_specs: true` es el único camino que copia medidas; sin él, vincular no altera nada.
+  - Sin medidas propias y con catálogo elegido, el error indica la acción: «Captura las medidas o pulsa “Traer specs”».
+  - Un `id` de pantalla mal formado se rechaza con 400 en vez de dejar que Postgres devuelva 500 con el error crudo.
+
+### Vista `/admin/catalogo-pantallas` (Configuración → Catálogos → Pantallas)
+- Alta, edición, reactivación y baja lógica por cuenta, con contador de pantallas en uso.
+- Cuadro de búsqueda con rebote de 250 ms: filtra por pantalla o por cuenta; el filtro va al servidor, no a un recorrido del arreglo ya cargado.
+- Indicador de coincidencias y estado vacío diferenciado: «Sin coincidencias» no es «no hay pantallas».
+
+### Proyecto (`/proyectos/[id]`)
+- El editor de pantalla ofrece el catálogo de la cuenta del proyecto y un botón **«Traer specs»** que rellena el formulario; seleccionar una pantalla no modifica las medidas.
+- Un proyecto sin cuenta no muestra catálogo.
+- Al listar se ve a qué pantalla del catálogo está vinculada cada una, incluso si el catálogo se desactivó después (el vínculo se conserva y el GET lo marca `activo = false`).
+
+### Verificación
+- `tsc --noEmit` y ESLint sin errores.
+- E2E con Diafi (`e57e184e-…`) sobre `PR-036`: alta y duplicado (409), búsqueda por pantalla y por cuenta, alta de pantalla desde el catálogo con `apply_catalog_specs`, vínculo sin specs (conserva 3.2×1.5), importar specs (pasa a 0.96×1.6), desvincular (conserva 2.4×1.2), catálogo de otra cuenta rechazado, id inválido → 400, y bitácora de los movimientos. Datos de prueba y bitácora `entity_type = 'screen'` purgados.
+
+## Bitácora global y usuarios en línea (V36) — sin commit
+
+> Identidad por selector "Quién eres" (cookie `sg_uid`), bitácora de todas las acciones principales en `/bitacora` y contador de usuarios concurrentes en la esquina superior derecha. Sin login real: la cookie identifica, no autentica.
+
+### Migración `051_activity_log.sql` (aplicada, sin commit)
+- `activity_log`: `entity_type`, `entity_id`, `entity_label`, `action`, `summary`, `details` (jsonb), `project_id`, `ticket_id`, `actor_id`, `actor_name`, `actor_role`, `created_at`. Índices por fecha, actor, entidad, acción, proyecto y ticket.
+- `user_presence`: un registro por usuario (`user_id` único) con `last_seen_at`. Índice por `last_seen_at`.
+- Las FKs a `projects`/`tickets` son `ON DELETE SET NULL`: la bitácora sobrevive a la baja de la entidad y se puede filtrar por proyecto o ticket.
+
+### Identidad (nuevo)
+- `web/app/lib/session.ts`: `SESSION_COOKIE = "sg_uid"` (1 año, `sameSite: "lax"`), `currentUser()`, `currentUserId()` y `touchPresence()`.
+- **Cambio de comportamiento:** `getCurrentUserId()` ya no devuelve "el primer admin" sino el usuario de la cookie. Los nueve helpers locales `getActorId(body.actor_id)` de tickets, proyectos, actividades, comentarios, adjuntos y mejoras se eliminaron: el cliente ya no puede atribuir una acción a otro usuario.
+- `GET /api/session` lista usuarios activos (sin agentes) y devuelve el actual. `POST /api/session { user_id }` fija la cookie y registra el ingreso en la bitácora.
+- `POST /api/presence` es el latido (idempotente, ~1 cada 30 s desde el navegador). `GET /api/presence` devuelve `{ online, window_minutes, users, me }` con ventana de 5 minutos y deduplicación por usuario: dos pestañas del mismo usuario cuentan como una persona.
+
+### Bitácora (V36: `/bitacora`)
+- `web/app/lib/audit.ts`: `logActivity(executor, entry)`, `logActivityAsync(entry)` y `queryActivityLog(filtros)`. Guarda nombre y rol en la propia entrada para no depender de joins, y nunca tumba la operación principal si falla (avisa por consola una sola vez).
+- `GET /api/activity-log`: filtros por usuario, acción, módulo, texto libre, fecha desde/hasta, más `project_id`/`ticket_id`/`entity_id` para consultas desde el detalle; devuelve también las facetas de acción y usuario para poblar los selectores.
+- Vista: tabla con fecha, usuario, acción (tono por tipo), módulo, resumen y expandable de `details`; enlace a proyecto/ticket cuando aplica; paginación de 50.
+- `PresenceBadge` reemplaza la `UiMark` fija del nav: pulsing verde + "N en línea" con popup de quién está activo. Latido cada 30 s y al recuperar el foco de la pestaña.
+- `UserSwitcher` en el pie del nav: elige "Quién eres" y recarga para que bitácora y presencia cambien de golpe.
+
+### Cobertura de auditoría
+- Servicios: alta de ticket, proyecto y actividad.
+- Rutas: proyectos (alta, edición, estado, cierre, cancelación), tickets (alta, edición, estado, solicitud de eliminación, cancelación, reapertura, facturación), actividades (alta, edición, estado, cancelación), asignaciones (alta y baja), comentarios (alta, edición y borrado), adjuntos (subida y borrado), inventario (alta/edición por upsert, edición y borrado), planeación (comentarios e instalado) y administración (borrado definitivo y restauración de proyectos y tickets, checklist de cierre administrativo).
+- El PATCH de proyectos y tickets excluye `status` de `update` cuando hubo transición: el cambio de estado se registra una sola vez como `status_change`.
+- Pendiente de auditoría: carga masiva de inventario por archivo, horas extra/trabajo, catálogo de controladores y las rutas de agente CLI (esas ya creditan al usuario dueño del token vía `lib/agent-auth.ts`).
+
+### Verificación
+- `tsc --noEmit` y ESLint limpios dentro del contenedor.
+- Prueba end-to-end con dos usuarios: alta de ticket atribuida al técnico, cambio de estado y eliminación atribuidos al admin, comentario, inventario y planeación. Con dos cookies distintas `/api/presence` reporta 2 en línea y 1 con dos pestañas del mismo usuario. Datos de prueba eliminados y bitácora/presencia purgadas.
+
+### Limitación conocida
+- Sin autenticación, cualquiera puede cambiar la cookie y poserar como otra persona. La bitácora registra la identidad declarada. El bloqueo real de usuarios/permisos sigue pendiente.
+
 ## 0.4.0 — Planeación, cierre V4 y operación centralizada (2026-10-02)
 
 > Versión estable. Consolida la planeación de inventario, el cierre V4, la documentación adjunta y la operación centralizada. El nav lee la versión desde `web/package.json` (v0.4.0).
@@ -45,6 +145,22 @@
 - Fila cancelada con opacidad + texto tachado y motivo visible; instalada con insignia verde.
 - GET de proyecto expone `installed`, `cancelled`, `cancel_reason`; tipos `ProjectScreen` actualizados.
 
+### V4 cierre: cantidad de módulos calculada por área de pantalla
+- Al elegir **marca y lote** del inventario, la cantidad de módulos se calcula sola: `Math.ceil((m2 de pantalla × quantity) ÷ m² del módulo)`, con `m² de pantalla = width_m × height_m` o `area_m2` en irregulares y `m² del módulo = (width_mm × height_mm) / 1e6` (320×160 mm = `0.0512 m²`). Ejemplo: pantalla de `5.632 m²` → `110` módulos.
+- La fórmula es la misma en cliente y servidor: `/api/projects/[id]/closure-inventory` ya expone `module_m2` y el detalle ya devuelve `m2` por pantalla, así que no se agregan columnas.
+- Cambiar de pantalla recalcula el valor solo mientras el campo siga automático o vacío; escribir a mano lo fija y ya no se sobrescribe.
+- Botón **Auto** por renglón para recalcular a mano, texto auxiliar con área de pantalla, m² por módulo, m² usados y **módulos faltantes** para cubrir el área (o excedente sobre el mínimo teórico).
+- El valor sigue siendo editable y las validaciones de guardado no cambian: entero > 0 y sin exceder `available_modules` del lote.
+
+### Cálculo de módulos con decimales exactos
+- El área y el m² del módulo viajan como **texto decimal exacto** desde Postgres: `m2_exact` en `/api/projects/[id]` y `module_m2_exact` en `/api/projects/[id]/closure-inventory`. No se redondea a 2 ni a 4 decimales antes de dividir.
+- Nuevo `web/app/lib/decimal.ts` con aritmética decimal exacta (`BigInt`): `modulesForArea`, `multiplyDecimalText`, `decimalText`. `tsconfig` sigue en `ES2017`; se usa el constructor `BigInt()` porque los literales `0n` exigen target ES2020.
+- Motivo: `Math.ceil(area / m2_modulo)` con `number` arrastra error de coma flotante. Con módulos de `0.0512 m²`, `13.000000000000002` redondeaba a **14** en lugar de 13 (281 fallos en 4000 áreas exactas). Con la división entera exacta hay 0 errores en 4000 áreas × 8 cantidades.
+- Verificado contra Postgres con las 4 pantallas reales del proyecto: `0.8704 → 17`, `0.9216 × 2 → 36`, `1.28 × 2 → 50`, `5.632 → 110` módulos. Coinciden en los cuatro casos.
+- Textos auxiliares del renglón sin `toFixed`: área exacta (`5.632`), total con cantidad (`0.9216 × 2 = 1.8432`), m² por módulo (`0.0512`), m² a usar y módulos faltantes/excedentes contra el valor exacto.
+- El selector **Marca y lote** del cierre muestra solo `marca · lote`: se quitaron los módulos y m² de las opciones porque ya se repetían en el texto pequeño de la derecha. Ese texto derecho ahora calcula el m² disponible con decimales exactos (`Disponible: 6000 módulos · 307.2 m²`).
+- Reordenamiento de la tabla de lotes del cierre a 6 columnas: **Pantalla**, **Marca y lote del inventario**, **Cant. módulos** (input `w-16` + botón **Auto**, alineados a la izquierda junto a los dos campos primeros), **Disponible** (módulos y m² a la derecha), **Observaciones** (área de pantalla, m² por módulo, m² a usar, valor exacto y faltantes/excedentes) y **Quitar**. Se corrigió el `colSpan={2}` de la celda de marca, que desalineaba la fila con su encabezado.
+
 ### Gantt: editar etapa completa
 - `PhaseEditModal` edita descripción, estado (`planned`, `not_started`, `in_progress`, `completed`, `blocked`, `not_applicable`), fechas y bloqueo (motivo + próxima acción + fecha obligatorios si `blocked`); aviso si `not_applicable` oculta la barra.
 - `GET /api/gantt` ahora trae `blocked_reason`, `next_action`, `next_action_date`.
@@ -52,10 +168,14 @@
 ### V34 Gantt de tickets abiertos
 - Nueva ruta `/gantt-tickets` y acceso principal **Gantt tickets** junto al Gantt de proyectos.
 - Nuevo `GET /api/ticket-gantt`: tickets con estado distinto de `closed`/`cancelled`, cliente, prioridad, próxima acción y actividades no canceladas con fechas, horas y técnicos.
-- Una fila por ticket; barras por actividad (`planned`, `in_progress`, `completed`) y marcador rosa de próxima acción. Tickets sin actividad/fecha permanecen visibles al final como **Sin programación**.
+- Una fila por ticket; barras por actividad (`planned`, `in_progress`, `completed`) y marcador rosa de próxima acción. Tickets sin actividad/fecha permanecen visibles como **Sin programación**.
+- Orden operativo: primero tickets sin programación y sin técnicos asignados; después el resto de tickets abiertos; `resolved_pending_validation` siempre al final. Dentro de cada grupo se ordena por primera fecha programada y código.
 - Buscadores por código/título/cliente, filtro por estado abierto, escalas semana/2 semanas/mes, navegación día anterior/Hoy/día siguiente, línea de hoy y links al detalle de ticket/Agenda/Lista.
+- Barra de herramientas en una sola línea (`flex-nowrap` con scroll horizontal): búsqueda reducida a `w-52`, estado `w-44`, escalas y navegación con `shrink-0`, dejando más ancho útil para las barras del Gantt.
 - Arrastre de actividades para cambiar `date`/`end_date` conservando duración; `pointercancel` revierte la previsualización sin guardar.
 - Asignación directa por ticket: técnicos activos mínimos desde `/api/ticket-gantt`, modal `W40` para asignar (`POST /api/assignments`) o quitar (`DELETE /api/assignments/[id]`), y nombres visibles en cada renglón.
+- Menú ⋮ `N10` por renglón: **Cambiar estado** (`W43`), **Programar actividad** (`W42`), **Asignar técnicos** y **Abrir detalle**.
+- Nuevo `POST /api/ticket-gantt/schedule` transaccional: crea actividad con rango/horas/técnicos, agrega asignaciones faltantes al ticket y cambia `new`/`to_review`/`unassigned` a `scheduled` con historial. Rechaza tickets cerrados/cancelados.
 - Marcador de vista `V34`. API y página HTTP 200; TypeScript y ESLint sin errores en los archivos nuevos.
 
 ### V3 estado inline + voltaje W30
@@ -87,6 +207,12 @@
 ### Marcas UI (V/W/N) + navegación
 - `UiMark` (gris `text-[10px]`, esquina superior, `pointer-events-none`) + `Modal mark` (W1–W39), `PageMark` (V1–V33 según ruta, en `layout.tsx`), menús N1 (nav), N2 (Administración), N3 (⋮ Gantt), N4 (columnas) y `SearchableSelect mark` (N5–N8 en agenda).
 - Nav con grupos hijos: **Catálogos → Controladores**, **Inventario → Planeación**; padre con estado activo tenue cuando el hijo está activo.
+
+### V1 dashboard principal y V35 Agenda
+- `/` deja de renderizar la agenda y se convierte en dashboard principal con cuatro tarjetas grandes: **Agenda**, **Proyectos**, **Tickets** y **Administración**; diseño responsive 1 columna móvil / 2 columnas escritorio.
+- Nuevo `GET /api/dashboard` con métricas reales: actividades de hoy/vencidas/próximas, técnicos activos; proyectos corriendo/bloqueados/en instalación/m²; tickets abiertos/sin asignar/en progreso/espera/acciones vencidas; usuarios/clientes/revisiones/notificaciones e inventario.
+- Agenda se mueve íntegra a `/agenda` con marcador `V35`; V1 queda reservado al dashboard. Nav agrega **Inicio** y conserva **Agenda** como opción separada.
+- Deep links de actividades en Pendientes y Notificaciones, y botones “Agenda semanal” de ambos Gantt, pasan a `/agenda` sin perder `activity`/`date`.
 
 ### Archivo V29: borrado definitivo
 - `POST /api/admin/projects/[id]/delete` selecciona `status` real para el historial y borra primero actividades exclusivas del proyecto (evita trigger de huérfanas) antes del `DELETE`; error detallado en respuesta.

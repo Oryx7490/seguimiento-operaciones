@@ -240,7 +240,7 @@ export default function PendientesView() {
               {data.actividades_vencidas.map((a) => (
                 <li key={a.id} className="px-4 py-3">
                   <Link
-                    href={`/?activity=${a.id}&date=${a.date}`}
+                    href={`/agenda?activity=${a.id}&date=${a.date}`}
                     className="text-sm font-medium text-zinc-800 hover:underline"
                     title="Abrir la actividad para actualizar su estado"
                   >
@@ -261,7 +261,7 @@ export default function PendientesView() {
                     )}
                   </div>
                   <Link
-                    href={`/?activity=${a.id}&date=${a.date}`}
+                    href={`/agenda?activity=${a.id}&date=${a.date}`}
                     className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-sky-600 hover:underline"
                   >
                     Abrir y actualizar estado →

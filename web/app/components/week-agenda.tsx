@@ -4,6 +4,7 @@ import { useEffect, useState, type DragEvent as ReactDragEvent } from "react";
 import Link from "next/link";
 import { useResource, fetchJson } from "@/app/lib/client";
 import { mondayOfWeek, weekDays, formatShortDate, isToday } from "@/app/lib/prototype-data";
+import { dateAtNoon, todayIso } from "@/app/lib/time";
 import {
   Field,
   Modal,
@@ -101,16 +102,16 @@ function deepLinkParams(): { activityId: string; date: string; monday: Date } | 
   const activityId = sp.get("activity");
   const dateParam = sp.get("date");
   if (!activityId) return null;
-  const ref = dateParam && !Number.isNaN(new Date(`${dateParam}T00:00:00`).getTime()) ? new Date(`${dateParam}T00:00:00`) : new Date();
+  const ref = dateParam && !Number.isNaN(new Date(`${dateParam}T00:00:00`).getTime()) ? new Date(`${dateParam}T00:00:00`) : dateAtNoon(todayIso());
   return { activityId, date: isoDate(ref), monday: mondayOfWeek(ref) };
 }
 
 export default function WeekAgenda() {
   const link = deepLinkParams();
-  const [monday, setMonday] = useState<Date>(() => link?.monday ?? mondayOfWeek(new Date()));
+  const [monday, setMonday] = useState<Date>(() => link?.monday ?? mondayOfWeek(dateAtNoon(todayIso())));
   const [view, setView] = useState<"week" | "day">(() => (link ? "day" : "week"));
   const [compact, setCompact] = useState(false);
-  const [day, setDay] = useState<string>(() => link?.date ?? isoDate(new Date()));
+  const [day, setDay] = useState<string>(() => link?.date ?? todayIso());
   const [kind, setKind] = useState<string>("");
   const [techId, setTechId] = useState<string>("");
   const [status, setStatus] = useState<string>("");
@@ -173,11 +174,11 @@ export default function WeekAgenda() {
 
   function goToday() {
     setView("day");
-    setDay(isoDate(new Date()));
-    setMonday(mondayOfWeek(new Date()));
+    setDay(todayIso());
+    setMonday(mondayOfWeek(dateAtNoon(todayIso())));
   }
 
-  const overdueCount = activities.filter((a) => activityEnd(a) < isoDate(new Date()) && (a.status === "planned" || a.status === "in_progress")).length;
+  const overdueCount = activities.filter((a) => activityEnd(a) < todayIso() && (a.status === "planned" || a.status === "in_progress")).length;
   const unassignedTickets = (tickets.data?.tickets ?? []).filter((t) => ["new", "unassigned", "to_review"].includes(t.status)).length;
   const blockedProjects = (projects.data?.projects ?? []).filter((p) => p.health_status === "blocked").length;
   const plannedTotal = activities.reduce((s, a) => s + a.planned_hours, 0);
@@ -280,7 +281,7 @@ export default function WeekAgenda() {
 
   const weekLabel = `Semana del ${formatShortDate(days[0])} – ${formatShortDate(days[6])} de ${new Intl.DateTimeFormat("es-MX", { month: "long", year: "numeric" }).format(days[0])}`;
   const dayLabel = new Intl.DateTimeFormat("es-MX", { weekday: "long", day: "numeric", month: "long", year: "numeric" }).format(new Date(`${day}T00:00:00`));
-  const rangeLabel = view === "day" ? (day === isoDate(new Date()) ? `Hoy · ${dayLabel}` : dayLabel) : weekLabel;
+  const rangeLabel = view === "day" ? (day === todayIso() ? `Hoy · ${dayLabel}` : dayLabel) : weekLabel;
 
   return (
     <div className="bg-zinc-100 text-zinc-900">
@@ -601,7 +602,7 @@ function ActivityCard({ activity, onClick, large, showTechs, variant, draggable,
     : activity.kind === "ticket" ? activity.ticket_code
     : activity.internal_activity_type_name?.slice(0, 10);
   const hours = `${activity.planned_hours}h`;
-  const overdue = activityEnd(activity) < isoDate(new Date()) && (activity.status === "planned" || activity.status === "in_progress");
+  const overdue = activityEnd(activity) < todayIso() && (activity.status === "planned" || activity.status === "in_progress");
   const multi = activity.end_date !== null && activity.end_date > activity.date;
   const dayMain = activity.kind === "project"
     ? (activity.projects[0]?.project_name ?? activity.description)

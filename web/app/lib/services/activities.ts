@@ -1,5 +1,6 @@
 import pool from "@/app/lib/db";
 import { ServiceError } from "@/app/lib/services/errors";
+import { logActivity } from "@/app/lib/audit";
 
 const ACTIVITY_STATUS = ["planned", "in_progress", "completed", "cancelled"];
 
@@ -40,6 +41,19 @@ export async function updateActivityStatus(
          VALUES ('activity', $1, $2, $3, $4, $5)`,
         [id, previous.rows[0].status, status, actorId, reason]
       );
+      const label = await client.query<{ code: string | null }>(
+        `SELECT t.code FROM activities a JOIN tickets t ON t.id = a.ticket_id WHERE a.id = $1`,
+        [id]
+      );
+      await logActivity(client, {
+        entity_type: "activity",
+        entity_id: id,
+        entity_label: label.rows[0]?.code ?? null,
+        action: "status_change",
+        summary: `Actividad ${previous.rows[0].status} → ${status}`,
+        details: { from: previous.rows[0].status, to: status, reason },
+        actor_id: actorId,
+      });
     }
 
     await client.query("COMMIT");

@@ -1,5 +1,6 @@
 import pool from "@/app/lib/db";
 import { ServiceError } from "@/app/lib/services/errors";
+import { logActivity } from "@/app/lib/audit";
 
 export interface CreateTicketInput {
   title?: string;
@@ -79,6 +80,21 @@ export async function createTicket(
         [ticketRes.rows[0].id, actorId, reason]
       );
     }
+    await logActivity(client, {
+      entity_type: "ticket",
+      entity_id: ticketRes.rows[0].id,
+      entity_label: ticketRes.rows[0].code,
+      action: "create",
+      summary: `Ticket ${ticketRes.rows[0].code} creado: ${ticketRes.rows[0].title}`,
+      details: {
+        title: ticketRes.rows[0].title,
+        ticket_type: ticketRes.rows[0].ticket_type,
+        reported_by: reportedBy,
+        client_id: clientId,
+      },
+      ticket_id: ticketRes.rows[0].id,
+      actor_id: actorId,
+    });
     await client.query("COMMIT");
     return ticketRes.rows[0];
   } catch (err) {

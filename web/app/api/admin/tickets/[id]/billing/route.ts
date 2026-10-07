@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
 import { jsonOk, jsonError, parseId } from "@/app/lib/api";
+import { logActivity } from "@/app/lib/audit";
+import { getCurrentUserId } from "@/app/lib/api";
 
 // PATCH → marcar/desmarcar facturación de un ticket con cobro.
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -29,6 +31,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   if (cols.length === 0) return jsonError("No hay campos para actualizar");
 
+  const actorId = await getCurrentUserId();
+
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -48,6 +52,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
        WHERE ticket_id = $1`,
       [id, ...vals]
     );
+    await logActivity(client, {
+      entity_type: "ticket",
+      entity_id: id,
+      action: "update",
+      summary: "Datos de facturación del ticket actualizados",
+      details: { invoice_generated: body.invoice_generated ?? null },
+      ticket_id: id,
+      actor_id: actorId,
+    });
     await client.query("COMMIT");
     return jsonOk({ saved: true });
   } catch (err) {

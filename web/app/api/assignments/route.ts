@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
 import { jsonOk, jsonError } from "@/app/lib/api";
+import { logActivity } from "@/app/lib/audit";
+import { currentUserId } from "@/app/lib/session";
 
 export async function POST(req: NextRequest) {
   let body: {
@@ -67,6 +69,22 @@ export async function POST(req: NextRequest) {
        RETURNING id, project_id, ticket_id, technician_id, role, assigned_at`,
       [hasProject ? body.project_id : null, hasTicket ? body.ticket_id : null, body.technician_id, body.role?.trim() || null]
     );
+
+    const tech = await client.query<{ name: string }>(`SELECT name FROM technicians WHERE id = $1`, [body.technician_id]);
+    const target = hasProject
+      ? await client.query<{ code: string }>(`SELECT code FROM projects WHERE id = $1`, [body.project_id])
+      : await client.query<{ code: string }>(`SELECT code FROM tickets WHERE id = $1`, [body.ticket_id]);
+    await logActivity(client, {
+      entity_type: "assignment",
+      entity_id: rows[0].id,
+      entity_label: target.rows[0]?.code ?? null,
+      action: "assign",
+      summary: `${tech.rows[0]?.name ?? "Técnico"} asignado a ${hasProject ? "proyecto" : "ticket"} ${target.rows[0]?.code ?? ""}`.trim(),
+      details: { technician_id: body.technician_id, role: body.role ?? null },
+      project_id: hasProject ? body.project_id ?? null : null,
+      ticket_id: hasTicket ? body.ticket_id ?? null : null,
+      actor_id: await currentUserId(),
+    });
     await client.query("COMMIT");
     return jsonOk({ assignment: rows[0] }, 201);
   } catch (err) {

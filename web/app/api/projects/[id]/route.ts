@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
-import { jsonOk, jsonError, parseId } from "@/app/lib/api";
+import { getCurrentUserId, jsonError, jsonOk, parseId } from "@/app/lib/api";
+import { logActivity } from "@/app/lib/audit";
 
 const PROJECT_STATUS = [
   "new",
@@ -17,14 +18,6 @@ const PROJECT_STATUS = [
 
 const HEALTH_STATUS = ["on_time", "at_risk", "blocked", "no_update"];
 
-async function getActorId(body?: { actor_id?: string }): Promise<string | null> {
-  if (body?.actor_id) {
-    const { rows } = await pool.query(`SELECT id FROM users WHERE id = $1`, [body.actor_id]);
-    if (rows.length > 0) return rows[0].id;
-  }
-  const { rows } = await pool.query(`SELECT id FROM users WHERE role = 'admin' ORDER BY created_at LIMIT 1`);
-  return rows.length > 0 ? rows[0].id : null;
-}
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -83,9 +76,13 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         `SELECT ps.id, ps.project_id, ps.screen_type, ps.environment, ps.quantity,
                 ps.width_m, ps.height_m, ps.is_irregular, ps.area_m2, ps.pitch_mm, ps.voltage,
                 ps.installed, ps.cancelled, ps.cancel_reason, ps.created_at,
+                ps.screen_catalog_id, sc.name AS catalog_screen_name, sc.active AS catalog_screen_active,
                 CASE WHEN ps.is_irregular THEN COALESCE(ps.area_m2, 0)
-                     ELSE COALESCE(ps.width_m, 0) * COALESCE(ps.height_m, 0) END AS m2
+                     ELSE COALESCE(ps.width_m, 0) * COALESCE(ps.height_m, 0) END AS m2,
+                (CASE WHEN ps.is_irregular THEN COALESCE(ps.area_m2, 0)
+                      ELSE COALESCE(ps.width_m, 0) * COALESCE(ps.height_m, 0) END)::text AS m2_exact
          FROM project_screens ps
+         LEFT JOIN screen_catalog sc ON sc.id = ps.screen_catalog_id
          WHERE ps.project_id = $1 ORDER BY ps.created_at`,
         [id]
       ),
@@ -209,6 +206,9 @@ interface ScreensPatch {
   screens?: Array<{
     id?: string;
     screen_type?: string;
+    screen_catalog_id?: string | null;
+    /** Trae ancho/alto/m²/pitch/voltage/ambiente desde la pantalla del catálogo. */
+    apply_catalog_specs?: boolean;
     environment?: string | null;
     quantity?: number;
     width_m?: number | null;
@@ -257,13 +257,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return jsonError("Cuerpo JSON inválido");
   }
 
-  const actorId = await getActorId(body);
+  const actorId = await getCurrentUserId();
 
   const setters: string[] = [];
   const values: unknown[] = [id];
+  const changedFields: string[] = [];
   const push = (col: string, val: unknown) => {
     setters.push(`${col} = $${values.length + 1}`);
     values.push(val);
+    if (!changedFields.includes(col)) changedFields.push(col);
   };
 
   const stringFields: Array<[string, keyof typeof body]> = [
@@ -327,6 +329,29 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
          VALUES ('project', $1, $2, $3, $4, $5)`,
         [id, fromStatus, body.status, actorId, body.reason || null]
       );
+      await logActivity(client, {
+        entity_type: "project",
+        entity_id: id,
+        action: "status_change",
+        summary: `Proyecto ${fromStatus} → ${body.status}`,
+        details: { from: fromStatus, to: body.status, reason: body.reason ?? null },
+        project_id: id,
+        actor_id: actorId,
+      });
+    }
+
+    // El cambio de estado ya quedó registrado como `status_change`.
+    const otherFields = changedFields.filter((f) => f !== "status");
+    if (otherFields.length > 0) {
+      await logActivity(client, {
+        entity_type: "project",
+        entity_id: id,
+        action: "update",
+        summary: `Proyecto actualizado: ${otherFields.join(", ")}`,
+        details: { fields: otherFields },
+        project_id: id,
+        actor_id: actorId,
+      });
     }
 
     // Solicitud de eliminación
@@ -405,6 +430,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     if (Array.isArray(body.screens)) {
       for (const sc of body.screens) {
+        // Sin esto, un id mal formado llega a Postgres y sale un 500 con el error crudo.
+        if (sc.id !== undefined && !parseId(sc.id)) {
+          await client.query("ROLLBACK");
+          return jsonError("Identificador de pantalla inválido");
+        }
         if (sc._deleted && sc.id) {
           await client.query(`DELETE FROM project_screens WHERE id = $1 AND project_id = $2`, [sc.id, id]);
           continue;
@@ -413,6 +443,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           Boolean(sc.id) &&
           (sc.installed !== undefined || sc.cancelled !== undefined || sc.cancel_reason !== undefined) &&
           sc.screen_type === undefined &&
+          sc.screen_catalog_id === undefined &&
+          sc.apply_catalog_specs === undefined &&
           sc.environment === undefined &&
           sc.quantity === undefined &&
           sc.width_m === undefined &&
@@ -460,6 +492,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         }
         if (
           sc.screen_type !== undefined ||
+          sc.screen_catalog_id !== undefined ||
+          sc.apply_catalog_specs !== undefined ||
           sc.environment !== undefined ||
           sc.quantity !== undefined ||
           sc.width_m !== undefined ||
@@ -469,6 +503,60 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           sc.pitch_mm !== undefined ||
           sc.voltage !== undefined
         ) {
+          // Pantalla del catálogo: se valida que sea de la cuenta del proyecto.
+          let catalog: {
+            id: string;
+            name: string;
+            width_m: number | null;
+            height_m: number | null;
+            area_m2: number | null;
+            pitch_mm: number | null;
+            is_irregular: boolean;
+            environment: string | null;
+            voltage: string | null;
+          } | null = null;
+          const catalogId = sc.screen_catalog_id === undefined ? undefined : sc.screen_catalog_id;
+          if (catalogId !== undefined) {
+            if (catalogId === null || catalogId === "") {
+              await client.query(
+                `UPDATE project_screens SET screen_catalog_id = NULL WHERE id = $1 AND project_id = $2`,
+                [sc.id ?? null, id]
+              );
+            } else {
+              if (!parseId(catalogId)) {
+                await client.query("ROLLBACK");
+                return jsonError("id de pantalla de catálogo inválido");
+              }
+              const found = await client.query(
+                `SELECT sc.id, sc.name, sc.width_m, sc.height_m, sc.area_m2, sc.pitch_mm,
+                        sc.is_irregular, sc.environment, sc.voltage
+                   FROM screen_catalog sc
+                   JOIN projects p ON p.id = $2
+                  WHERE sc.id = $1 AND sc.client_id = p.client_id`,
+                [catalogId, id]
+              );
+              if (found.rows.length === 0) {
+                await client.query("ROLLBACK");
+                return jsonError("La pantalla del catálogo no existe o no pertenece a la cuenta del proyecto");
+              }
+              catalog = found.rows[0];
+            }
+          }
+          if (sc.apply_catalog_specs) {
+            if (!catalog) {
+              await client.query("ROLLBACK");
+              return jsonError("Elige primero la pantalla del catálogo");
+            }
+            sc.width_m = catalog.width_m;
+            sc.height_m = catalog.height_m;
+            sc.area_m2 = catalog.area_m2;
+            sc.pitch_mm = catalog.pitch_mm;
+            sc.is_irregular = catalog.is_irregular;
+            sc.environment = catalog.environment;
+            sc.voltage = catalog.voltage;
+            if (sc.screen_type === undefined) sc.screen_type = catalog.name;
+          }
+
           const sType = typeof sc.screen_type === "string" ? sc.screen_type.trim() : undefined;
           const qty = sc.quantity;
           const w = sc.width_m;
@@ -505,13 +593,21 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           if (willBeIrregular) {
             if (area === undefined || area === null || !Number.isFinite(Number(area)) || Number(area) <= 0) {
               await client.query("ROLLBACK");
-              return jsonError("Pantalla irregular requiere area_m2 > 0");
+              return jsonError(
+                catalog
+                  ? "La pantalla del catálogo es irregular: captura el área o pulsa «Traer specs»"
+                  : "Pantalla irregular requiere area_m2 > 0"
+              );
             }
           } else {
             if (w === undefined || w === null || !Number.isFinite(Number(w)) || Number(w) <= 0 ||
                 h === undefined || h === null || !Number.isFinite(Number(h)) || Number(h) <= 0) {
               await client.query("ROLLBACK");
-              return jsonError("Pantalla regular requiere width_m > 0 y height_m > 0");
+              return jsonError(
+                catalog
+                  ? "Captura las medidas de la pantalla o pulsa «Traer specs» para tomarlas del catálogo"
+                  : "Pantalla regular requiere width_m > 0 y height_m > 0"
+              );
             }
           }
           if (qty !== undefined && qty !== null && (!Number.isFinite(Number(qty)) || Number(qty) <= 0)) {
@@ -557,6 +653,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
               vals.push(val);
             };
             if (sType !== undefined) setPush("screen_type", sType);
+            if (catalogId !== undefined) setPush("screen_catalog_id", catalogId);
             if (environment !== undefined) setPush("environment", environment);
             if (voltage !== undefined) setPush("voltage", voltage);
             if (sc.quantity !== undefined) setPush("quantity", sc.quantity);
@@ -573,9 +670,9 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             }
           } else if (sType) {
             const { rows: inserted } = await client.query(
-              `INSERT INTO project_screens (project_id, screen_type, environment, quantity, width_m, height_m, is_irregular, area_m2, pitch_mm, voltage)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`,
-              [id, sType, environment ?? null, sc.quantity ?? 1, num(sc.width_m), num(sc.height_m), sc.is_irregular ?? false, num(sc.area_m2), num(sc.pitch_mm), voltage ?? null]
+              `INSERT INTO project_screens (project_id, screen_type, screen_catalog_id, environment, quantity, width_m, height_m, is_irregular, area_m2, pitch_mm, voltage)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+              [id, sType, catalog?.id ?? null, environment ?? null, sc.quantity ?? 1, num(sc.width_m), num(sc.height_m), sc.is_irregular ?? false, num(sc.area_m2), num(sc.pitch_mm), voltage ?? null]
             );
             screenId = inserted[0]?.id ?? null;
           }
@@ -683,6 +780,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
     // Lotes de módulos LED y marca del fabricante, siempre asociados a una pantalla activa.
     if (Array.isArray(body.closure_module_lots)) {
+      const requestedByInventoryLot = new Map<string, number>();
       for (const lot of body.closure_module_lots) {
         const brand = lot.manufacturer_brand?.trim();
         const lotNo = lot.lot_number?.trim();
@@ -707,12 +805,34 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           await client.query("ROLLBACK");
           return jsonError("La pantalla del lote no pertenece al proyecto o está cancelada");
         }
-        if (lot.module_count !== undefined && lot.module_count !== null) {
-          const n = Number(lot.module_count);
-          if (!Number.isInteger(n) || n <= 0) {
-            await client.query("ROLLBACK");
-            return jsonError("La cantidad de módulos debe ser un entero > 0");
-          }
+        const moduleCount = Number(lot.module_count);
+        if (!Number.isInteger(moduleCount) || moduleCount <= 0) {
+          await client.query("ROLLBACK");
+          return jsonError("Cada lote de módulos requiere una cantidad entera > 0");
+        }
+        const inventoryKey = `${brand.toLowerCase()}\u0001${lotNo.toLowerCase()}`;
+        requestedByInventoryLot.set(inventoryKey, (requestedByInventoryLot.get(inventoryKey) ?? 0) + moduleCount);
+        const { rows: inventoryRows } = await client.query(
+          `SELECT il.module_count,
+                  COALESCE(SUM(CASE WHEN pml.project_id <> $1 THEN COALESCE(pml.module_count, 0) ELSE 0 END), 0)::int AS used_elsewhere
+             FROM inventory_lots il
+             LEFT JOIN project_closure_module_lots pml
+               ON LOWER(pml.manufacturer_brand) = LOWER(il.manufacturer_brand)
+              AND LOWER(pml.lot_number) = LOWER(il.lot_number)
+            WHERE LOWER(il.manufacturer_brand) = LOWER($2)
+              AND LOWER(il.lot_number) = LOWER($3)
+              AND il.status = 'available'
+            GROUP BY il.id, il.module_count`,
+          [id, brand, lotNo],
+        );
+        if (inventoryRows.length === 0) {
+          await client.query("ROLLBACK");
+          return jsonError(`El lote ${brand} ${lotNo} ya no está disponible en el inventario`);
+        }
+        const available = Math.max(0, Number(inventoryRows[0].module_count) - Number(inventoryRows[0].used_elsewhere));
+        if ((requestedByInventoryLot.get(inventoryKey) ?? 0) > available) {
+          await client.query("ROLLBACK");
+          return jsonError(`El lote ${brand} ${lotNo} solo tiene ${available} módulos disponibles`);
         }
       }
       if (body.closure_module_lots.length === 0) {
@@ -728,7 +848,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
               lot.screen_id,
               lot.manufacturer_brand!.trim(),
               lot.lot_number!.trim(),
-              lot.module_count ? Number(lot.module_count) : null,
+              Number(lot.module_count),
             ]
           );
         }
@@ -806,6 +926,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
            VALUES ('project', $1, $2, 'closed', $3, 'Cierre de proyecto')`,
           [id, fromStatus, actorId]
         );
+        await logActivity(client, {
+          entity_type: "project",
+          entity_id: id,
+          action: "close",
+          summary: `Proyecto cerrado (${fromStatus} → closed)`,
+          details: { from: fromStatus, to: "closed" },
+          project_id: id,
+          actor_id: actorId,
+        });
       }
     }
 
@@ -826,7 +955,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!parseId(id)) return jsonError("id inválido");
-  const actorId = await getActorId();
+  const actorId = await getCurrentUserId();
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -844,6 +973,15 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
          VALUES ('project', $1, $2, 'cancelled', $3, 'Cancelación de proyecto')`,
         [id, rows[0].status, actorId]
       );
+      await logActivity(client, {
+        entity_type: "project",
+        entity_id: id,
+        action: "cancel",
+        summary: `Proyecto cancelado (${rows[0].status} → cancelled)`,
+        details: { from: rows[0].status, to: "cancelled" },
+        project_id: id,
+        actor_id: actorId,
+      });
     }
     await client.query("COMMIT");
     return jsonOk({ cancelled: rows[0].id });

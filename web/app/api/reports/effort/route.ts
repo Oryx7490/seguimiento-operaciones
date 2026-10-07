@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
 import { jsonError, jsonOk } from "@/app/lib/api";
 import { round2 } from "@/app/lib/overtime";
+import { todayIso } from "@/app/lib/time";
 
 const SCALES = new Set(["week", "month", "year"]);
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -41,7 +42,7 @@ export async function GET(req: NextRequest) {
   const sp = new URL(req.url).searchParams;
   const scale = sp.get("scale") ?? "month";
   if (!SCALES.has(scale)) return jsonError("scale inválido (semana/mes/año)");
-  const dateRaw = sp.get("date") ?? new Date().toISOString().slice(0, 10);
+  const dateRaw = sp.get("date") ?? todayIso();
   if (!DATE_RE.test(dateRaw)) return jsonError("date inválido");
 
   const range = computeRange(scale, dateRaw);

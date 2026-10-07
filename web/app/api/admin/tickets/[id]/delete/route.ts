@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
 import { jsonOk, jsonError, parseId } from "@/app/lib/api";
+import { logActivity } from "@/app/lib/audit";
 
 async function getActorId(): Promise<string | null> {
   const { rows } = await pool.query(
@@ -44,6 +45,15 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
 
     // Eliminar definitivamente (CASCADE elimina comentarios, adjuntos, cierre; activities quedan sin ticket)
     await client.query(`DELETE FROM tickets WHERE id = $1`, [id]);
+    await logActivity(client, {
+      entity_type: "ticket",
+      entity_id: id,
+      entity_label: rows[0].code,
+      action: "delete",
+      summary: `Ticket eliminado definitivamente: ${rows[0].code}`,
+      details: { code: rows[0].code, title: rows[0].title ?? null },
+      actor_id: actorId,
+    });
     await client.query("COMMIT");
     return jsonOk({ deleted: id, code: rows[0].code });
   } catch (err) {

@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
 import { jsonOk, jsonError, parseId } from "@/app/lib/api";
+import { logActivityAsync } from "@/app/lib/audit";
 
 const NOTES_MAX = 2000;
 
@@ -210,6 +211,13 @@ export async function PATCH(req: NextRequest) {
         [id, body.installed]
       );
       if (rows.length === 0) return jsonError("No encontrado", 404);
+      await logActivityAsync({
+        entity_type: "planning",
+        entity_id: id,
+        action: "update",
+        summary: `Equipo de planeación marcado como ${body.installed ? "instalado" : "no instalado"}`,
+        details: { target: "controller", installed: body.installed },
+      });
       return jsonOk({ item: rows[0] });
     } catch (err) {
       return jsonError("No se pudo guardar la instalación", 500, String(err));
@@ -225,6 +233,13 @@ export async function PATCH(req: NextRequest) {
       [id, notes || null]
     );
     if (rows.length === 0) return jsonError("No encontrado", 404);
+    await logActivityAsync({
+      entity_type: "planning",
+      entity_id: id,
+      action: "comment",
+      summary: `Comentario de planeación en ${body.target === "screen" ? "pantalla" : "equipo"}`,
+      details: { target: body.target, notes: notes || null },
+    });
     return jsonOk({ item: rows[0] });
   } catch (err) {
     return jsonError("No se pudo guardar el comentario", 500, String(err));

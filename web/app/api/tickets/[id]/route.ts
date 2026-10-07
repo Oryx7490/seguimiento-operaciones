@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
-import { jsonOk, jsonError, parseId } from "@/app/lib/api";
+import { getCurrentUserId, jsonError, jsonOk, parseId } from "@/app/lib/api";
+import { logActivity } from "@/app/lib/audit";
 
 const TICKET_STATUS = [
   "new",
@@ -24,14 +25,6 @@ class HttpError extends Error {
   }
 }
 
-async function getActorId(body?: { actor_id?: string }): Promise<string | null> {
-  if (body?.actor_id) {
-    const { rows } = await pool.query(`SELECT id FROM users WHERE id = $1`, [body.actor_id]);
-    if (rows.length > 0) return rows[0].id;
-  }
-  const { rows } = await pool.query(`SELECT id FROM users WHERE role = 'admin' ORDER BY created_at LIMIT 1`);
-  return rows.length > 0 ? rows[0].id : null;
-}
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -150,7 +143,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return jsonError("Cuerpo JSON inválido");
   }
 
-  const actorId = await getActorId(body);
+  const actorId = await getCurrentUserId();
 
   const DATE_FIELDS = ["next_action_date", "first_response_at", "resolved_at", "closed_at"] as const;
   for (const f of DATE_FIELDS) {
@@ -166,9 +159,11 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const setters: string[] = [];
   const values: unknown[] = [id];
+  const changedFields: string[] = [];
   const push = (col: string, val: unknown) => {
     setters.push(`${col} = $${values.length + 1}`);
     values.push(val);
+    if (!changedFields.includes(col)) changedFields.push(col);
   };
 
   const stringFields: Array<[string, keyof typeof body]> = [
@@ -317,6 +312,28 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
          VALUES ('ticket', $1, $2, $3, $4, $5)`,
         [id, fromStatus, body.status, actorId, body.reason || null]
       );
+      await logActivity(client, {
+        entity_type: "ticket",
+        entity_id: id,
+        action: "status_change",
+        summary: `Ticket ${fromStatus} → ${body.status}`,
+        details: { from: fromStatus, to: body.status, reason: body.reason ?? null },
+        ticket_id: id,
+        actor_id: actorId,
+      });
+    }
+    // El cambio de estado ya quedó registrado como `status_change`.
+    const otherFields = changedFields.filter((f) => f !== "status");
+    if (otherFields.length > 0) {
+      await logActivity(client, {
+        entity_type: "ticket",
+        entity_id: id,
+        action: "update",
+        summary: `Ticket actualizado: ${otherFields.join(", ")}`,
+        details: { fields: otherFields },
+        ticket_id: id,
+        actor_id: actorId,
+      });
     }
 
     // Solicitud de eliminación
@@ -364,7 +381,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   if (!parseId(id)) return jsonError("id inválido");
-  const actorId = await getActorId();
+  const actorId = await getCurrentUserId();
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -382,6 +399,15 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
          VALUES ('ticket', $1, $2, 'cancelled', $3, 'Cancelación de ticket')`,
         [id, rows[0].status, actorId]
       );
+      await logActivity(client, {
+        entity_type: "ticket",
+        entity_id: id,
+        action: "cancel",
+        summary: `Ticket cancelado (${rows[0].status} → cancelled)`,
+        details: { from: rows[0].status, to: "cancelled" },
+        ticket_id: id,
+        actor_id: actorId,
+      });
     }
     await client.query("COMMIT");
     return jsonOk({ cancelled: rows[0].id });

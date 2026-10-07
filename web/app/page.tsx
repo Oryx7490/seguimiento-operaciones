@@ -1,7 +1,7 @@
-import WeekAgenda from "@/app/components/week-agenda";
+import DashboardView from "@/app/components/dashboard-view";
 
 export const dynamic = "force-dynamic";
 
 export default function Home() {
-  return <WeekAgenda />;
+  return <DashboardView />;
 }

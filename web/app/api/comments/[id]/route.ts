@@ -1,15 +1,8 @@
 import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
-import { jsonOk, jsonError, parseId } from "@/app/lib/api";
+import { getCurrentUserId, jsonError, jsonOk, parseId } from "@/app/lib/api";
+import { logActivity } from "@/app/lib/audit";
 
-async function getActorId(body?: { actor_id?: string }): Promise<string | null> {
-  if (body?.actor_id) {
-    const { rows } = await pool.query(`SELECT id FROM users WHERE id = $1`, [body.actor_id]);
-    if (rows.length > 0) return rows[0].id;
-  }
-  const { rows } = await pool.query(`SELECT id FROM users WHERE role = 'admin' ORDER BY created_at LIMIT 1`);
-  return rows.length > 0 ? rows[0].id : null;
-}
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -24,13 +17,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const newBody = body.body?.trim();
   if (!newBody) return jsonError("body es obligatorio");
 
-  const actorId = await getActorId(body);
+  const actorId = await getCurrentUserId();
   if (!actorId) return jsonError("No hay un usuario válido para editar el comentario");
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const cur = await client.query(`SELECT author_id FROM comments WHERE id = $1 FOR UPDATE`, [id]);
+    const cur = await client.query(
+      `SELECT author_id, project_id, ticket_id, client_id FROM comments WHERE id = $1 FOR UPDATE`,
+      [id]
+    );
     if (cur.rows.length === 0) {
       await client.query("ROLLBACK");
       return jsonError("comentario no encontrado", 404);
@@ -44,6 +40,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
        RETURNING id, body, created_at, updated_at, author_id`,
       [id, newBody]
     );
+    await logActivity(client, {
+      entity_type: "comment",
+      entity_id: id,
+      action: "update",
+      summary: `Comentario editado: ${newBody.slice(0, 80)}${newBody.length > 80 ? "…" : ""}`,
+      details: { body: newBody },
+      project_id: cur.rows[0].project_id ?? null,
+      ticket_id: cur.rows[0].ticket_id ?? null,
+      actor_id: actorId,
+    });
     await client.query("COMMIT");
     return jsonOk({ comment: rows[0] });
   } catch (err) {

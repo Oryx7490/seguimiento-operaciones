@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
 import { jsonError, jsonOk, parseId } from "@/app/lib/api";
+import { logActivityAsync } from "@/app/lib/audit";
 import { validateInventoryLot, type ValidLot } from "@/app/lib/inventory";
 
 function toParams(v: ValidLot) {
@@ -36,6 +37,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       [id, ...p]
     );
     if (rows.length === 0) return jsonError("lote no encontrado", 404);
+    await logActivityAsync({
+      entity_type: "inventory",
+      entity_id: id,
+      entity_label: `${v.lot.brand} · ${v.lot.lot}`,
+      action: "update",
+      summary: `Lote de inventario actualizado: ${v.lot.brand} · ${v.lot.lot}`,
+      details: {
+        module_count: v.lot.count,
+        status: v.lot.status,
+        expected_arrival: v.lot.eta,
+        width_mm: v.lot.widthMm,
+        height_mm: v.lot.heightMm,
+      },
+    });
     return jsonOk({ lot: rows[0] });
   } catch (err) {
     const msg = String(err);
@@ -51,10 +66,18 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   if (!parseId(id)) return jsonError("id inválido");
   try {
     const { rows } = await pool.query(
-      `DELETE FROM inventory_lots WHERE id = $1 RETURNING id`,
+      `DELETE FROM inventory_lots WHERE id = $1 RETURNING id, manufacturer_brand, lot_number`,
       [id]
     );
     if (rows.length === 0) return jsonError("lote no encontrado", 404);
+    await logActivityAsync({
+      entity_type: "inventory",
+      entity_id: id,
+      entity_label: `${rows[0].manufacturer_brand} · ${rows[0].lot_number}`,
+      action: "delete",
+      summary: `Lote de inventario eliminado: ${rows[0].manufacturer_brand} · ${rows[0].lot_number}`,
+      details: {},
+    });
     return jsonOk({ deleted: rows[0].id });
   } catch (err) {
     return jsonError("No se pudo eliminar el lote", 500, String(err));

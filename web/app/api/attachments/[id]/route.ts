@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
 import { jsonError, jsonOk, parseId } from "@/app/lib/api";
+import { logActivityAsync } from "@/app/lib/audit";
 import { deleteStorageObject, storageDownloadUrl } from "@/app/lib/storage";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -35,11 +36,21 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   if (!parseId(id)) return jsonError("id inválido");
   try {
     const { rows } = await pool.query(
-      `SELECT storage_key FROM attachments WHERE id = $1`,
+      `SELECT storage_key, file_name, project_id, ticket_id FROM attachments WHERE id = $1`,
       [id]
     );
     if (rows.length === 0) return jsonError("adjunto no encontrado", 404);
     await pool.query(`DELETE FROM attachments WHERE id = $1`, [id]);
+    await logActivityAsync({
+      entity_type: "attachment",
+      entity_id: id,
+      entity_label: rows[0].file_name,
+      action: "delete",
+      summary: `Archivo eliminado: ${rows[0].file_name}`,
+      details: {},
+      project_id: rows[0].project_id ?? null,
+      ticket_id: rows[0].ticket_id ?? null,
+    });
     try {
       await deleteStorageObject(rows[0].storage_key);
     } catch {

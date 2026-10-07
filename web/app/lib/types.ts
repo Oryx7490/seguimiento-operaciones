@@ -417,6 +417,11 @@ export interface ProjectScreen {
   cancelled: boolean;
   cancel_reason: string | null;
   m2: number;
+  m2_exact?: string;
+  /** Pantalla del catálogo de la cuenta a la que se relacionó esta pantalla. */
+  screen_catalog_id?: string | null;
+  catalog_screen_name?: string | null;
+  catalog_screen_active?: boolean | null;
   created_at: string;
   attachment: ProjectAttachment[];
   controllers: ScreenController[];

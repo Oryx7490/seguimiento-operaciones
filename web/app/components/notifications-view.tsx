@@ -48,7 +48,7 @@ function entityHref(n: Notification): string | null {
   if (!n.entity_id) return null;
   if (n.entity_type === "project") return `/proyectos/${n.entity_id}`;
   if (n.entity_type === "ticket") return `/tickets/${n.entity_id}`;
-  return "/";
+  return "/agenda";
 }
 
 export default function NotificationsView() {

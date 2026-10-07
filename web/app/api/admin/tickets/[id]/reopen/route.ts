@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
 import { jsonOk, jsonError, parseId } from "@/app/lib/api";
+import { logActivity } from "@/app/lib/audit";
 
 async function getActorId(): Promise<string | null> {
   const { rows } = await pool.query(
@@ -60,6 +61,16 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
       );
     }
 
+    await logActivity(client, {
+      entity_type: "ticket",
+      entity_id: id,
+      entity_label: rows[0].code,
+      action: "restore",
+      summary: `Ticket reabierto: ${rows[0].code} (${restoreStatus})`,
+      details: { from: "closed", to: restoreStatus },
+      ticket_id: id,
+      actor_id: actorId,
+    });
     await client.query("COMMIT");
     return jsonOk({ reopened: id, code: rows[0].code, status: restoreStatus });
   } catch (err) {

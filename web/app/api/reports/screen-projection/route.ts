@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
 import { jsonOk, jsonError } from "@/app/lib/api";
+import { isoDateLocal, todayIso } from "@/app/lib/time";
 
 // Proyección de m² de pantalla a instalar por tipo, en horizontes
 // corto / mediano / largo plazo.
@@ -27,12 +28,9 @@ export async function GET(req: NextRequest) {
     ? [...new Set(pitchParam.split(",").map(s => Number(s.trim())).filter(n => !isNaN(n) && n > 0))]
     : [];
 
-  const anchor = new Date();
-  const anchorParam = searchParams.get("anchor");
-  if (anchorParam) {
-    const parsed = new Date(anchorParam);
-    if (!isNaN(parsed.getTime())) anchor.setTime(parsed.getTime());
-  }
+  const anchorParam = searchParams.get("anchor") ?? todayIso();
+  const parsed = new Date(`${anchorParam}T00:00:00`);
+  const anchor = isNaN(parsed.getTime()) ? new Date(`${todayIso()}T00:00:00`) : parsed;
   anchor.setDate(1);
   anchor.setHours(0, 0, 0, 0);
 
@@ -41,8 +39,8 @@ export async function GET(req: NextRequest) {
   rangeEnd.setDate(0);
   rangeEnd.setHours(23, 59, 59, 999);
 
-  const from = anchor.toISOString().slice(0, 10);
-  const to = rangeEnd.toISOString().slice(0, 10);
+  const from = isoDateLocal(anchor);
+  const to = isoDateLocal(rangeEnd);
 
   const anchorYear = anchor.getFullYear();
   const anchorMonth = anchor.getMonth();

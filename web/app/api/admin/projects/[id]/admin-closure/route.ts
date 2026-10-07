@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
 import { jsonOk, jsonError, parseId } from "@/app/lib/api";
+import { logActivity } from "@/app/lib/audit";
 
 async function getActorId(): Promise<string | null> {
   const { rows } = await pool.query(
@@ -57,6 +58,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       [id, ...vals, actorId]
     );
 
+    await logActivity(client, {
+      entity_type: "project",
+      entity_id: id,
+      action: "update",
+      summary: "Checklist de cierre administrativo actualizado",
+      details: { admin_closure: body },
+      project_id: id,
+      actor_id: actorId,
+    });
     await client.query("COMMIT");
     return jsonOk({ saved: true });
   } catch (err) {

@@ -15,6 +15,7 @@ interface Aggregate {
   pitch: number | null;
   widthMm: number | null;
   heightMm: number | null;
+  m2Unit: number;
   moduleType: string | null;
   ledType: string | null;
   obs: string | null;
@@ -195,6 +196,7 @@ function downloadTemplate() {
 export default function InventoryPage() {
   const { data, error, reload } = useResource<InventoryResponse>("/api/inventory");
   const [editing, setEditing] = useState<InventoryLot | "new" | null>(null);
+  const [prefill, setPrefill] = useState<Partial<LotFormData> | null>(null);
   const [importing, setImporting] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -220,6 +222,7 @@ export default function InventoryPage() {
         pitch: lot.pitch_mm,
         widthMm: lot.width_mm != null ? Number(lot.width_mm) : null,
         heightMm: lot.height_mm != null ? Number(lot.height_mm) : null,
+        m2Unit: ((Number(lot.width_mm ?? 320) * Number(lot.height_mm ?? 160)) / 1_000_000),
         moduleType: lot.module_type,
         ledType: lot.led_type,
         obs: lot.observations,
@@ -232,7 +235,7 @@ export default function InventoryPage() {
       const k = keyOf(u.manufacturer_brand, u.lot_number);
       let agg = byKey.get(k);
       if (!agg) {
-        agg = { brand: u.manufacturer_brand, lot: u.lot_number, invQty: 0, location: null, pitch: null, widthMm: null, heightMm: null, moduleType: null, ledType: null, obs: null, ics: [null, null, null], usedTotal: 0, projects: new Map() };
+        agg = { brand: u.manufacturer_brand, lot: u.lot_number, invQty: 0, location: null, pitch: null, widthMm: null, heightMm: null, m2Unit: 0, moduleType: null, ledType: null, obs: null, ics: [null, null, null], usedTotal: 0, projects: new Map() };
         byKey.set(k, agg);
       }
       agg.usedTotal += u.module_count;
@@ -340,6 +343,7 @@ export default function InventoryPage() {
       }
       setOk(editing === "new" ? "Lote agregado." : "Lote actualizado.");
       setEditing(null);
+      setPrefill(null);
       reload();
     } catch (e) {
       setErr(String(e));
@@ -408,7 +412,7 @@ export default function InventoryPage() {
           <SecondaryButton onClick={() => fileRef.current?.click()} disabled={importing} className="text-xs px-2 py-1">
             {importing ? "Importando…" : "Importar CSV"}
           </SecondaryButton>
-          <PrimaryButton onClick={() => setEditing("new")} className="text-xs px-2 py-1">Agregar lote</PrimaryButton>
+          <PrimaryButton onClick={() => { setPrefill(null); setEditing("new"); }} className="text-xs px-2 py-1">Agregar lote</PrimaryButton>
           <input
             ref={fileRef}
             type="file"
@@ -477,7 +481,9 @@ export default function InventoryPage() {
                 <th className="px-3 py-2 text-left">Observaciones</th>
                 <th className="cursor-pointer px-3 py-2 text-right" onClick={() => toggleSort("inv")}>Inventario{arrow("inv")}</th>
                 <th className="cursor-pointer px-3 py-2 text-right" onClick={() => toggleSort("used")}>Usado{arrow("used")}</th>
+                <th className="px-3 py-2 text-right">m² usado</th>
                 <th className="cursor-pointer px-3 py-2 text-right" onClick={() => toggleSort("diff")}>Diferencia{arrow("diff")}</th>
+                <th className="px-3 py-2 text-right">m² restante</th>
                 <th className="px-3 py-2 text-left">Disponibilidad</th>
                 <th className="px-3 py-2 text-left">Pantallas donde se ocupó</th>
                 <th className="px-3 py-2 text-left">Estado</th>
@@ -486,7 +492,7 @@ export default function InventoryPage() {
             </thead>
             <tbody className="divide-y divide-zinc-100">
               {filtered.length === 0 ? (
-                <tr><td colSpan={15} className="px-3 py-4 text-sm text-zinc-400">Sin datos.</td></tr>
+                <tr><td colSpan={17} className="px-3 py-4 text-sm text-zinc-400">Sin datos.</td></tr>
               ) : (
                 filtered.map((row) => {
                   const st = statusOf(row);
@@ -518,7 +524,9 @@ export default function InventoryPage() {
                       </td>
                       <td className="px-3 py-2 text-right text-zinc-700">{row.invQty || "—"}</td>
                       <td className="px-3 py-2 text-right text-zinc-700">{row.usedTotal || "0"}</td>
+                      <td className="px-3 py-2 text-right text-zinc-700">{row.m2Unit > 0 ? `${formatNum(row.usedTotal * row.m2Unit)} m²` : "—"}</td>
                       <td className="px-3 py-2 text-right font-medium text-zinc-800">{row.invQty - row.usedTotal}</td>
+                      <td className="px-3 py-2 text-right font-medium text-zinc-800">{row.m2Unit > 0 ? `${formatNum((row.invQty - row.usedTotal) * row.m2Unit)} m²` : "—"}</td>
                       <td className="px-3 py-2 text-xs">
                         {(() => {
                           const inv = invLot;
@@ -552,7 +560,7 @@ export default function InventoryPage() {
                           {invLot && (
                             <>
                               <button
-                                onClick={() => setEditing(invLot)}
+                                onClick={() => { setPrefill(null); setEditing(invLot); }}
                                 className="rounded border border-zinc-200 px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100"
                               >
                                 Editar
@@ -564,6 +572,17 @@ export default function InventoryPage() {
                                 Eliminar
                               </button>
                             </>
+                          )}
+                          {!invLot && row.usedTotal > 0 && (
+                            <button
+                              onClick={() => {
+                                setPrefill({ brand: row.brand, lot: row.lot, count: String(row.usedTotal) });
+                                setEditing("new");
+                              }}
+                              className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-700 hover:bg-amber-100"
+                            >
+                              Registrar en inventario
+                            </button>
                           )}
                         </div>
                       </td>
@@ -595,8 +614,10 @@ export default function InventoryPage() {
                         <th className="px-3 py-2 text-left">Lote</th>
                         <th className="px-3 py-2 text-left">Pantalla</th>
                         <th className="px-3 py-2 text-right">Usado</th>
+                        <th className="px-3 py-2 text-right">m² usado</th>
                         <th className="px-3 py-2 text-right">Inventario</th>
                         <th className="px-3 py-2 text-right">Diferencia</th>
+                        <th className="px-3 py-2 text-right">m² restante</th>
                         <th className="px-3 py-2 text-left">Estado</th>
                       </tr>
                     </thead>
@@ -611,8 +632,10 @@ export default function InventoryPage() {
                             <td className="px-3 py-2 text-zinc-600">{row.lot}</td>
                             <td className="px-3 py-2 text-xs text-zinc-500">{screens.length ? screens.join(", ") : "General"}</td>
                             <td className="px-3 py-2 text-right text-zinc-700">{row.usedTotal}</td>
+                            <td className="px-3 py-2 text-right text-zinc-700">{row.m2Unit > 0 ? `${formatNum(row.usedTotal * row.m2Unit)} m²` : "—"}</td>
                             <td className="px-3 py-2 text-right text-zinc-700">{row.invQty || "—"}</td>
                             <td className="px-3 py-2 text-right font-medium text-zinc-800">{row.invQty - row.usedTotal}</td>
+                            <td className="px-3 py-2 text-right font-medium text-zinc-800">{row.m2Unit > 0 ? `${formatNum((row.invQty - row.usedTotal) * row.m2Unit)} m²` : "—"}</td>
                             <td className="px-3 py-2">
                               <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${st.cls}`} title={st.text}>
                                 {st.label}
@@ -631,11 +654,12 @@ export default function InventoryPage() {
 
       {editing && (
         <LotModal
-          key={editing === "new" ? "new" : editing.id}
+          key={editing === "new" ? `new-${prefill?.brand ?? ""}-${prefill?.lot ?? ""}` : editing.id}
           editing={editing}
-          onClose={() => setEditing(null)}
+          onClose={() => { setEditing(null); setPrefill(null); }}
           onSave={saveLot}
           saving={saving}
+          initial={prefill ?? undefined}
         />
       )}
     </div>
@@ -666,18 +690,20 @@ function formatDateShort(iso: string): string {
 
 function LotModal({
   editing,
+  initial,
   onClose,
   onSave,
   saving,
 }: {
   editing: InventoryLot | "new";
+  initial?: Partial<LotFormData>;
   onClose: () => void;
   onSave: (form: LotFormData) => Promise<void>;
   saving: boolean;
 }) {
   const [form, setForm] = useState<LotFormData>(
     editing === "new"
-      ? EMPTY_FORM
+      ? { ...EMPTY_FORM, ...initial }
       : {
           brand: editing.manufacturer_brand,
           lot: editing.lot_number,
@@ -715,7 +741,7 @@ function LotModal({
     <Modal mark="W9"
       open
       onClose={onClose}
-      title={editing === "new" ? "Agregar lote" : "Editar lote"}
+      title={editing === "new" ? (initial?.brand ? "Registrar lote usado" : "Agregar lote") : "Editar lote"}
       footer={
         <>
           <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>

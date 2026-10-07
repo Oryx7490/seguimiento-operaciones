@@ -2,12 +2,15 @@
 
 import Link from "next/link";
 import { UiMark } from "@/app/components/ui";
+import PresenceBadge from "@/app/components/presence-badge";
+import UserSwitcher from "@/app/components/user-switcher";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import pkg from "../../package.json";
 
 const NAV = [
-  { href: "/", label: "Agenda" },
+  { href: "/", label: "Inicio" },
+  { href: "/agenda", label: "Agenda" },
   { href: "/gantt", label: "Gantt" },
   { href: "/gantt-tickets", label: "Gantt tickets" },
   { href: "/proyectos", label: "Proyectos" },
@@ -33,7 +36,10 @@ const ADMIN_SUB: readonly NavItem[] = [
   {
     href: "/admin/catalogos",
     label: "Catálogos",
-    children: [{ href: "/admin/controladores", label: "Controladores" }],
+    children: [
+      { href: "/admin/controladores", label: "Controladores" },
+      { href: "/admin/catalogo-pantallas", label: "Pantallas" },
+    ],
   },
   { href: "/admin/especialidades", label: "Especialidades" },
   { href: "/admin/calendario", label: "Calendario" },
@@ -45,6 +51,7 @@ const ADMIN_SUB: readonly NavItem[] = [
   { href: "/admin/cierre", label: "Cierre" },
   { href: "/admin/horas-extra", label: "Horas extra" },
   { href: "/admin/notificaciones", label: "Notificaciones" },
+  { href: "/bitacora", label: "Bitácora" },
   { href: "/admin/agentes", label: "Agentes CLI" },
 ];
 
@@ -72,9 +79,7 @@ export default function AppNav() {
 
   return (
     <div className="relative flex h-full min-h-screen w-52 shrink-0 flex-col border-r border-zinc-200 bg-white">
-      <span className="absolute right-2 top-1">
-        <UiMark id="N1" />
-      </span>
+      <PresenceBadge />
       <div className="border-b border-zinc-200 px-4 py-4">
         <h1 className="text-sm font-bold tracking-tight text-zinc-800">
           <Link href="/">Seguimiento Ops</Link>
@@ -151,8 +156,9 @@ export default function AppNav() {
         </div>
       </nav>
 
-      <div className="border-t border-zinc-100 px-4 py-3 text-[10px] text-zinc-400">
-        v{pkg.version}
+      <div className="border-t border-zinc-100 px-2 py-2">
+        <UserSwitcher />
+        <p className="px-2 pb-1 pt-0.5 text-[10px] text-zinc-400">v{pkg.version}</p>
       </div>
     </div>
   );
