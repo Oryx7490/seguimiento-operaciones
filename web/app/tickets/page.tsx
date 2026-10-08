@@ -18,7 +18,7 @@ import {
   Textarea,
 } from "@/app/components/ui";
 import { ColumnSelector } from "@/app/components/column-selector";
-import type { CatalogItem, CatalogsResponse, Client, ClientsResponse, Ticket, TicketsResponse } from "@/app/lib/types";
+import type { CatalogItem, CatalogsResponse, Client, ClientsResponse, Location, LocationsResponse, Ticket, TicketsResponse } from "@/app/lib/types";
 
 const STATUS_OPTIONS = [
   "new",
@@ -38,6 +38,7 @@ const TICKET_COLUMNS = [
   { key: "codigo", label: "Código" },
   { key: "titulo", label: "Título" },
   { key: "cliente", label: "Cliente" },
+  { key: "ubicacion", label: "Sucursal / ubicación" },
   { key: "estado", label: "Estado" },
   { key: "prioridad", label: "Prioridad" },
   { key: "coordinador", label: "Coordinador" },
@@ -54,6 +55,7 @@ export default function TicketsPage() {
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState(false);
   const [cols, setCols] = useState<Record<string, boolean>>(DEFAULT_TICKET_COLS);
+  const [includeArchived, setIncludeArchived] = useState(false);
 
   const toggleCol = (key: string) => setCols((prev) => ({ ...prev, [key]: !prev[key] }));
 
@@ -61,6 +63,7 @@ export default function TicketsPage() {
   if (statusFilter) params.set("status", statusFilter);
   if (typeFilter) params.set("type", typeFilter);
   if (search.trim()) params.set("q", search.trim());
+  if (includeArchived) params.set("include_archived", "1");
   const query = params.toString();
   const { data, error, reload } = useResource<TicketsResponse>(`/api/tickets${query ? `?${query}` : ""}`);
 
@@ -97,18 +100,27 @@ export default function TicketsPage() {
             />
           </div>
         </div>
-        <div className="w-48">
-          <Select
-            value={typeFilter}
-            onChange={setTypeFilter}
-            placeholder="Todos los tipos"
-            options={[
-              { value: "external", label: "Externo (cliente)" },
-              { value: "internal", label: "Interno" },
-            ]}
-          />
-        </div>
-        <ColumnSelector columns={TICKET_COLUMNS} visible={cols} onToggle={toggleCol} />
+<div className="w-48">
+            <Select
+              value={typeFilter}
+              onChange={setTypeFilter}
+              placeholder="Todos los tipos"
+              options={[
+                { value: "external", label: "Externo (cliente)" },
+                { value: "internal", label: "Interno" },
+              ]}
+            />
+          </div>
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-zinc-600">
+            <input
+              type="checkbox"
+              checked={includeArchived}
+              onChange={(e) => setIncludeArchived(e.target.checked)}
+              className="h-4 w-4 rounded border-zinc-300"
+            />
+            Mostrar archivados
+          </label>
+          <ColumnSelector columns={TICKET_COLUMNS} visible={cols} onToggle={toggleCol} />
       </div>
 
       <div className="mt-4">
@@ -124,6 +136,7 @@ export default function TicketsPage() {
                   {cols.codigo && <th className="px-4 py-3 text-left">Código</th>}
                   {cols.titulo && <th className="px-4 py-3 text-left">Título</th>}
                   {cols.cliente && <th className="px-4 py-3 text-left">Cliente</th>}
+                  {cols.ubicacion && <th className="px-4 py-3 text-left">Sucursal / ubicación</th>}
                   {cols.estado && <th className="px-4 py-3 text-left">Estado</th>}
                   {cols.prioridad && <th className="px-4 py-3 text-left">Prioridad</th>}
                   {cols.coordinador && <th className="px-4 py-3 text-left">Coordinador</th>}
@@ -142,9 +155,19 @@ export default function TicketsPage() {
                     )}
                     {cols.titulo && <td className="px-4 py-3 font-medium text-zinc-800">{t.title}</td>}
                     {cols.cliente && <td className="px-4 py-3 text-zinc-600">{t.client_name ?? "—"}</td>}
+                    {cols.ubicacion && (
+                      <td className="px-4 py-3 text-zinc-600">
+                        {t.location_name ? `${t.location_name}${t.city ? `, ${t.city}` : ""}` : "—"}
+                      </td>
+                    )}
                     {cols.estado && (
                       <td className="px-4 py-3">
                         <StatusBadge status={t.status} kind="ticket" />
+                        {t.archived_at && (
+                          <span className="ml-2 inline-block rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-500">
+                            Archivado
+                          </span>
+                        )}
                       </td>
                     )}
                     {cols.prioridad && <td className="px-4 py-3 text-zinc-600">{t.priority_name ?? "—"}</td>}
@@ -172,29 +195,42 @@ function NewTicketModal({ onClose, onSaved }: { onClose: () => void; onSaved: ()
   const [description, setDescription] = useState("");
   const [ticketType, setTicketType] = useState<"external" | "internal">("external");
   const [clientId, setClientId] = useState("");
+  const [locationId, setLocationId] = useState("");
   const [priorityId, setPriorityId] = useState("");
   const [channelId, setChannelId] = useState("");
   const [reportedBy, setReportedBy] = useState("");
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [locations, setLocations] = useState<Location[]>([]);
 
   useEffect(() => {
     let cancelled = false;
     Promise.all([
       fetchJson<ClientsResponse>("/api/clients"),
       fetchJson<CatalogsResponse>("/api/catalogs"),
+      fetchJson<LocationsResponse>("/api/locations"),
     ])
-      .then(([c, cat]) => {
+      .then(([c, cat, loc]) => {
         if (cancelled) return;
         setClients(c.clients);
         setPriorities(cat.priorities);
         setChannels(cat.ticket_channels);
+        setLocations(loc.locations.filter((location) => location.active));
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!locationId || !clientId) return;
+    const loc = locations.find((l) => l.id === locationId);
+    if (loc && loc.client_id !== clientId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setLocationId("");
+    }
+  }, [clientId, locationId, locations]);
 
   useEffect(() => {
     if (ticketType !== "internal") return;
@@ -217,6 +253,7 @@ function NewTicketModal({ onClose, onSaved }: { onClose: () => void; onSaved: ()
           description,
           ticket_type: ticketType,
           client_id: clientId || undefined,
+          location_id: locationId || undefined,
           priority_id: priorityId || undefined,
           channel_id: channelId || undefined,
           reported_by: reportedBy || undefined,
@@ -269,6 +306,16 @@ function NewTicketModal({ onClose, onSaved }: { onClose: () => void; onSaved: ()
             <Select value={priorityId} onChange={setPriorityId} placeholder="— Sin prioridad —" options={priorities.map((p) => ({ value: p.id, label: p.name }))} />
           </Field>
         </div>
+        <Field label="Sucursal / ubicación a atender" hint="Opcional. Si la pantalla no pertenece a una sucursal del cliente, puedes dejarla sin asignar.">
+          <Select
+            value={locationId}
+            onChange={setLocationId}
+            placeholder="Selecciona una sucursal…"
+            options={locations
+              .filter((location) => !clientId || location.client_id === clientId)
+              .map((location) => ({ value: location.id, label: `${location.name}${location.city ? ` · ${location.city}` : ""}` }))}
+          />
+        </Field>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Canal de reporte">
             <Select value={channelId} onChange={setChannelId} placeholder="— Sin canal —" options={channels.map((c) => ({ value: c.id, label: c.name }))} />

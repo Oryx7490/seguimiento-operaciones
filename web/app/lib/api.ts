@@ -1,17 +1,16 @@
 import { NextResponse } from "next/server";
-import { currentUserId } from "@/app/lib/session";
+import { currentUserId, currentUser } from "@/app/lib/session";
 
 export function jsonOk<T>(data: T, status = 200) {
   return NextResponse.json(data, { status });
 }
 
-/**
- * Usuario que está operando: el de la cookie "Quién eres" y, si no hay,
- * el admin/coordinator más antiguo (comportamiento previo, usado por la API
- * de agentes y scripts). Ver `lib/session.ts`.
- */
 export async function getCurrentUserId(): Promise<string | null> {
   return currentUserId();
+}
+
+export async function getCurrentUser() {
+  return currentUser();
 }
 
 export function jsonError(message: string, status = 400, details?: unknown) {

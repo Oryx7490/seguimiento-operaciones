@@ -19,7 +19,7 @@ import {
 import TicketClosure from "@/app/components/ticket-closure";
 import CommentSection from "@/app/components/comment-section";
 import AttachmentsSection from "@/app/components/attachments-section";
-import type { Client, ClientsResponse, Technician, TechniciansResponse, TicketDetail } from "@/app/lib/types";
+import type { Client, ClientsResponse, Location, LocationsResponse, Technician, TechniciansResponse, Ticket, TicketDetail } from "@/app/lib/types";
 
 const TICKET_STATUS_FLOW = [
   "new",
@@ -89,6 +89,12 @@ export default function TicketDetailPage() {
           <p className="text-xs text-zinc-400">Abierto</p>
           <p className="break-words text-sm font-medium text-zinc-800">{formatDateTime(t.opened_at)}</p>
         </div>
+        <div className="min-w-0 sm:col-span-2 lg:col-span-4">
+          <p className="text-xs text-zinc-400">Sucursal / ubicación a atender</p>
+          <p className="break-words text-sm font-medium text-zinc-800">
+            {t.location_name ? `${t.location_name}${t.city ? `, ${t.city}` : ""}` : "—"}
+          </p>
+        </div>
       </div>
 
       {t.waiting_reason && (
@@ -102,6 +108,7 @@ export default function TicketDetailPage() {
           <TicketStatusChanger detail={detail} onSaved={reload} />
           <EditTicket detail={detail} onSaved={reload} />
           <TicketDeletionRequest detail={detail} onSaved={reload} />
+          <TicketArchiveButton ticket={t} onSaved={reload} />
         </div>
       )}
 
@@ -242,23 +249,42 @@ function EditTicket({ detail, onSaved }: { detail: TicketDetail; onSaved: () => 
   const [title, setTitle] = useState(detail.ticket.title);
   const [description, setDescription] = useState(detail.ticket.description ?? "");
   const [clientId, setClientId] = useState(detail.ticket.client_id ?? "");
+  const [locationId, setLocationId] = useState(detail.ticket.location_id ?? "");
   const [clients, setClients] = useState<Client[]>([]);
+  const [locations, setLocations] = useState<Location[]>([]);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const t = detail.ticket;
 
   useEffect(() => {
     let cancelled = false;
-    fetchJson<ClientsResponse>("/api/clients")
-      .then((c) => { if (!cancelled) setClients(c.clients); })
+    Promise.all([
+      fetchJson<ClientsResponse>("/api/clients"),
+      fetchJson<LocationsResponse>("/api/locations"),
+    ])
+      .then(([c, loc]) => {
+        if (cancelled) return;
+        setClients(c.clients);
+        setLocations(loc.locations.filter((location) => location.active));
+      })
       .catch(() => {});
     return () => { cancelled = true; };
   }, []);
+
+  useEffect(() => {
+    if (!locationId || !clientId) return;
+    const loc = locations.find((l) => l.id === locationId);
+    if (loc && loc.client_id !== clientId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setLocationId("");
+    }
+  }, [clientId, locationId, locations]);
 
   function openModal() {
     setTitle(t.title);
     setDescription(t.description ?? "");
     setClientId(t.client_id ?? "");
+    setLocationId(t.location_id ?? "");
     setErr(null);
     setOpen(true);
   }
@@ -275,14 +301,13 @@ function EditTicket({ detail, onSaved }: { detail: TicketDetail; onSaved: () => 
     setSaving(true);
     setErr(null);
     try {
-      const clientChanged = (clientId || null) !== t.client_id;
       await fetchJson(`/api/tickets/${t.id}`, {
         method: "PATCH",
         body: JSON.stringify({
           title: title.trim(),
           description: description.trim() || null,
           client_id: clientId || null,
-          ...(clientChanged && t.location_id ? { location_id: null } : {}),
+          location_id: locationId || null,
         }),
       });
       setOpen(false);
@@ -324,9 +349,16 @@ function EditTicket({ detail, onSaved }: { detail: TicketDetail; onSaved: () => 
                 />
               )}
             </Field>
-            {t.location_id && (clientId || null) !== t.client_id && (
-              <p className="text-[11px] text-amber-600">Al cambiar de cliente se quitará la ubicación actual ({t.location_name ?? "sin nombre"}).</p>
-            )}
+            <Field label="Sucursal / ubicación a atender" hint="Se filtra por el cliente del ticket. Puedes dejarla en «Sin sucursal».">
+              <Select
+                value={locationId}
+                onChange={setLocationId}
+                placeholder="Sin sucursal"
+                options={locations
+                  .filter((location) => !clientId || location.client_id === clientId)
+                  .map((location) => ({ value: location.id, label: `${location.name}${location.city ? ` · ${location.city}` : ""}` }))}
+              />
+            </Field>
             {err && <p className="text-xs text-red-600">{err}</p>}
           </div>
         </Modal>
@@ -484,5 +516,42 @@ function TicketDeletionRequest({ detail, onSaved }: { detail: TicketDetail; onSa
         </Modal>
       )}
     </>
+  );
+}
+
+function TicketArchiveButton({ ticket, onSaved }: { ticket: Ticket; onSaved: () => void }) {
+  const [saving, setSaving] = useState(false);
+  const archived = Boolean(ticket.archived_at);
+
+  if (!archived && ticket.status !== "closed") return null;
+
+  async function toggle() {
+    if (!archived && !confirm(`¿Archivar el ticket ${ticket.code}? Dejará de mostrarse en la sección Tickets.`)) return;
+    setSaving(true);
+    try {
+      await fetchJson(`/api/tickets/${ticket.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ archived: !archived }),
+      });
+      onSaved();
+    } catch (e) {
+      alert(String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <button
+      onClick={toggle}
+      disabled={saving}
+      className={`rounded-md border px-3 py-2 text-sm ${
+        archived
+          ? "border-zinc-300 bg-white text-zinc-600 hover:bg-zinc-50"
+          : "border-zinc-300 bg-white text-zinc-700 hover:bg-zinc-50"
+      }`}
+    >
+      {saving ? "Guardando…" : archived ? "Desarchivar" : "Archivar"}
+    </button>
   );
 }

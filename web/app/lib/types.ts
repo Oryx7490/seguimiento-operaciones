@@ -292,6 +292,7 @@ export interface Ticket {
   deletion_requested_at: string | null;
   deletion_requested_by: string | null;
   deletion_reason: string | null;
+  archived_at: string | null;
 }
 
 export interface ActivityTechnician {
@@ -399,6 +400,7 @@ export interface ClosureController {
   controller_name: string;
   quantity: number;
   serial_numbers: string | null;
+  no_equipment?: boolean;
 }
 
 export interface ProjectScreen {
@@ -416,6 +418,7 @@ export interface ProjectScreen {
   installed: boolean;
   cancelled: boolean;
   cancel_reason: string | null;
+  sort_order: number;
   m2: number;
   m2_exact?: string;
   /** Pantalla del catálogo de la cuenta a la que se relacionó esta pantalla. */

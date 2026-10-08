@@ -24,11 +24,13 @@ export async function GET(req: NextRequest) {
   const status = searchParams.get("status");
   const type = searchParams.get("type");
   const q = searchParams.get("q");
+  const includeArchived = searchParams.get("include_archived") === "1";
 
   let sql = `SELECT t.id, t.code, t.title, t.description, t.ticket_type, t.status, t.priority_id,
                     t.client_id, t.location_id, t.coordinator_id, t.reported_by, t.opened_at,
                     t.first_response_at, t.resolved_at, t.closed_at, t.waiting_reason,
                     t.next_action, t.next_action_date, t.last_activity_at, t.version,
+                    t.archived_at,
                     COALESCE(c.name, CASE WHEN t.ticket_type = 'internal' THEN 'RGB' END) AS client_name,
                     l.name AS location_name, l.city,
                     pr.name AS priority_name, u.name AS coordinator_name, ch.name AS channel_name
@@ -40,6 +42,9 @@ export async function GET(req: NextRequest) {
              LEFT JOIN ticket_channels ch ON ch.id = t.channel_id
              WHERE t.status <> 'cancelled'`;
   const values: unknown[] = [];
+  if (!includeArchived) {
+    sql += ` AND t.archived_at IS NULL`;
+  }
   if (status && TICKET_STATUS.includes(status)) {
     values.push(status);
     sql += ` AND t.status = $${values.length}`;

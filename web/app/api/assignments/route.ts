@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
       [hasProject ? body.project_id : null, hasTicket ? body.ticket_id : null, body.technician_id, body.role?.trim() || null]
     );
 
-    const tech = await client.query<{ name: string }>(`SELECT name FROM technicians WHERE id = $1`, [body.technician_id]);
+    const tech = await client.query<{ name: string }>(`SELECT display_name AS name FROM technicians WHERE id = $1`, [body.technician_id]);
     const target = hasProject
       ? await client.query<{ code: string }>(`SELECT code FROM projects WHERE id = $1`, [body.project_id])
       : await client.query<{ code: string }>(`SELECT code FROM tickets WHERE id = $1`, [body.ticket_id]);

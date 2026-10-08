@@ -1,5 +1,58 @@
 # Constraints & Decisions Log
 
+## Auditoría de medidas de pantallas (V44) — sin commit
+
+> Un usuario detectó cenefas con alto «0.016 m» en vez de «0.16 m» (error de orden de magnitud al capturar). Se agrega una auditoría que recorre todas las pantallas de proyectos no cancelados y marca posibles errores de captura.
+
+- **Reglas compartidas** (`web/app/lib/screen-rules.ts`, TS puro, reutilizables por el formulario en el futuro):
+  - Orden de magnitud: alto < 1 cm = error; 1–5 cm = aviso «¿falta un cero?»; ancho/área con umbrales análogos.
+  - Tamaños imposibles: ancho/alto/pitch/área fuera de rangos físicos, cantidad ≤ 0.
+  - Coherencia `ancho × alto` vs `area_m2` (tolerancia 2%); relación de aspecto anormal.
+  - Píxeles enteros a partir del `pitch_mm` (pantallas regulares).
+  - Desviación frente al **catálogo de la cuenta** (`screen_catalog`): difiere ≥ 5× (o ≤ 0.2×) = error; entre 1.5×/0.6× = aviso.
+- **Endpoint** `GET /api/admin/screen-audit`: escanea `project_screens` (proyectos no cancelados) con JOIN a catalogo/cliente; devuelve solo pantallas con alertas + conteos (`total`, `with_errors`, `with_warnings`, `ok`).
+- **Página** `/admin/revision-pantallas` (nav «Auditoría pantallas», mark V44): chips de resumen, filtros por severidad y búsqueda, tabla con proyecto (link), dimensiones, área, pitch, medidas del catálogo y alertas (rojo = error, ámbar = aviso).
+- E2E: con datos reales detectó 11 pantallas con avisos (altos de 9.6 m, relaciones de aspecto 0.33:1, etc.); la prueba con una cenefa temporal 0.016 m arrojó el aviso exacto «¿falta un cero? (¿0.16 m?)». Pantalla de prueba purgada.
+
+## Pantallas a instalar: vista para PDF sin «Estado» + resumen de equipos (V43) — sin commit
+
+> En la sección «Pantallas a instalar» de V4, el botón **PDF / Imprimir** genera ahora una impresión más útil: sin la columna «Estado» y con un resumen de los equipos requeridos por tipo.
+
+- Se quita la columna **Estado** de la tabla impresa (ya no distinguía «Instalada/Cancelada» en el documento).
+- La impresión considera solo las **pantallas activas** (excluye canceladas): el conteo del encabezado, la tabla y los totales de m²/MP ya no incluyen canceladas.
+- Nueva sección **«Resumen de equipos requeridos por tipo»**: agrupa los controladores de pantallas activas por modelo/serie y suma las cantidades (ordenado de mayor a menor), con fila de total de equipos; si no hay equipos muestra «Sin equipos.».
+- `web/app/proyectos/[id]/page.tsx` → `printPdf()`.
+
+## Tickets: sucursal / ubicación a atender (V42) — sin commit
+
+> La infraestructura ya existía (columna `tickets.location_id` desde `001_init`, tipos y APIs POST/PATCH/GET). Faltaba la UI: ahora el ticket captura y muestra la sucursal a atender, igual que los proyectos.
+
+- Alta (`NewTicketModal`, `web/app/tickets/page.tsx`): nuevo campo **«Sucursal / ubicación a atender»** que carga `/api/locations`, se filtra por el cliente elegido (patrón de `proyectos/page.tsx`) y se envía como `location_id` en el POST. Al cambiar de cliente se limpia la sucursal ajena.
+- Edición (`EditTicket`, `web/app/tickets/[id]/page.tsx`): selector de sucursal (opción «Sin sucursal») que hace `PATCH { location_id }`; se elimina el reset implícito/aviso de «se quitará la ubicación al cambiar de cliente» — ahora el usuario elige explícitamente.
+- Detalle: tarjeta de datos generales con celda **«Sucursal / ubicación a atender»** (nombre + ciudad, spans la fila completa).
+- Lista `/tickets`: nueva columna **«Sucursal / ubicación»** (visible por defecto, configurable desde ColumnSelector) con `Nombre, Ciudad`.
+- E2E: PATCH de `location_id` real → GET detalle y lista devuelven `location_name`/`city`; datos de prueba limpiados. `tsc`/ESLint OK.
+
+## Cierre de proyecto: opción «Sin equipo» (V41) — sin commit
+
+> En V4 (cierre), cada pantalla ahora puede marcarse expresamente como «Sin equipo» cuando no utiliza un controlador nuestro o comparte uno ya considerado en otra pantalla. Hoy una pantalla "vacía" era indistinguible de "falta capturar".
+
+- Migración `055_project_closure_no_equipment.sql` (aplicada): `project_closure_controllers.no_equipment boolean NOT NULL DEFAULT false` + CHECK `no_equipment = false OR controller_id IS NULL` (una fila "sin equipo" no referencia catálogo). Se mantienen los constraints existentes (`controller_name NOT NULL`, `quantity > 0`): la fila se guarda como `controller_name='Sin equipo'`, `quantity=1`, `serial_numbers=NULL`.
+- UI (`project-closure.tsx`): la columna **Modelo** del listado de equipos definitivos incluye la opción **«Sin equipo (compartido o no aplica)»**; en esa fila Cant./SN se muestran en desuso y aparece una leyenda. La vista de proyecto cerrado muestra la pantalla con «Sin equipo (compartido o no aplica)».
+- Validación: una fila "Sin equipo" **requiere** pantalla perteneciente al proyecto y no cancelada, y no acepta controlador (400 en ambos casos, front y back; `buildClosureControllers` idem).
+- API: `PATCH /api/projects/[id]` (bloque `closure_controllers` 741–779) y `GET` precargan/devuelven `no_equipment` (SELECT 113–119). `ClosureController.no_equipment?: boolean`.
+- E2E con proyecto `waiting_materials`: alta de fila "Sin equipo" + equipo normal (round-trip correcto), 400 al mezclar con controlador o sin pantalla; datos de prueba limpiados.
+
+## Archivar tickets cerrados (V40) — sin commit
+
+> Un botón «Archivar» oculta un ticket cerrado de la sección Tickets; el archivo es blando (siempre se puede desarchivar) y no afecta al Gantt de tickets, Pendientes ni Dashboard, que ya excluyen cerrados.
+
+- Migración `054_ticket_archive.sql` (aplicada): `tickets.archived_at timestamptz` + índice parcial `idx_tickets_archived_at` (mismo patrón que `deletion_requested_at`).
+- `PATCH /api/tickets/[id]` acepta `{ archived: true|false }`; archivar **solo** se permite si el ticket está `closed` (si no, 400), y queda en la bitácora (`action = "archive"`).
+- `GET /api/tickets` excluye archivados por omisión y acepta `include_archived=1` para incluirlos; devuelve `archived_at`.
+- Detalle (`/tickets/[id]`): botón **Archivar** en tickets cerrados y **Desarchivar** en archivados (con confirmación). Lista `/tickets`: casilla «Mostrar archivados» + badge «Archivado» en la fila.
+- E2E con TK-005: archivar lo oculta de la lista, aparece con `include_archived=1`, desarchivar lo regresa; bitácora de prueba purgada.
+
 ## 0.4.5 — RC (2026-10-07)
 
 > Release candidato que lleva a GitHub: catálogo de pantallas por cuenta (V37), corrección de zona horaria y de la línea «Hoy» del Gantt (V39), y arreglo del modal que dejaba los clics bloqueados hasta un F5 (véase secciones abajo). El nav sigue leyendo la versión desde `web/package.json` (v0.4.5).
@@ -445,3 +498,16 @@ Bloquea en BD cualquier INSERT/UPDATE incoherente.
 - `attachment_exactly_one_entity` CHECK debe actualizarse si se añade 4ª entidad.
 - Presence indicator: migración 014 aplicada; falta API `/api/presence`, `PresenceBadge`, montaje en `layout.tsx`.
 - GDrive OAuth bloqueado; security 1–4 y optimizations 13–17 pendientes decisión.
+
+## Auditoría de medidas de pantallas — botón "Validar" (V44b) — sin commit
+- Tabla de auditoría (`/admin/revision-pantallas`): cada aviso ahora tiene botón **Validar** para marcarlo como revisado.
+- Al validar se guarda en `screen_audit_ignores` (screen_id + issue_key hash) con usuario, fecha/hora y motivo opcional (registrado).
+- Los avisos validados se ocultan de la auditoría y pueden reactivarse desde la misma tabla (aparecen tachados con tooltip para volver a mostrar).
+- Endpoints: `POST/DELETE /api/admin/screen-audit/[screenId]/ignore`, `GET /api/admin/screen-audit/ignores`.
+- Migración `057_screen_audit_ignore.sql`.
+
+## Ubicaciones (V17): barra de búsqueda
+- Agregada barra de búsqueda en `/admin/ubicaciones` para filtrar por nombre, ciudad, cliente o dirección. Muestra el conteo de resultados.
+
+## Fix: asignación de técnico a ticket
+- `POST /api/assignments`: corregido `SELECT name FROM technicians` → `display_name`. Causaba error 500 al asignar técnico a un ticket.

@@ -15,7 +15,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
     );
     if (rows.length === 0) return jsonError("asignación no encontrada", 404);
     const row = rows[0];
-    const tech = await pool.query<{ name: string }>(`SELECT name FROM technicians WHERE id = $1`, [row.technician_id]);
+    const tech = await pool.query<{ name: string }>(`SELECT display_name AS name FROM technicians WHERE id = $1`, [row.technician_id]);
     const target = row.project_id
       ? await pool.query<{ code: string }>(`SELECT code FROM projects WHERE id = $1`, [row.project_id])
       : await pool.query<{ code: string }>(`SELECT code FROM tickets WHERE id = $1`, [row.ticket_id]);

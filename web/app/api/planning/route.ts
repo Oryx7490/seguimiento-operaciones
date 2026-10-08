@@ -26,6 +26,8 @@ type Row = {
   is_irregular: boolean | null;
   area_m2: string | null;
   screen_notes: string | null;
+  cancelled: boolean | null;
+  cancel_reason: string | null;
   m2_unit: string | null;
   m2_total: string | null;
   assignment_id: string | null;
@@ -54,6 +56,7 @@ export async function GET() {
               cl.name AS client_name,
               ps.id AS screen_id, ps.screen_type, ps.environment, ps.quantity, ps.pitch_mm,
               ps.width_m, ps.height_m, ps.is_irregular, ps.area_m2, ps.notes AS screen_notes,
+              ps.cancelled, ps.cancel_reason,
               (${M2_UNIT})::numeric(12,4) AS m2_unit,
               ((${M2_UNIT}) * ps.quantity)::numeric(12,4) AS m2_total,
               sc.id AS assignment_id, sc.quantity AS controller_qty, sc.notes AS controller_notes, sc.installed,
@@ -63,8 +66,8 @@ export async function GET() {
          LEFT JOIN project_screens ps ON ps.project_id = p.id
          LEFT JOIN screen_controllers sc ON sc.screen_id = ps.id
          LEFT JOIN controller_catalog cc ON cc.id = sc.controller_id
-        WHERE p.status <> 'cancelled'
-        ORDER BY p.code, ps.created_at NULLS LAST, cc.brand NULLS LAST, cc.name`
+         WHERE p.status <> 'cancelled'
+         ORDER BY p.code, ps.sort_order NULLS LAST, ps.created_at NULLS LAST, cc.brand NULLS LAST, cc.name`
     );
 
     const projects = new Map<string, {
@@ -84,6 +87,8 @@ export async function GET() {
         is_irregular: boolean;
         area_m2: number | null;
         notes: string | null;
+        cancelled: boolean;
+        cancel_reason: string | null;
         m2_unit: number;
         m2_total: number;
         controllers: {
@@ -125,6 +130,8 @@ export async function GET() {
           is_irregular: Boolean(r.is_irregular),
           area_m2: num(r.area_m2),
           notes: r.screen_notes,
+          cancelled: Boolean(r.cancelled),
+          cancel_reason: r.cancel_reason,
           m2_unit: round2(num(r.m2_unit) ?? 0),
           m2_total: round2(num(r.m2_total) ?? 0),
           controllers: [],
@@ -165,6 +172,8 @@ export async function GET() {
     }>();
     for (const p of list) {
       for (const s of p.screens) {
+        // Las pantallas canceladas se muestran sin equipos por asignar.
+        if (s.cancelled) continue;
         for (const c of s.controllers) {
           const cur = demand.get(c.controller_id) ?? {
             controller_id: c.controller_id,

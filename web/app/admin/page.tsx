@@ -117,6 +117,13 @@ export default function AdminDashboard() {
               <p className="mt-1 text-xs text-zinc-500">m² a instalar en corto, mediano y largo plazo</p>
             </Link>
             <Link
+              href="/admin/revision-pantallas"
+              className="rounded-lg border border-amber-200 bg-amber-50 p-4 shadow-sm transition hover:border-amber-300 hover:shadow"
+            >
+              <p className="text-sm font-medium text-amber-800">Auditoría pantallas</p>
+              <p className="mt-1 text-xs text-amber-600">Errores de captura en medidas (0.016 vs 0.16, etc.)</p>
+            </Link>
+            <Link
               href="/admin/cierre"
               className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 shadow-sm transition hover:border-emerald-300 hover:shadow"
             >

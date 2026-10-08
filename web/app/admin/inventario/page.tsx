@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { fetchJson, useResource } from "@/app/lib/client";
 import { Field, Modal, PrimaryButton, SecondaryButton, Select, Spinner, TextInput, Textarea } from "@/app/components/ui";
 import type { InventoryLot, InventoryResponse } from "@/app/lib/types";
@@ -485,7 +486,7 @@ export default function InventoryPage() {
                 <th className="cursor-pointer px-3 py-2 text-right" onClick={() => toggleSort("diff")}>Diferencia{arrow("diff")}</th>
                 <th className="px-3 py-2 text-right">m² restante</th>
                 <th className="px-3 py-2 text-left">Disponibilidad</th>
-                <th className="px-3 py-2 text-left">Pantallas donde se ocupó</th>
+                <th className="px-3 py-2 text-left">Proyectos donde se ocupó</th>
                 <th className="px-3 py-2 text-left">Estado</th>
                 <th className="px-3 py-2 text-right">Acciones</th>
               </tr>
@@ -496,8 +497,6 @@ export default function InventoryPage() {
               ) : (
                 filtered.map((row) => {
                   const st = statusOf(row);
-                  const screens = new Set<string>();
-                  for (const proj of row.projects.values()) for (const s of proj.screens) screens.add(s);
                   const invLot = findInventoryLot(row.brand, row.lot);
                   return (
                     <tr key={keyOf(row.brand, row.lot)} className="hover:bg-zinc-50 align-top">
@@ -548,7 +547,20 @@ export default function InventoryPage() {
                         })()}
                       </td>
                       <td className="px-3 py-2 text-xs text-zinc-500">
-                        {screens.size === 0 ? "—" : [...screens].join(", ")}
+                        {row.projects.size === 0 ? "—" : (
+                          <span className="inline-flex flex-wrap gap-x-2 gap-y-1">
+                            {[...row.projects.entries()].map(([projectId, proj]) => (
+                              <Link
+                                key={projectId}
+                                href={`/proyectos/${projectId}`}
+                                title={`${proj.code} · ${proj.name}`}
+                                className="text-sky-700 hover:underline"
+                              >
+                                {proj.name}
+                              </Link>
+                            ))}
+                          </span>
+                        )}
                       </td>
                       <td className="px-3 py-2">
                         <span className={`inline-block rounded-full px-2 py-0.5 text-[11px] font-medium ${st.cls}`} title={st.text}>

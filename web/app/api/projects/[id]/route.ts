@@ -75,7 +75,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
       pool.query(
         `SELECT ps.id, ps.project_id, ps.screen_type, ps.environment, ps.quantity,
                 ps.width_m, ps.height_m, ps.is_irregular, ps.area_m2, ps.pitch_mm, ps.voltage,
-                ps.installed, ps.cancelled, ps.cancel_reason, ps.created_at,
+                ps.installed, ps.cancelled, ps.cancel_reason, ps.created_at, ps.sort_order,
                 ps.screen_catalog_id, sc.name AS catalog_screen_name, sc.active AS catalog_screen_active,
                 CASE WHEN ps.is_irregular THEN COALESCE(ps.area_m2, 0)
                      ELSE COALESCE(ps.width_m, 0) * COALESCE(ps.height_m, 0) END AS m2,
@@ -83,7 +83,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
                       ELSE COALESCE(ps.width_m, 0) * COALESCE(ps.height_m, 0) END)::text AS m2_exact
          FROM project_screens ps
          LEFT JOIN screen_catalog sc ON sc.id = ps.screen_catalog_id
-         WHERE ps.project_id = $1 ORDER BY ps.created_at`,
+         WHERE ps.project_id = $1 ORDER BY ps.sort_order, ps.created_at`,
         [id]
       ),
       pool.query(
@@ -112,7 +112,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
 
     const closureControllers = await pool.query(
       `SELECT pcc.id, pcc.screen_id, pcc.controller_id, pcc.controller_name,
-              pcc.quantity, pcc.serial_numbers
+              pcc.quantity, pcc.serial_numbers, pcc.no_equipment
        FROM project_closure_controllers pcc
        WHERE pcc.project_id = $1
        ORDER BY pcc.created_at`,
@@ -191,6 +191,7 @@ interface ClosurePatch {
     quantity?: number;
     serial_numbers?: string | null;
     _deleted?: boolean;
+    no_equipment?: boolean;
   }>;
   closure_module_lots?: Array<{
     id?: string;
@@ -223,6 +224,8 @@ interface ScreensPatch {
     controllers?: Array<{ controller_id: string; quantity: number }>;
     _deleted?: boolean;
   }>;
+  /** Reordenamiento gráfico de pantallas (V4): lista de ids en el orden deseado. */
+  screen_order?: string[];
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -670,8 +673,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             }
           } else if (sType) {
             const { rows: inserted } = await client.query(
-              `INSERT INTO project_screens (project_id, screen_type, screen_catalog_id, environment, quantity, width_m, height_m, is_irregular, area_m2, pitch_mm, voltage)
-               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`,
+              `INSERT INTO project_screens (project_id, screen_type, screen_catalog_id, environment, quantity, width_m, height_m, is_irregular, area_m2, pitch_mm, voltage, sort_order)
+               VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE((SELECT MAX(sort_order) FROM project_screens WHERE project_id = $1), -1) + 1) RETURNING id`,
               [id, sType, catalog?.id ?? null, environment ?? null, sc.quantity ?? 1, num(sc.width_m), num(sc.height_m), sc.is_irregular ?? false, num(sc.area_m2), num(sc.pitch_mm), voltage ?? null]
             );
             screenId = inserted[0]?.id ?? null;
@@ -691,6 +694,42 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             }
           }
         }
+      }
+    }
+
+    // Reordenamiento gráfico de pantallas (V4): persiste el orden de la lista.
+    if (Array.isArray((body as { screen_order?: unknown }).screen_order)) {
+      const order = (body as { screen_order: unknown[] }).screen_order;
+      if (order.length === 0) {
+        await client.query("ROLLBACK");
+        return jsonError("screen_order no puede estar vacío");
+      }
+      const ids: string[] = [];
+      for (const v of order) {
+        if (typeof v !== "string" || !parseId(v)) {
+          await client.query("ROLLBACK");
+          return jsonError("Identificador de pantalla inválido en screen_order");
+        }
+        ids.push(v);
+      }
+      if (new Set(ids).size !== ids.length) {
+        await client.query("ROLLBACK");
+        return jsonError("screen_order tiene identificadores duplicados");
+      }
+      const { rows: owned } = await client.query(
+        `SELECT id FROM project_screens WHERE project_id = $1`,
+        [id]
+      );
+      const ownedIds = new Set(owned.map((r: { id: string }) => r.id));
+      if (ids.length !== ownedIds.size || !ids.every((sid) => ownedIds.has(sid))) {
+        await client.query("ROLLBACK");
+        return jsonError("screen_order debe incluir todas las pantallas del proyecto una sola vez");
+      }
+      for (let i = 0; i < ids.length; i++) {
+        await client.query(
+          `UPDATE project_screens SET sort_order = $3 WHERE id = $1 AND project_id = $2`,
+          [ids[i], id, i]
+        );
       }
     }
 
@@ -741,6 +780,27 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     if (Array.isArray(body.closure_controllers)) {
       // Validar antes de reemplazar.
       for (const cc of body.closure_controllers) {
+        const noEquipment = Boolean(cc.no_equipment);
+        if (noEquipment) {
+          if (!cc.screen_id || !parseId(cc.screen_id)) {
+            await client.query("ROLLBACK");
+            return jsonError("La fila 'Sin equipo' debe asociarse a una pantalla");
+          }
+          if (cc.controller_id) {
+            await client.query("ROLLBACK");
+            return jsonError("Una fila 'Sin equipo' no puede referenciar un controlador");
+          }
+          const { rows: scr } = await client.query(
+            `SELECT id FROM project_screens
+             WHERE id = $1 AND project_id = $2 AND COALESCE(cancelled, false) = false`,
+            [cc.screen_id, id]
+          );
+          if (scr.length === 0) {
+            await client.query("ROLLBACK");
+            return jsonError("La pantalla seleccionada en 'Sin equipo' no pertenece al proyecto o está cancelada");
+          }
+          continue;
+        }
         const name = cc.controller_name?.trim();
         if (cc.controller_id && !parseId(cc.controller_id)) {
           await client.query("ROLLBACK");
@@ -761,17 +821,19 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       } else {
         await client.query(`DELETE FROM project_closure_controllers WHERE project_id = $1`, [id]);
         for (const cc of body.closure_controllers) {
+          const noEquipment = Boolean(cc.no_equipment);
           await client.query(
             `INSERT INTO project_closure_controllers (
-               project_id, screen_id, controller_id, controller_name, quantity, serial_numbers
-             ) VALUES ($1, $2, $3, $4, $5, $6)`,
+               project_id, screen_id, controller_id, controller_name, quantity, serial_numbers, no_equipment
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
             [
               id,
               cc.screen_id && parseId(cc.screen_id) ? cc.screen_id : null,
-              cc.controller_id || null,
-              cc.controller_name!.trim(),
-              cc.quantity ?? 1,
-              cc.serial_numbers?.trim() || null,
+              noEquipment ? null : (cc.controller_id || null),
+              noEquipment ? "Sin equipo" : cc.controller_name!.trim(),
+              noEquipment ? 1 : (cc.quantity ?? 1),
+              noEquipment ? null : (cc.serial_numbers?.trim() || null),
+              noEquipment,
             ]
           );
         }

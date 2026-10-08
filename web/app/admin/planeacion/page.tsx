@@ -26,6 +26,8 @@ interface ScreenRow {
   is_irregular: boolean;
   area_m2: number | null;
   notes: string | null;
+  cancelled: boolean;
+  cancel_reason: string | null;
   m2_unit: number;
   m2_total: number;
   controllers: ControllerRow[];
@@ -58,7 +60,29 @@ function fmt(n: number) {
   return n.toLocaleString("es-MX", { maximumFractionDigits: 2 });
 }
 
-type SortKey = "project" | "screen" | "pitch" | "m2" | "controllers" | "notes";
+function fmtMP(n: number) {
+  const up = Math.ceil(n * 10 - 1e-9) / 10;
+  return `${up.toLocaleString("es-MX", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}M`;
+}
+
+// Millones de píxeles: (base_mm / pitch) * (altura_mm / pitch) / 1e6.
+// Con base/altura en metros: mp = area_m2 / pitch_mm^2. Para irregular usa area_m2.
+function mpUnit(s: ScreenRow): number | null {
+  if (!s.pitch_mm || s.pitch_mm <= 0) return null;
+  if (s.is_irregular) {
+    if (!s.area_m2 || s.area_m2 <= 0) return null;
+    return s.area_m2 / (s.pitch_mm * s.pitch_mm);
+  }
+  if (!s.width_m || !s.height_m || s.width_m <= 0 || s.height_m <= 0) return null;
+  return (s.width_m * s.height_m) / (s.pitch_mm * s.pitch_mm);
+}
+
+function mpTotal(s: ScreenRow): number | null {
+  const u = mpUnit(s);
+  return u == null ? null : u * s.quantity;
+}
+
+type SortKey = "project" | "screen" | "pitch" | "m2" | "mp" | "controllers" | "notes";
 
 function cmpText(a: string, b: string) {
   return a.localeCompare(b, "es", { sensitivity: "base", numeric: true });
@@ -76,6 +100,7 @@ export default function PlaneacionPage() {
     const map = new Map<string, { controller_id: string; name: string; brand: string | null; quantity: number }>();
     for (const p of data?.projects ?? []) {
       for (const s of p.screens) {
+        if (s.cancelled) continue;
         for (const c of s.controllers) {
           if (c.installed) continue;
           const cur = map.get(c.controller_id) ?? {
@@ -97,6 +122,7 @@ export default function PlaneacionPage() {
     let units = 0;
     for (const p of data?.projects ?? []) {
       for (const s of p.screens) {
+        if (s.cancelled) continue;
         if (s.controllers.length > 0) continue;
         rows += 1;
         units += s.quantity;
@@ -123,12 +149,12 @@ export default function PlaneacionPage() {
     const q = query.trim().toLocaleLowerCase("es");
     const eq = equipQuery.trim().toLocaleLowerCase("es");
     const matchesEquip = (s: ScreenRow) =>
-      !eq || s.controllers.some((c) =>
+      !eq || (!s.cancelled && s.controllers.some((c) =>
         c.name.toLocaleLowerCase("es").includes(eq) || (c.brand ?? "").toLocaleLowerCase("es").includes(eq)
-      );
+      ));
     const list = (data?.projects ?? [])
       .filter((p) => !q || [p.code, p.name, p.client_name].some((t) => (t ?? "").toLocaleLowerCase("es").includes(q)))
-      .map((p) => ({ ...p, screens: p.screens.filter(matchesEquip).filter((s) => !hideAssigned || s.controllers.length === 0) }))
+      .map((p) => ({ ...p, screens: p.screens.filter(matchesEquip).filter((s) => !hideAssigned || s.cancelled || s.controllers.length === 0) }))
       .filter((p) => !eq || p.screens.length > 0);
     if (!sortKey) return list;
     const dir = sortDir === "asc" ? 1 : -1;
@@ -280,6 +306,7 @@ export default function PlaneacionPage() {
                   <SortTh label="Pantalla" column="screen" align="left" sortKey={sortKey} dir={sortDir} onSort={toggleSort} />
                   <SortTh label="Pitch" column="pitch" align="right" sortKey={sortKey} dir={sortDir} onSort={toggleSort} />
                   <SortTh label="Metraje" column="m2" align="right" sortKey={sortKey} dir={sortDir} onSort={toggleSort} />
+                  <SortTh label="MP" column="mp" align="right" sortKey={sortKey} dir={sortDir} onSort={toggleSort} />
                   <SortTh label="Controladores" column="controllers" align="left" sortKey={sortKey} dir={sortDir} onSort={toggleSort} />
                   <SortTh label="Comentario de pantalla" column="notes" align="left" sortKey={sortKey} dir={sortDir} onSort={toggleSort} />
                 </tr>
@@ -287,24 +314,29 @@ export default function PlaneacionPage() {
               <tbody>
                 {rows.length === 0 && (
                   <tr>
-                    <td colSpan={6} className="px-4 py-6 text-sm text-zinc-500">No hay proyectos que coincidan.</td>
+                    <td colSpan={7} className="px-4 py-6 text-sm text-zinc-500">No hay proyectos que coincidan.</td>
                   </tr>
                 )}
                 {rows.map((row) =>
                   row.screen === null ? (
                     <tr key={row.key} className="border-t border-zinc-100">
                       <td className="px-4 py-3 align-top"><ProjectCell project={row.project} /></td>
-                      <td colSpan={5} className="px-4 py-3 text-zinc-400">Sin pantallas registradas.</td>
+                      <td colSpan={6} className="px-4 py-3 text-zinc-400">Sin pantallas registradas.</td>
                     </tr>
                   ) : (
-                    <tr key={row.key} className="border-t border-zinc-100 align-top">
+                    <tr key={row.key} className={`border-t border-zinc-100 align-top ${row.screen.cancelled ? "opacity-60" : ""}`}>
                         {row.span > 0 && (
                           <td className="px-4 py-3" rowSpan={row.span}>
                             <ProjectCell project={row.project} />
                           </td>
                         )}
                         <td className="px-4 py-3">
-                          <p className="font-medium text-zinc-800">{row.screen.screen_type}</p>
+                          <p className={`font-medium ${row.screen.cancelled ? "text-zinc-500 line-through" : "text-zinc-800"}`}>{row.screen.screen_type}</p>
+                          {row.screen.cancelled && (
+                            <p className="mt-0.5 text-[11px] font-medium text-rose-700" title={row.screen.cancel_reason ?? ""}>
+                              Cancelada{row.screen.cancel_reason ? `: ${row.screen.cancel_reason}` : ""}
+                            </p>
+                          )}
                           <p className="text-xs text-zinc-500">
                             {row.screen.environment ? ENV[row.screen.environment] ?? row.screen.environment : "Sin tipo"}
                             {` · × ${row.screen.quantity}`}
@@ -320,8 +352,25 @@ export default function PlaneacionPage() {
                             <p className="text-[11px] text-zinc-400">{fmt(row.screen.m2_unit)} m² c/u</p>
                           )}
                         </td>
+                        <td className="px-4 py-3 text-right">
+                          {(() => {
+                            const total = mpTotal(row.screen);
+                            const unit = mpUnit(row.screen);
+                            if (total == null || unit == null) return <span className="text-zinc-400">—</span>;
+                            return (
+                              <>
+                                <p className="font-semibold text-zinc-800">{fmtMP(total)}</p>
+                                {row.screen.quantity > 1 && (
+                                  <p className="text-[11px] text-zinc-400">{fmtMP(unit)} c/u</p>
+                                )}
+                              </>
+                            );
+                          })()}
+                        </td>
                         <td className="px-4 py-3">
-                          {row.screen.controllers.length === 0 ? (
+                          {row.screen.cancelled ? (
+                            <span className="text-xs text-zinc-400">Sin equipos por asignar</span>
+                          ) : row.screen.controllers.length === 0 ? (
                             <span className="text-xs text-zinc-400">Sin controladores</span>
                           ) : (
                             <ul className="space-y-2">
@@ -430,6 +479,14 @@ function compareScreens(
     return dir * (a.pitch_mm - b.pitch_mm) || tie;
   }
   if (key === "m2") return dir * (a.m2_total - b.m2_total) || tie;
+  if (key === "mp") {
+    const ma = mpTotal(a);
+    const mb = mpTotal(b);
+    if (ma == null && mb == null) return tie;
+    if (ma == null) return 1;
+    if (mb == null) return -1;
+    return dir * (ma - mb) || tie;
+  }
   if (key === "controllers") {
     const qa = a.controllers.reduce((n, c) => n + c.quantity, 0);
     const qb = b.controllers.reduce((n, c) => n + c.quantity, 0);

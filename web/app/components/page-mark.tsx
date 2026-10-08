@@ -26,6 +26,7 @@ const PAGES: { path: string; id: string; exact?: boolean }[] = [
   { path: "/admin/catalogos", id: "V18" },
   { path: "/admin/especialidades", id: "V19" },
   { path: "/admin/calendario", id: "V20" },
+  { path: "/admin/revision-pantallas", id: "V44" },
   { path: "/admin/controladores", id: "V21" },
   { path: "/admin/catalogo-pantallas", id: "V37" },
   { path: "/admin/inventario", id: "V22" },

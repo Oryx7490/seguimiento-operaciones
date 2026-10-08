@@ -123,6 +123,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     request_deletion?: boolean;
     cancel_deletion?: boolean;
     deletion_reason?: string;
+    // Archivar (requiere estado cerrado)
+    archived?: boolean;
     // Closure fields
     close_ticket?: boolean;
     closure?: {
@@ -361,6 +363,51 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
          WHERE id = $1`,
         [id]
       );
+    }
+
+    // Archivar / desarchivar
+    if (body.archived === true) {
+      const row = await client.query<{ status: string; code: string }>(
+        `SELECT status, code FROM tickets WHERE id = $1`,
+        [id]
+      );
+      if (row.rows.length === 0) {
+        await client.query("ROLLBACK");
+        return jsonError("No se encontró el ticket", 404);
+      }
+      if (row.rows[0].status !== "closed") {
+        await client.query("ROLLBACK");
+        return jsonError("Solo se pueden archivar tickets cerrados.", 400);
+      }
+      await client.query(
+        `UPDATE tickets SET archived_at = now(), version = version + 1 WHERE id = $1`,
+        [id]
+      );
+      if (actorId) {
+        await logActivity(client, {
+          entity_type: "ticket",
+          entity_id: id,
+          action: "archive",
+          summary: `Ticket ${row.rows[0].code} archivado`,
+          ticket_id: id,
+          actor_id: actorId,
+        });
+      }
+    } else if (body.archived === false) {
+      await client.query(
+        `UPDATE tickets SET archived_at = NULL, version = version + 1 WHERE id = $1`,
+        [id]
+      );
+      if (actorId) {
+        await logActivity(client, {
+          entity_type: "ticket",
+          entity_id: id,
+          action: "archive",
+          summary: "Ticket desarchivado",
+          ticket_id: id,
+          actor_id: actorId,
+        });
+      }
     }
 
     const { rows } = await client.query(

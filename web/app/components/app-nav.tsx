@@ -43,6 +43,7 @@ const ADMIN_SUB: readonly NavItem[] = [
   },
   { href: "/admin/especialidades", label: "Especialidades" },
   { href: "/admin/calendario", label: "Calendario" },
+  { href: "/admin/revision-pantallas", label: "Auditoría pantallas" },
   {
     href: "/admin/inventario",
     label: "Inventario",

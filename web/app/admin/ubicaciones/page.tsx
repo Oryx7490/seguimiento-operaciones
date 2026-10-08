@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { fetchJson, useResource } from "@/app/lib/client";
 import {
   Badge,
@@ -20,8 +20,19 @@ export default function LocationsPage() {
   const { data, error, reload } = useResource<LocationsResponse>("/api/locations");
   const [selected, setSelected] = useState<Location | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [search, setSearch] = useState("");
 
-  const locations = data?.locations ?? [];
+  const locations = useMemo(() => {
+    const locationsRaw = data?.locations ?? [];
+    const q = search.trim().toLowerCase();
+    if (!q) return locationsRaw;
+    return locationsRaw.filter((l: Location) =>
+      (l.name ?? "").toLowerCase().includes(q) ||
+      (l.city ?? "").toLowerCase().includes(q) ||
+      (l.client_name ?? "").toLowerCase().includes(q) ||
+      (l.address ?? "").toLowerCase().includes(q)
+    );
+  }, [data?.locations, search]);
   const loading = !data && !error;
 
   async function send(method: "PATCH" | "DELETE", l: Location, body?: object) {
@@ -48,6 +59,13 @@ export default function LocationsPage() {
       {error && (
         <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>
       )}
+
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <div className="w-96">
+          <TextInput value={search} onChange={setSearch} placeholder="Buscar por nombre, ciudad, cliente o dirección..." />
+        </div>
+        <div className="text-sm text-zinc-500">{locations.length} resultado(s)</div>
+      </div>
 
       <div className="mt-6">
         {loading ? (

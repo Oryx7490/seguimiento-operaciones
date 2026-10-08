@@ -933,6 +933,51 @@ function ScreensSection({ projectId, detail, onSaved, summary, defaultOpen }: { 
   const [menu, setMenu] = useState<{ screen: ProjectScreen; rect: DOMRect } | null>(null);
   const [cancelling, setCancelling] = useState<ProjectScreen | null>(null);
   const [open, setOpen] = useState(defaultOpen);
+  const [dragId, setDragId] = useState<string | null>(null);
+  const [overId, setOverId] = useState<string | null>(null);
+  const [orderSaving, setOrderSaving] = useState(false);
+  const [orderError, setOrderError] = useState<string | null>(null);
+
+  async function persistOrder(ids: string[]) {
+    setOrderSaving(true);
+    setOrderError(null);
+    try {
+      await fetchJson(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ screen_order: ids }),
+      });
+      onSaved();
+    } catch {
+      setOrderError("No se pudo guardar el orden");
+    } finally {
+      setOrderSaving(false);
+    }
+  }
+
+  function moveScreen(id: string, dir: -1 | 1) {
+    const ids = detail.screens.map((s) => s.id);
+    const i = ids.indexOf(id);
+    const j = i + dir;
+    if (i < 0 || j < 0 || j >= ids.length) return;
+    const next = [...ids];
+    const [moved] = next.splice(i, 1);
+    next.splice(j, 0, moved);
+    void persistOrder(next);
+  }
+
+  function dropOn(targetId: string) {
+    if (!dragId || dragId === targetId) return;
+    const ids = detail.screens.map((s) => s.id);
+    const from = ids.indexOf(dragId);
+    const to = ids.indexOf(targetId);
+    if (from < 0 || to < 0) return;
+    const next = [...ids];
+    const [moved] = next.splice(from, 1);
+    next.splice(to, 0, moved);
+    setDragId(null);
+    setOverId(null);
+    void persistOrder(next);
+  }
 
   async function patchScreenStatus(screen: ProjectScreen, patch: { installed?: boolean; cancelled?: boolean; cancel_reason?: string | null }) {
     await fetchJson(`/api/projects/${projectId}`, {
@@ -1021,6 +1066,92 @@ function ScreensSection({ projectId, detail, onSaved, summary, defaultOpen }: { 
     onSaved();
   }
 
+  function printPdf() {
+    const esc = (v: string | null | undefined) =>
+      String(v ?? "—")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    const dims = (s: ProjectScreen) =>
+      s.is_irregular
+        ? s.area_m2
+          ? `Irregular · ${formatNum(s.area_m2)} m²`
+          : "Irregular"
+        : s.width_m && s.height_m
+          ? `${formatNum(s.width_m)} × ${formatNum(s.height_m)} m`
+          : "—";
+const activeScreens = detail.screens.filter((s) => !s.cancelled);
+    const rows = activeScreens
+      .map((s) => {
+        const mp = screenMP(s);
+        const ctrls =
+          s.controllers.length === 0
+            ? "—"
+            : s.controllers.map((c) => `${c.name} × ${c.quantity}`).join(", ");
+        return `<tr>
+          <td>${esc(s.screen_type)}</td>
+          <td style="text-align:right">${s.quantity}</td>
+          <td>${esc(dims(s))}</td>
+          <td style="text-align:right">${s.pitch_mm ? `P${formatNum(s.pitch_mm)}` : "—"}</td>
+          <td style="text-align:right">${s.m2 > 0 ? `${formatNum(s.m2 * s.quantity)} m²` : "—"}</td>
+          <td style="text-align:right">${mp != null ? formatMP(mp) : "—"}</td>
+          <td>${esc(ctrls)}</td>
+        </tr>`;
+      })
+      .join("");
+    const totalM2 = activeScreens.reduce((n, s) => n + (s.m2 > 0 ? s.m2 * s.quantity : 0), 0);
+    const totalMP = activeScreens.reduce((n, s) => n + (screenMP(s) ?? 0), 0);
+    const equip = new Map<string, number>();
+    for (const s of activeScreens) {
+      for (const c of s.controllers) {
+        equip.set(c.name, (equip.get(c.name) ?? 0) + c.quantity);
+      }
+    }
+    const equipRows = [...equip.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([name, qty]) => `<tr><td>${esc(name)}</td><td style="text-align:right">${qty}</td></tr>`)
+      .join("");
+    const totalEquip = [...equip.values()].reduce((n, q) => n + q, 0);
+    const fecha = new Date().toLocaleDateString("es-MX", { year: "numeric", month: "long", day: "numeric" });
+    const win = window.open("", "_blank");
+    if (!win) {
+      setOrderError("El navegador bloqueó la ventana de impresión");
+      return;
+    }
+    win.document.write(`<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Pantallas a instalar · ${esc(detail.project.code)} ${esc(detail.project.name)}</title>
+<style>
+body{font-family:Arial,Helvetica,sans-serif;margin:32px;color:#111}
+h1{font-size:20px;margin:0}p.meta{color:#555;font-size:13px;margin:4px 0 16px}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{border:1px solid #999;padding:6px 8px;text-align:left}
+th{background:#eee}
+tfoot td{font-weight:bold}
+</style>
+</head>
+<body>
+<h1>Pantallas a instalar · ${esc(detail.project.code)} ${esc(detail.project.name)}</h1>
+<p class="meta">${esc(detail.project.client_name ?? "Sin cliente")} · ${activeScreens.length} pantallas · ${fecha}</p>
+<table>
+<thead><tr><th>Pantalla</th><th>Cant</th><th>Dimensiones</th><th>Pitch</th><th>m²</th><th>MP</th><th>Controladores</th></tr></thead>
+<tbody>${rows}</tbody>
+<tfoot><tr><td colspan="4">Total</td><td style="text-align:right">${formatNum(Math.round(totalM2 * 100) / 100)} m²</td><td style="text-align:right">${formatMP(Math.ceil(totalMP * 10 - 1e-9) / 10)}</td><td></td></tr></tfoot>
+</table>
+<h2 style="font-size:16px;margin:32px 0 8px">Resumen de equipos requeridos por tipo</h2>
+<table>
+<thead><tr><th>Equipo</th><th style="text-align:right">Cantidad</th></tr></thead>
+<tbody>${equipRows || `<tr><td colspan="2">Sin equipos.</td></tr>`}</tbody>
+${equipRows ? `<tfoot><tr><td>Total de equipos</td><td style="text-align:right">${totalEquip}</td></tr></tfoot>` : ""}
+</table>
+<script>window.onload=()=>window.print();<\/script>
+</body>
+</html>`);
+    win.document.close();
+  }
+
   return (
     <section className="rounded-lg border border-zinc-200 bg-white shadow-sm">
       <div className="flex items-center justify-between gap-3 px-4 py-3">
@@ -1029,14 +1160,32 @@ function ScreensSection({ projectId, detail, onSaved, summary, defaultOpen }: { 
           <h2 className="text-sm font-semibold text-zinc-800">Pantallas a instalar</h2>
           <span className="text-xs text-zinc-400">{summary}</span>
         </button>
+        <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={printPdf}
+          title="Genera una versión limpia para PDF o correo (sin fichas ni acciones)"
+          className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-50"
+        >
+          PDF / Imprimir
+        </button>
         <ScreenForm
           editing={editing}
           setEditing={setEditing}
           onSaved={save}
           clientId={detail.project.client_id}
         />
+        </div>
       </div>
       {open && <div className="border-t border-zinc-100 p-4">
+      {orderError && (
+        <p className="mb-2 rounded-md border border-red-200 bg-red-50 px-3 py-1.5 text-xs text-red-700">{orderError}</p>
+      )}
+      {detail.screens.length > 1 && (
+        <p className="mb-2 text-[11px] text-zinc-400">
+          Arrastra ⠿ o usa ▲▼ para ordenar la lista{orderSaving ? " · Guardando orden…" : ""}.
+        </p>
+      )}
       {detail.screens.length === 0 ? (
         <p className="mt-3 text-sm text-zinc-400">No hay pantallas registradas.</p>
       ) : (
@@ -1044,20 +1193,78 @@ function ScreensSection({ projectId, detail, onSaved, summary, defaultOpen }: { 
           <table className="min-w-full text-sm">
             <thead className="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500">
               <tr>
+                <th className="w-10 px-2 py-2 text-center" title="Arrastra para reordenar">
+                  <span className="sr-only">Orden</span>
+                  <span aria-hidden="true">⠿</span>
+                </th>
                 <th className="px-3 py-2 text-left">Tipo</th>
                 <th className="px-3 py-2 text-left">Descripción</th>
                 <th className="px-3 py-2 text-center">Cantidad</th>
                 <th className="px-3 py-2 text-left">Dimensiones</th>
                 <th className="px-3 py-2 text-right">Pitch (mm)</th>
                 <th className="px-3 py-2 text-right">m² (total)</th>
+                <th className="px-3 py-2 text-right">MP (total)</th>
                 <th className="px-3 py-2 text-left">Controladores</th>
                 <th className="px-3 py-2 text-left">Fichas</th>
                 <th className="px-3 py-2 text-right">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
-              {detail.screens.map((s) => (
-                <tr key={s.id} className={`hover:bg-zinc-50 align-top ${s.cancelled ? "opacity-60" : ""}`}>
+              {detail.screens.map((s, idx) => (
+                <tr
+                  key={s.id}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    if (overId !== s.id) setOverId(s.id);
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    dropOn(s.id);
+                  }}
+                  className={`hover:bg-zinc-50 align-top ${s.cancelled ? "opacity-60" : ""} ${overId === s.id && dragId ? "bg-sky-50" : ""} ${orderSaving ? "opacity-70" : ""}`}
+                >
+                  <td className="px-2 py-2 text-center align-middle">
+                    <span
+                      draggable
+                      onDragStart={(e) => {
+                        setDragId(s.id);
+                        e.dataTransfer.effectAllowed = "move";
+                        try {
+                          e.dataTransfer.setData("text/plain", s.id);
+                        } catch { /* noop */ }
+                      }}
+                      onDragEnd={() => {
+                        setDragId(null);
+                        setOverId(null);
+                      }}
+                      title="Arrastra para reordenar"
+                      className="inline-block cursor-grab touch-none select-none rounded px-1 text-base leading-5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 active:cursor-grabbing"
+                    >
+                      ⠿
+                    </span>
+                    <span className="mt-1 flex flex-col items-center gap-0.5">
+                      <button
+                        type="button"
+                        onClick={() => moveScreen(s.id, -1)}
+                        disabled={idx === 0 || orderSaving}
+                        aria-label={`Subir ${s.screen_type}`}
+                        title="Subir"
+                        className="rounded px-1 text-[10px] leading-3 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 disabled:opacity-30"
+                      >
+                        ▲
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveScreen(s.id, 1)}
+                        disabled={idx === detail.screens.length - 1 || orderSaving}
+                        aria-label={`Bajar ${s.screen_type}`}
+                        title="Bajar"
+                        className="rounded px-1 text-[10px] leading-3 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 disabled:opacity-30"
+                      >
+                        ▼
+                      </button>
+                    </span>
+                  </td>
                   <td className="px-3 py-2">
                     {s.environment === "exterior" ? (
                       <span className="inline-block rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">Exterior</span>
@@ -1100,6 +1307,9 @@ function ScreensSection({ projectId, detail, onSaved, summary, defaultOpen }: { 
                   </td>
                   <td className="px-3 py-2 text-right font-medium text-zinc-800">
                     {s.m2 > 0 ? `${formatNum(s.m2 * s.quantity)} m²` : "—"}
+                  </td>
+                  <td className="px-3 py-2 text-right font-medium text-zinc-800">
+                    {screenMP(s) != null ? `${formatMP(screenMP(s)!)}` : "—"}
                   </td>
                   <td className="px-3 py-2">
                     <ScreenControllersCell screen={s} onEdit={() => setCtlEditing(s)} />
@@ -1171,6 +1381,23 @@ function ScreensSection({ projectId, detail, onSaved, summary, defaultOpen }: { 
 
 function formatNum(v: number): string {
   return String(Number.isInteger(v) ? v : Math.round(v * 100) / 100);
+}
+
+function formatMP(v: number): string {
+  const up = Math.ceil(v * 10 - 1e-9) / 10;
+  return `${up.toLocaleString("es-MX", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}M`;
+}
+
+// Millones de píxeles totales: (base_mm / pitch) * (altura_mm / pitch) * cantidad / 1e6.
+// Con base/altura en metros: mp_total = area_m2 * cantidad / pitch_mm^2. Irregular usa area_m2.
+function screenMP(s: ProjectScreen): number | null {
+  if (!s.pitch_mm || s.pitch_mm <= 0) return null;
+  if (s.is_irregular) {
+    if (!s.area_m2 || s.area_m2 <= 0) return null;
+    return (s.area_m2 * s.quantity) / (s.pitch_mm * s.pitch_mm);
+  }
+  if (!s.width_m || !s.height_m || s.width_m <= 0 || s.height_m <= 0) return null;
+  return ((s.width_m * s.height_m * s.quantity) / (s.pitch_mm * s.pitch_mm));
 }
 
 function ScreenActionsMenu({

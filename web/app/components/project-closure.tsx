@@ -43,6 +43,7 @@ interface Row {
   controller_name: string;
   quantity: string;
   serial_numbers: string;
+  no_equipment?: boolean;
 }
 
 interface LotRow {
@@ -85,6 +86,7 @@ function toRows(initial: ClosureController[]): Row[] {
     controller_name: c.controller_name ?? "",
     quantity: String(c.quantity ?? 1),
     serial_numbers: c.serial_numbers ?? "",
+    no_equipment: Boolean(c.no_equipment),
   }));
 }
 
@@ -231,6 +233,7 @@ export default function ProjectClosure({
             controller_name: controllers.find((c) => c.id === p.controller_id)?.name ?? "",
             quantity: String(p.quantity),
             serial_numbers: "",
+            no_equipment: false,
           }));
         return [...prev, ...add];
       });
@@ -243,7 +246,7 @@ export default function ProjectClosure({
   function addRow() {
     setRows([
       ...rows,
-      { key: newKey(), screen_id: "", controller_id: "", controller_name: "", quantity: "1", serial_numbers: "" },
+      { key: newKey(), screen_id: "", controller_id: "", controller_name: "", quantity: "1", serial_numbers: "", no_equipment: false },
     ]);
   }
 
@@ -284,6 +287,7 @@ export default function ProjectClosure({
     controller_name: string;
     quantity: number;
     serial_numbers: string | null;
+    no_equipment: boolean;
   }> | { __error: string } {
     const out: Array<{
       screen_id: string | null;
@@ -291,8 +295,21 @@ export default function ProjectClosure({
       controller_name: string;
       quantity: number;
       serial_numbers: string | null;
+      no_equipment: boolean;
     }> = [];
     for (const r of rows) {
+      if (r.no_equipment) {
+        if (!r.screen_id) return { __error: "La fila 'Sin equipo' debe asociarse a una pantalla" };
+        out.push({
+          screen_id: r.screen_id,
+          controller_id: null,
+          controller_name: "Sin equipo",
+          quantity: 1,
+          serial_numbers: null,
+          no_equipment: true,
+        });
+        continue;
+      }
       const name = resolvedName(r);
       if (!name) return { __error: "Cada equipo definitivo requiere un modelo" };
       const q = Number(r.quantity);
@@ -303,6 +320,7 @@ export default function ProjectClosure({
         controller_name: name,
         quantity: q,
         serial_numbers: r.serial_numbers.trim() || null,
+        no_equipment: false,
       });
     }
     return out;
@@ -448,9 +466,17 @@ export default function ProjectClosure({
                 <ul className="mt-1 space-y-1">
                   {closedRows.map((r, i) => (
                     <li key={r.id ?? i} className="text-xs">
-                      <strong>{screenName(r.screen_id ?? "")}</strong> — {r.controller_name} ×{r.quantity}
-                      {r.serial_numbers && (
-                        <span className="text-zinc-400"> · SN: {r.serial_numbers}</span>
+                      <strong>{screenName(r.screen_id ?? "")}</strong>
+                      {r.no_equipment ? (
+                        <span className="text-zinc-400"> — Sin equipo (compartido o no aplica)</span>
+                      ) : (
+                        <>
+                          {" "}
+                          — {r.controller_name} ×{r.quantity}
+                          {r.serial_numbers && (
+                            <span className="text-zinc-400"> · SN: {r.serial_numbers}</span>
+                          )}
+                        </>
                       )}
                     </li>
                   ))}
@@ -546,6 +572,8 @@ export default function ProjectClosure({
             </div>
               <p className="mt-1 text-[11px] text-zinc-400">
                 Registra los controladores realmente utilizados y sus números de serie. Pueden diferir de la cotización.
+                Elige <strong className="font-semibold text-zinc-500">Sin equipo</strong> cuando una pantalla no ocupe un
+                equipo nuestro o comparta un controlador ya considerado en otra pantalla.
               </p>
 
               {rows.length === 0 ? (
@@ -584,23 +612,25 @@ export default function ProjectClosure({
                             <td className="px-2 py-1.5">
                               <div className="flex flex-col gap-1">
                                 <select
-                                  value={r.controller_id}
+                                  value={r.no_equipment ? "__none__" : r.controller_id}
                                   onChange={(e) =>
                                     updateRow(r.key, {
-                                      controller_id: e.target.value,
+                                      no_equipment: e.target.value === "__none__",
+                                      controller_id: e.target.value === "__none__" ? "" : e.target.value,
                                       controller_name: "",
                                     })
                                   }
                                   className="rounded border border-zinc-300 bg-white px-1.5 py-1 text-xs text-zinc-800"
                                 >
                                   <option value="">Escribir modelo…</option>
+                                  <option value="__none__">Sin equipo (compartido o no aplica)</option>
                                   {opts.map((x) => (
                                     <option key={x.id} value={x.id}>
                                       {x.brand ? `${x.brand} ` : ""}{x.name}
                                     </option>
                                   ))}
                                 </select>
-                                {!r.controller_id && (
+                                {!r.controller_id && !r.no_equipment && (
                                   <input
                                     value={r.controller_name}
                                     onChange={(e) => updateRow(r.key, { controller_name: e.target.value })}
@@ -608,24 +638,37 @@ export default function ProjectClosure({
                                     className="w-40 rounded border border-zinc-300 bg-white px-1.5 py-1 text-xs text-zinc-800"
                                   />
                                 )}
+                                {r.no_equipment && (
+                                  <span className="text-[11px] text-zinc-400">
+                                    No ocupa un equipo nuestro o comparte otro ya considerado.
+                                  </span>
+                                )}
                               </div>
                             </td>
                             <td className="px-2 py-1.5 text-center">
-                              <input
-                                type="number"
-                                min={1}
-                                value={r.quantity}
-                                onChange={(e) => updateRow(r.key, { quantity: e.target.value })}
-                                className="w-14 rounded border border-zinc-300 bg-white px-1.5 py-1 text-center text-xs text-zinc-800"
-                              />
+                              {r.no_equipment ? (
+                                <span className="text-zinc-300">—</span>
+                              ) : (
+                                <input
+                                  type="number"
+                                  min={1}
+                                  value={r.quantity}
+                                  onChange={(e) => updateRow(r.key, { quantity: e.target.value })}
+                                  className="w-14 rounded border border-zinc-300 bg-white px-1.5 py-1 text-center text-xs text-zinc-800"
+                                />
+                              )}
                             </td>
                             <td className="px-2 py-1.5">
-                              <input
-                                value={r.serial_numbers}
-                                onChange={(e) => updateRow(r.key, { serial_numbers: e.target.value })}
-                                placeholder="SN-001, SN-002…"
-                                className="w-48 rounded border border-zinc-300 bg-white px-1.5 py-1 text-xs text-zinc-800"
-                              />
+                              {r.no_equipment ? (
+                                <span className="text-zinc-300">—</span>
+                              ) : (
+                                <input
+                                  value={r.serial_numbers}
+                                  onChange={(e) => updateRow(r.key, { serial_numbers: e.target.value })}
+                                  placeholder="SN-001, SN-002…"
+                                  className="w-48 rounded border border-zinc-300 bg-white px-1.5 py-1 text-xs text-zinc-800"
+                                />
+                              )}
                             </td>
                             <td className="px-2 py-1.5 text-right">
                               <button
