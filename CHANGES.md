@@ -1,5 +1,15 @@
 # Constraints & Decisions Log
 
+## Metas semanales con semáforo (V55) — sin commit
+
+> Objetivos por métrica (equipo o técnico) que el resumen semanal evalúa con semáforo verde/ámbar/rojo, base para comparar horas y KPIs.
+
+- **Migración `068`**: tabla `attendance_goals` (métrica, `target`, `direction`, `technician_id` nulo = equipo; `scope_key` generado + único por scope/métrica). Métricas: `hours_worked`, `overtime`, `m2_per_hour`, `m2_installed`, `screens_installed`, `tickets_closed`.
+- **Lib** `web/app/lib/goals.ts`: `GOAL_METRICS` (etiqueta/unidad/dirección) y `evaluateGoal` (at_least: ok≥100%, warn≥80%; at_most: ok≤100%, warn≤120%).
+- **API** `GET/PUT/DELETE /api/attendance/goals`: consulta metas (equipo y/o técnico), upsert por (scope, métrica) y borrado.
+- **Resumen del equipo**: `team-summary` ahora devuelve `goals` evaluadas (actual/target/estado/ratio) y, por técnico, `hours_target`/`hours_status`. La UI muestra "Metas del equipo" con semáforo, un botón **Metas** (modal para definir/editar/quitar) y el avance de horas por técnico con color.
+- Verificado: metas creadas/consultadas, evaluación con semáforo (p. ej. horas 8.2/320 → rojo; extra 0.2/10 → verde) y limpieza de pruebas; `tsc` limpio; página 200.
+
 ## Resumen semanal por equipo + horas vs KPIs (V54) — sin commit
 
 > Vista semanal del equipo que combina horas trabajadas (asistencia) con los KPIs de la semana, como base para comparar desempeño.

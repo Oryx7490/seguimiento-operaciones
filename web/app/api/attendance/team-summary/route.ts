@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
 import { jsonOk, jsonError } from "@/app/lib/api";
 import { computeWeeklyMetrics } from "@/app/lib/kpi-weekly";
+import { GOAL_METRICS, evaluateGoal } from "@/app/lib/goals";
 
 export const runtime = "nodejs";
 
@@ -39,7 +40,7 @@ export async function GET(request: NextRequest) {
   const weekEnding = sunday.toISOString().slice(0, 10);
 
   try {
-    const [rows, total, kpis] = await Promise.all([
+    const [rows, total, kpis, goalsRes] = await Promise.all([
       pool.query(
         `SELECT a.technician_id, t.display_name,
                 COALESCE(sum(a.hours),0)::numeric AS hours,
@@ -63,37 +64,74 @@ export async function GET(request: NextRequest) {
         [monday, weekEnding]
       ),
       computeWeeklyMetrics(isoStart(monday), isoEnd(weekEnding), ""),
+      pool.query(`SELECT technician_id, metric, target FROM attendance_goals WHERE active = true`),
     ]);
 
     const kpiMap: Record<string, number> = {};
     for (const k of kpis) kpiMap[k.key] = Number(k.value);
 
+    const team = {
+      hours: Number(total.rows[0].hours),
+      overtime: Number(total.rows[0].overtime),
+      technicians: total.rows[0].technicians,
+      entries: total.rows[0].entries,
+    };
+    const kpiOut = {
+      m2_installed: kpiMap.m2_installed ?? 0,
+      mp_installed: kpiMap.mp_installed ?? 0,
+      screens_installed_count: kpiMap.screens_installed_count ?? 0,
+      projects_with_installed_screens: kpiMap.projects_with_installed_screens ?? 0,
+      controllers_installed_week: kpiMap.controllers_installed_week ?? 0,
+      tickets_closed_week: kpiMap.tickets_closed_week ?? 0,
+      activities_completed_week: kpiMap.activities_completed_week ?? 0,
+      hours_registered_week: kpiMap.hours_registered_week ?? 0,
+    };
+
+    // Valores reales por métrica (equipo).
+    const teamActuals: Record<string, number> = {
+      hours_worked: team.hours,
+      overtime: team.overtime,
+      m2_per_hour: team.hours > 0 ? kpiOut.m2_installed / team.hours : 0,
+      m2_installed: kpiOut.m2_installed,
+      screens_installed: kpiOut.screens_installed_count,
+      tickets_closed: kpiOut.tickets_closed_week,
+    };
+
+    const techGoals = new Map<string, number>(); // technician_id -> hours_worked target
+    const goals: Array<{ metric: string; label: string; unit: string; target: number; direction: string; actual: number; status: string; ratio: number | null }> = [];
+    for (const g of goalsRes.rows as { technician_id: string | null; metric: string; target: string }[]) {
+      if (g.technician_id) {
+        if (g.metric === "hours_worked") techGoals.set(g.technician_id, Number(g.target));
+        continue;
+      }
+      const meta = GOAL_METRICS[g.metric];
+      if (!meta) continue;
+      const actual = teamActuals[g.metric] ?? 0;
+      const target = Number(g.target);
+      const ev = evaluateGoal(actual, target, meta.direction);
+      goals.push({ metric: g.metric, label: meta.label, unit: meta.unit, target, direction: meta.direction, actual, status: ev.status, ratio: ev.ratio });
+    }
+
     return jsonOk({
       week: { start: monday, end: weekEnding },
-      team: {
-        hours: Number(total.rows[0].hours),
-        overtime: Number(total.rows[0].overtime),
-        technicians: total.rows[0].technicians,
-        entries: total.rows[0].entries,
-      },
-      technicians: rows.rows.map((r: { technician_id: string; display_name: string; hours: string; overtime: string; entries: number; days: number }) => ({
-        technician_id: r.technician_id,
-        display_name: r.display_name,
-        hours: Number(r.hours),
-        overtime: Number(r.overtime),
-        entries: r.entries,
-        days: r.days,
-      })),
-      kpis: {
-        m2_installed: kpiMap.m2_installed ?? 0,
-        mp_installed: kpiMap.mp_installed ?? 0,
-        screens_installed_count: kpiMap.screens_installed_count ?? 0,
-        projects_with_installed_screens: kpiMap.projects_with_installed_screens ?? 0,
-        controllers_installed_week: kpiMap.controllers_installed_week ?? 0,
-        tickets_closed_week: kpiMap.tickets_closed_week ?? 0,
-        activities_completed_week: kpiMap.activities_completed_week ?? 0,
-        hours_registered_week: kpiMap.hours_registered_week ?? 0,
-      },
+      team,
+      technicians: rows.rows.map((r: { technician_id: string; display_name: string; hours: string; overtime: string; entries: number; days: number }) => {
+        const hoursTarget = techGoals.get(r.technician_id);
+        const hours = Number(r.hours);
+        const ev = hoursTarget != null ? evaluateGoal(hours, hoursTarget, "at_least") : null;
+        return {
+          technician_id: r.technician_id,
+          display_name: r.display_name,
+          hours,
+          overtime: Number(r.overtime),
+          entries: r.entries,
+          days: r.days,
+          hours_target: hoursTarget ?? null,
+          hours_status: ev?.status ?? null,
+        };
+      }),
+      kpis: kpiOut,
+      goals,
     });
   } catch (err) {
     return jsonError("No se pudo generar el resumen del equipo", 500, String(err));
