@@ -85,6 +85,46 @@ export function hoursBetween(checkIn: string | null, checkOut: string | null): n
   return Math.round((diff / 60) * 100) / 100;
 }
 
+/** Minutos desde medianoche de un "HH:MM[:SS]"; null si no es válido. */
+function minutesOf(t: string | null | undefined): number | null {
+  if (!t) return null;
+  const [h, m] = t.split(":").map(Number);
+  if (Number.isNaN(h)) return null;
+  return h * 60 + (m ?? 0);
+}
+
+/**
+ * Suma las horas de un día a partir de sus tramos (segmentos).
+ * Empareja tramos con solo inicio con el siguiente tramo con solo fin,
+ * de modo que una entrada y una salida aprobadas por separado sumen horas.
+ * Los tramos con ambos extremos aportan su duración directa.
+ */
+export function computeSegmentsHours(segments: { started_at: string | null; ended_at: string | null }[]): number {
+  const intervals: [number, number][] = [];
+  const starts: number[] = [];
+  const ends: number[] = [];
+  for (const s of segments) {
+    const a = minutesOf(s.started_at);
+    const b = minutesOf(s.ended_at);
+    if (a != null && b != null) intervals.push([a, b]);
+    else if (a != null) starts.push(a);
+    else if (b != null) ends.push(b);
+  }
+  starts.sort((x, y) => x - y);
+  ends.sort((x, y) => x - y);
+  const usedEnds = new Set<number>();
+  for (const a of starts) {
+    const idx = ends.findIndex((b, i) => !usedEnds.has(i) && b >= a);
+    if (idx >= 0) {
+      usedEnds.add(idx);
+      intervals.push([a, ends[idx]]);
+    }
+  }
+  let mins = 0;
+  for (const [a, b] of intervals) mins += b >= a ? b - a : b + 24 * 60 - a;
+  return Math.round((mins / 60) * 100) / 100;
+}
+
 function isoWeekKey(date: string): string {
   const [y, m, d] = date.split("-").map(Number);
   const dt = new Date(Date.UTC(y, m - 1, d));

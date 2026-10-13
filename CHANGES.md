@@ -1,5 +1,14 @@
 # Constraints & Decisions Log
 
+## Resumen semanal por equipo + horas vs KPIs (V54) — sin commit
+
+> Vista semanal del equipo que combina horas trabajadas (asistencia) con los KPIs de la semana, como base para comparar desempeño.
+
+- **API** `GET /api/attendance/team-summary?from=YYYY-MM-DD` (semana lunes–domingo de `from`): totales del equipo (horas, extra, técnicos, registros), detalle por técnico y **KPIs calculados en vivo** con `computeWeeklyMetrics` (m²/pantallas/controladores instalados, tickets cerrados, actividades, horas en actividades).
+- **UI** `/admin/resumen-equipo` (nav «Resumen del equipo», mark `V53`): navegación de semanas, tarjetas de horas y de KPIs, bloque **"Horas vs KPIs"** (asistencias, horas en actividades, diferencia y **m² por hora**) y tabla por técnico con enlace a su perfil de horas.
+- **Corrección de horas**: `computeSegmentsHours` empareja tramos de entrada y salida aprobados por separado (antes quedaban en 0). Se usa al aprobar candidatos; nuevo `POST /api/attendance/recompute` recalcula entradas/horas desde los segmentos y recomputa horas extra (se ejecutó y corrigió los días existentes).
+- Verificado: `Marco Martínez` quedó con 8.20 h y 0.20 h extra; resumen semanal correcto; páginas 200; `tsc` limpio.
+
 ## Perfil de horas por técnico (V52) — sin commit
 
 > Página por técnico para revisar horas trabajadas y horas extra por **día, semana, mes o año**, más mejoras a la bandeja de asistencia.

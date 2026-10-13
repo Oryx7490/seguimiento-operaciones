@@ -51,6 +51,7 @@ export const ADMIN_SUB: readonly NavItem[] = [
   { href: "/admin/cierre", label: "Cierre", section: "admin.cierre", keywords: "cierre proyectos" },
   { href: "/admin/horas-extra", label: "Horas extra", section: "admin.horas_extra", keywords: "overtime tiempo" },
   { href: "/admin/asistencia-fotos", label: "Asistencia por fotos", section: "admin.asistencia_fotos", keywords: "checador whatsapp entradas salidas jornada" },
+  { href: "/admin/resumen-equipo", label: "Resumen del equipo", section: "admin.asistencia_fotos", keywords: "horas kpis semana equipo" },
   { href: "/admin/kpis-semanales", label: "KPIs semanales", section: "admin.kpis_semanales", keywords: "metricas indicadores" },
   { href: "/admin/notificaciones", label: "Notificaciones", section: "admin.notificaciones", keywords: "avisos alertas config" },
   { href: "/bitacora", label: "Bitácora", section: "bitacora", keywords: "log auditoria historial" },

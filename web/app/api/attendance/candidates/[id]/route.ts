@@ -3,7 +3,7 @@ import type { PoolClient } from "pg";
 import pool from "@/app/lib/db";
 import { jsonOk, jsonError, parseId, getCurrentUserId } from "@/app/lib/api";
 import { asNumber, getSettings } from "@/app/lib/notifications";
-import { computeOvertime, hoursBetween, parseTime } from "@/app/lib/overtime";
+import { computeOvertime, computeSegmentsHours, hoursBetween, parseTime } from "@/app/lib/overtime";
 
 export const runtime = "nodejs";
 
@@ -121,15 +121,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       [technicianId, eventDate, started, ended, hours, id]
     );
 
-    // Agrega el día a partir de los segmentos.
-    const agg = await client.query(
-      `SELECT to_char(min(started_at),'HH24:MI:SS') AS check_in,
-              to_char(max(ended_at),'HH24:MI:SS') AS check_out,
-              COALESCE(sum(hours), 0)::numeric AS hours
+    // Agrega el día a partir de los segmentos (empareja entradas y salidas sueltas).
+    const segs = await client.query(
+      `SELECT to_char(started_at,'HH24:MI:SS') AS started_at, to_char(ended_at,'HH24:MI:SS') AS ended_at
          FROM attendance_segments WHERE technician_id = $1 AND date = $2`,
       [technicianId, eventDate]
     );
-    const dayAgg = agg.rows[0];
+    const startsOnly = segs.rows.map((r: { started_at: string | null }) => r.started_at).filter(Boolean).sort();
+    const endsOnly = segs.rows.map((r: { ended_at: string | null }) => r.ended_at).filter(Boolean).sort();
+    const dayAgg = {
+      check_in: startsOnly.length > 0 ? startsOnly[0] : null,
+      check_out: endsOnly.length > 0 ? endsOnly[endsOnly.length - 1] : null,
+      hours: computeSegmentsHours(segs.rows),
+    };
 
     await client.query(
       `INSERT INTO attendance_entries (technician_id, person_name, date, check_in, check_out, hours)

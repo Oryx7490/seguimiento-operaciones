@@ -36,6 +36,7 @@ const PAGES: { path: string; id: string; exact?: boolean }[] = [
   { path: "/admin/cierre", id: "V24" },
   { path: "/admin/horas-extra", id: "V25" },
   { path: "/admin/asistencia-fotos", id: "V52" },
+  { path: "/admin/resumen-equipo", id: "V53" },
   { path: "/admin/horas-hombre", id: "V26" },
   { path: "/admin/notificaciones", id: "V27" },
   { path: "/admin/agentes", id: "V28" },
