@@ -1,5 +1,16 @@
 # Constraints & Decisions Log
 
+## Asistencia derivada de fotos (candidatos + revisión) (V51) — sin commit
+
+> Convierte el texto OCR de las fotos de checador en **candidatos de entrada/salida**, con identificación del técnico por remitente + rostro, y una **bandeja de revisión** humana que, al confirmar, registra horas. Segmentos por día habilitan dobles/triples turnos.
+
+- **Migración `066`**: `attendance_candidates` (foto, remitente, técnico resuelto, tipo, fecha/hora, jornada, horas, ubicación, app, `ambiguity` jsonb, estado) y `attendance_segments` (tramos entrada–salida por técnico/día). **Migración `067`**: sección RBAC `admin.asistencia_fotos`.
+- **Worker** (`worker/src/attendance-candidates.js`): por cada OCR completado crea un candidato; resuelve al técnico por **contacto de WhatsApp → alias → nombre del roster → rostro**; marca ambigüedades (`tecnico_desconocido`, `varios_tecnicos`, `sin_fecha`, `sin_hora`, `tipo_desconocido`, `hora_vs_jornada`) y una confianza; no escribe en asistencia.
+- **API**: `GET /api/attendance/candidates` (filtros estado/fecha/técnico) y `POST /api/attendance/candidates/{id}` con `action: approve|reject`. Al **aprobar**: crea un `attendance_segment`, recalcula el día (`attendance_entries`: primera entrada, última salida, suma de horas) y **recomputa horas extra** de la semana con `computeOvertime`; además **aprende** el mapeo remitente→técnico en `technician_contacts`.
+- **UI** `/admin/asistencia-fotos` (nav «Asistencia por fotos», mark `V52`): pestañas por estado, filtros, miniatura, remitente, selección de técnico/tipo, señales de ambigüedad y acciones Registrar/Rechazar.
+- Reglas acordadas: identificación remitente+rostro; **múltiples segmentos por día**; se usa toda la señal (marca de agua con mayor peso, jornada Timemark y caption) marcando ambigüedades; **revisión humana** antes de registrar.
+- Verificado: 19 candidatos generados; aprobación de prueba creó segmento + entrada diaria + aprendizaje de contacto y se revirtió; `tsc` limpio; build/arranque OK.
+
 ## Lectura de texto (OCR) en fotos de WhatsApp (V50) — sin commit
 
 > Extrae el texto de cada foto (apps tipo **Timemark** y cámara con marca de agua) y propone un candidato de asistencia para revisarlo; aún no escribe en `attendance_entries` (pendiente definir reglas).

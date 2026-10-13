@@ -2,6 +2,7 @@ import "dotenv/config";
 import pg from "pg";
 import { runFaceScan, runFaceTraining } from "./faces.js";
 import { runOcrScan } from "./ocr.js";
+import { runAttendanceCandidates } from "./attendance-candidates.js";
 
 const connectionString = process.env.DATABASE_URL;
 const webUrl = process.env.WEB_INTERNAL_URL || "http://web:3000";
@@ -82,6 +83,10 @@ async function main() {
         const o = await runOcrScan({ pool, webUrl, faceUrl });
         if (o.pending > 0) {
           console.log(`[ocr] ${new Date().toISOString()} pendientes=${o.pending} procesadas=${o.processed} fallidas=${o.failed}`);
+        }
+        const c = await runAttendanceCandidates({ pool });
+        if (c.processed > 0) {
+          console.log(`[asistencia] ${new Date().toISOString()} candidatos=${c.processed}`);
         }
       } catch (err) {
         console.error("[ocr] error en escaneo:", err.message);
