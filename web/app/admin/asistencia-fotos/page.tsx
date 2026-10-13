@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { fetchJson, useResource } from "@/app/lib/client";
-import { Badge, EmptyState, SecondaryButton, Select, Spinner, TextInput } from "@/app/components/ui";
+import { Badge, EmptyState, Modal, SecondaryButton, Select, Spinner, TextInput } from "@/app/components/ui";
 
 interface Candidate {
   id: string;
@@ -69,6 +70,7 @@ export default function AttendancePhotosPage() {
   const { data, error, reload } = useResource<{ items: Candidate[]; total: number }>(`/api/attendance/candidates?${query}`);
   const items = data?.items ?? [];
   const loading = !data && !error;
+  const [zoom, setZoom] = useState<Candidate | null>(null);
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -147,18 +149,43 @@ export default function AttendancePhotosPage() {
               </thead>
               <tbody className="divide-y divide-zinc-100">
                 {filtered.map((c) => (
-                  <Row key={c.id} candidate={c} techs={techs.data?.technicians ?? []} onDone={reload} />
+                  <Row key={c.id} candidate={c} techs={techs.data?.technicians ?? []} onDone={reload} onZoom={setZoom} />
                 ))}
               </tbody>
             </table>
           </div>
         )}
       </div>
+
+      {zoom && (
+        <Modal open={true} onClose={() => setZoom(null)} title={zoom.sender_display_name || "Foto"} wide>
+          <div className="flex justify-center rounded-md bg-zinc-900 p-1">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={`/api/whatsapp/media/${zoom.sha256}`} alt="" className="max-h-[70vh] w-auto" />
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-3">
+            <div><p className="text-[11px] uppercase text-zinc-400">Fecha</p><p className="text-zinc-700">{zoom.event_date ?? "—"}</p></div>
+            <div><p className="text-[11px] uppercase text-zinc-400">Hora</p><p className="text-zinc-700">{zoom.event_time ?? (zoom.shift_in ? `${zoom.shift_in}–${zoom.shift_out ?? "?"}` : "—")}</p></div>
+            <div><p className="text-[11px] uppercase text-zinc-400">Tipo</p><p className="text-zinc-700">{zoom.event_type ?? "—"}</p></div>
+            {zoom.location && <div className="col-span-2 sm:col-span-3"><p className="text-[11px] uppercase text-zinc-400">Ubicación</p><p className="text-zinc-700">{zoom.location}</p></div>}
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
 
-function Row({ candidate, techs, onDone }: { candidate: Candidate; techs: Tech[]; onDone: () => void }) {
+function Row({
+  candidate,
+  techs,
+  onDone,
+  onZoom,
+}: {
+  candidate: Candidate;
+  techs: Tech[];
+  onDone: () => void;
+  onZoom: (c: Candidate) => void;
+}) {
   const [techId, setTechId] = useState(candidate.technician_id ?? "");
   const [type, setType] = useState(candidate.event_type ?? "");
   const [busy, setBusy] = useState(false);
@@ -192,8 +219,10 @@ function Row({ candidate, techs, onDone }: { candidate: Candidate; techs: Tech[]
   return (
     <tr className="align-top hover:bg-zinc-50">
       <td className="px-3 py-2">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={`/api/whatsapp/media/${candidate.sha256}/thumb`} alt="" loading="lazy" className="h-14 w-14 rounded object-cover" />
+        <button type="button" onClick={() => onZoom(candidate)} title="Ver foto" className="block">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={`/api/whatsapp/media/${candidate.sha256}/thumb`} alt="" loading="lazy" className="h-14 w-14 rounded object-cover" />
+        </button>
       </td>
       <td className="px-3 py-2">
         <div className="text-xs font-medium text-zinc-700">{candidate.sender_display_name || candidate.sender_id || "—"}</div>
@@ -211,6 +240,11 @@ function Row({ candidate, techs, onDone }: { candidate: Candidate; techs: Tech[]
             options={techs.map((t) => ({ value: t.id, label: t.display_name }))}
             className="min-w-44"
           />
+        )}
+        {techId && (
+          <Link href={`/admin/tecnicos/${techId}/horas`} className="mt-1 block text-[11px] text-sky-700 hover:underline">
+            Ver horas →
+          </Link>
         )}
       </td>
       <td className="px-3 py-2 text-zinc-600">{candidate.event_date ?? "—"}</td>

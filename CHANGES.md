@@ -1,5 +1,14 @@
 # Constraints & Decisions Log
 
+## Perfil de horas por técnico (V52) — sin commit
+
+> Página por técnico para revisar horas trabajadas y horas extra por **día, semana, mes o año**, más mejoras a la bandeja de asistencia.
+
+- **API** `GET /api/technicians/{id}/hours?granularity=day|week|month|year&from=&to=`: agrega `attendance_entries` por periodo (`date_trunc`), devuelve periodos (horas, extra, registros, entrada/salida, incompleto) y totales; incluye los `attendance_segments` (tramos) para el detalle.
+- **UI** `/admin/tecnicos/{id}/horas`: selector Día/Semana/Mes/Año, rango de fechas, tarjetas de totales (horas, extra, registros), tabla por periodo (con entrada/salida y marca "incompleto" en vista diaria) y listado de tramos por día. Enlace "Horas trabajadas" desde el expediente del técnico.
+- **Bandeja de asistencia** (`/admin/asistencia-fotos`): la miniatura abre la **foto en grande** (modal con fecha/hora/tipo/ubicación) y cada técnico seleccionado ofrece "Ver horas →" a su perfil.
+- Verificado: agregación correcta (día/semana/mes/año) con datos de prueba; páginas 200; `tsc` limpio.
+
 ## Asistencia derivada de fotos (candidatos + revisión) (V51) — sin commit
 
 > Convierte el texto OCR de las fotos de checador en **candidatos de entrada/salida**, con identificación del técnico por remitente + rostro, y una **bandeja de revisión** humana que, al confirmar, registra horas. Segmentos por día habilitan dobles/triples turnos.

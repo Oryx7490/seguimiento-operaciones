@@ -135,6 +135,12 @@ export default function TechnicianFilePage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Link
+            href={`/admin/tecnicos/${id}/horas`}
+            className="rounded-md border border-zinc-200 px-2.5 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+          >
+            Horas trabajadas
+          </Link>
           {t.technician_active && t.user_active ? (
             <Badge className="bg-emerald-100 text-emerald-700">Activo</Badge>
           ) : (
