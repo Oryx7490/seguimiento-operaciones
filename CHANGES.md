@@ -1,5 +1,19 @@
 # Constraints & Decisions Log
 
+## Captura manual de fecha/hora y discrepancia (V56) — sin commit
+
+> En la bandeja de asistencia (V52) el revisor puede **escribir la fecha y las horas** cuando la foto no las trae, y el sistema marca la **discrepancia** cuando lo capturado difiere de lo leído en la imagen.
+
+- **Migración `069`**: `attendance_candidates` conserva `image_time`/`image_date` (valor OCR) y agrega `manual_override` y `override_note`. El worker guarda `image_time`/`image_date` al crear el candidato.
+- **API**: la lista devuelve los nuevos campos; al aprobar, si la imagen **sí** traía hora/fecha y lo capturado difiere, se marca `manual_override`, se guarda una nota ("Imagen: … · Manual: …") y se añade `discrepancia_hora` a las señales. Si la imagen no traía datos, la captura es normal (sin discrepancia).
+- **UI** `/admin/asistencia-fotos`: inputs de **fecha, entrada y salida** por candidato (prefill con lo leído), referencia "imagen: …", aviso en vivo "discrepancia con la imagen" y, en registrados, "ajuste manual".
+- Verificado: captura manual 08:15–17:45 → 9.5 h sin discrepancia (imagen vacía); cambio 21:20 → 22:00 marcado como discrepancia con nota. `tsc` limpio.
+
+## Búsqueda de mensaje de WhatsApp de las 07:33 (2026-10-13) — sin commit
+
+- Se buscó en la base para el 13 de octubre, hora `America/Mexico_City`, en el rango 07:28–07:38; no hay mensaje guardado. El último mensaje del grupo en PostgreSQL al momento de la consulta era de las 06:14:32.
+- El journal no registra entrada de WhatsApp a las 07:33. Sí registra recuperación de una conexión obsoleta a las 07:35:36 (UTC 13:35:36); los datos disponibles no permiten afirmar que esa conexión causara la ausencia ni recuperar el contenido.
+
 ## Metas semanales con semáforo (V55) — sin commit
 
 > Objetivos por métrica (equipo o técnico) que el resumen semanal evalúa con semáforo verde/ámbar/rojo, base para comparar horas y KPIs.

@@ -19,6 +19,10 @@ interface Candidate {
   event_time: string | null;
   shift_in: string | null;
   shift_out: string | null;
+  image_time: string | null;
+  image_date: string | null;
+  manual_override: boolean;
+  override_note: string | null;
   worked_hours: number | null;
   location: string | null;
   app: string | null;
@@ -41,6 +45,7 @@ const AMB: Record<string, string> = {
   sin_hora: "Sin hora",
   tipo_desconocido: "Sin tipo",
   hora_vs_jornada: "Hora ≠ jornada",
+  discrepancia_hora: "Discrepancia hora",
 };
 
 const TABS = [
@@ -191,6 +196,21 @@ function Row({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  const imageStart = candidate.shift_in ?? (candidate.event_type === "entrada" ? candidate.image_time : null);
+  const imageEnd = candidate.shift_out ?? (candidate.event_type === "salida" ? candidate.image_time : null);
+  const toInput = (t: string | null) => (t ? t.slice(0, 5) : "");
+  const hms = (t: string | null) => (t ? (t.length === 5 ? `${t}:00` : t.slice(0, 8)) : null);
+
+  const [date, setDate] = useState(candidate.event_date ?? candidate.image_date ?? "");
+  const [entrada, setEntrada] = useState(toInput(imageStart ?? candidate.event_time));
+  const [salida, setSalida] = useState(toInput(imageEnd));
+
+  const imageHasTime = imageStart != null || imageEnd != null;
+  const imageHasDate = candidate.image_date != null;
+  const discrepancy =
+    (imageHasTime && (hms(entrada || null) !== hms(imageStart) || hms(salida || null) !== hms(imageEnd))) ||
+    (imageHasDate && date !== candidate.image_date);
+
   const done = candidate.status !== "pending";
 
   async function act(action: "approve" | "reject") {
@@ -201,7 +221,15 @@ function Row({
         method: "POST",
         body: JSON.stringify({
           action,
-          ...(action === "approve" ? { technician_id: techId || undefined, event_type: type || undefined } : {}),
+          ...(action === "approve"
+            ? {
+                technician_id: techId || undefined,
+                event_type: type || undefined,
+                event_date: date || undefined,
+                shift_in: entrada || null,
+                shift_out: salida || null,
+              }
+            : {}),
         }),
       });
       onDone();
@@ -247,10 +275,58 @@ function Row({
           </Link>
         )}
       </td>
-      <td className="px-3 py-2 text-zinc-600">{candidate.event_date ?? "—"}</td>
       <td className="px-3 py-2 text-zinc-600">
-        {timeCell}
-        {candidate.worked_hours != null && <div className="text-[11px] text-zinc-400">{candidate.worked_hours} h</div>}
+        {done ? (
+          <span>{candidate.event_date ?? "—"}</span>
+        ) : (
+          <>
+            <input
+              type="date"
+              value={date}
+              onChange={(e) => setDate(e.target.value)}
+              className="w-36 rounded-md border border-zinc-300 px-1.5 py-1 text-xs"
+            />
+            {candidate.image_date && date !== candidate.image_date && (
+              <div className="mt-0.5 text-[10px] text-amber-600">imagen: {candidate.image_date}</div>
+            )}
+          </>
+        )}
+      </td>
+      <td className="px-3 py-2 text-zinc-600">
+        {done ? (
+          <>
+            {timeCell}
+            {candidate.worked_hours != null && <div className="text-[11px] text-zinc-400">{candidate.worked_hours} h</div>}
+            {candidate.manual_override && <div className="mt-0.5 text-[10px] font-medium text-amber-600">ajuste manual</div>}
+          </>
+        ) : (
+          <div className="space-y-1">
+            <label className="flex items-center gap-1 text-[11px] text-zinc-500">
+              <span className="w-12">Entrada</span>
+              <input
+                type="time"
+                value={entrada}
+                onChange={(e) => setEntrada(e.target.value)}
+                className="w-24 rounded-md border border-zinc-300 px-1.5 py-1 text-xs"
+              />
+            </label>
+            <label className="flex items-center gap-1 text-[11px] text-zinc-500">
+              <span className="w-12">Salida</span>
+              <input
+                type="time"
+                value={salida}
+                onChange={(e) => setSalida(e.target.value)}
+                className="w-24 rounded-md border border-zinc-300 px-1.5 py-1 text-xs"
+              />
+            </label>
+            {(imageStart || imageEnd || candidate.image_time) && (
+              <div className="text-[10px] text-zinc-400">
+                imagen: {imageStart ?? candidate.image_time ?? "—"} – {imageEnd ?? "—"}
+              </div>
+            )}
+            {discrepancy && <div className="text-[10px] font-medium text-amber-600">discrepancia con la imagen</div>}
+          </div>
+        )}
       </td>
       <td className="px-3 py-2">
         {done ? (

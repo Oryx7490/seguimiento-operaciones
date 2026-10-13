@@ -64,7 +64,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       `SELECT id, technician_id, sender_id, event_type, to_char(event_date,'YYYY-MM-DD') AS event_date,
               to_char(event_time,'HH24:MI:SS') AS event_time,
               to_char(shift_in,'HH24:MI:SS') AS shift_in,
-              to_char(shift_out,'HH24:MI:SS') AS shift_out
+              to_char(shift_out,'HH24:MI:SS') AS shift_out,
+              to_char(image_time,'HH24:MI:SS') AS image_time,
+              to_char(image_date,'YYYY-MM-DD') AS image_date
          FROM attendance_candidates WHERE id = $1 FOR UPDATE`,
       [id]
     );
@@ -107,6 +109,19 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return jsonError("El candidato no tiene hora de entrada ni de salida");
     }
     const hours = hoursBetween(started, ended);
+
+    // Discrepancia: solo si la imagen traía hora/fecha y lo capturado difiere.
+    const imageStart = candidate.shift_in || (candidate.event_type === "entrada" ? candidate.image_time : null);
+    const imageEnd = candidate.shift_out || (candidate.event_type === "salida" ? candidate.image_time : null);
+    const norm = (t: string | null) => (t ? t.slice(0, 8) : null);
+    const imageHasTime = imageStart != null || imageEnd != null;
+    const imageHasDate = candidate.image_date != null;
+    const timeDiffers = imageHasTime && (norm(started) !== norm(imageStart) || norm(ended) !== norm(imageEnd));
+    const dateDiffers = imageHasDate && eventDate !== candidate.image_date;
+    const manualOverride = timeDiffers || dateDiffers;
+    const overrideNote = manualOverride
+      ? `Imagen: ${imageStart ?? "—"}–${imageEnd ?? "—"}${candidate.image_date ? ` (${candidate.image_date})` : ""} · Manual: ${started ?? "—"}–${ended ?? "—"} (${eventDate})`
+      : null;
 
     const techRes = await client.query(`SELECT display_name FROM technicians WHERE id = $1`, [technicianId]);
     if (techRes.rowCount === 0) {
@@ -153,9 +168,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       `UPDATE attendance_candidates
           SET status = 'registered', technician_id = $2, event_date = $3, event_type = $4,
               event_time = COALESCE($5, event_time), shift_in = COALESCE($6, shift_in), shift_out = COALESCE($7, shift_out),
-              reviewed_by = $8, reviewed_at = now()
+              reviewed_by = $8, reviewed_at = now(),
+              manual_override = $9, override_note = $10,
+              ambiguity = CASE WHEN $9 THEN (ambiguity || '["discrepancia_hora"]'::jsonb) ELSE ambiguity END
         WHERE id = $1`,
-      [id, technicianId, eventDate, eventType, eventTime, shiftIn, shiftOut, reviewer]
+      [id, technicianId, eventDate, eventType, eventTime, shiftIn, shiftOut, reviewer, manualOverride, overrideNote]
     );
 
     // Aprende el mapeo remitente -> técnico para futuras fotos.
