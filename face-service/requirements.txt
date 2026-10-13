@@ -4,3 +4,5 @@ numpy==1.26.4
 onnxruntime==1.17.1
 Cython==0.29.36
 insightface==0.7.3
+pytesseract==0.3.13
+Pillow==11.1.0

@@ -41,7 +41,7 @@ export async function GET(request: NextRequest) {
   if (tag) add("EXISTS (SELECT 1 FROM whatsapp_capture.media_tags t WHERE t.sha256 = mm.sha256 AND lower(t.tag) = lower($N))", tag);
   if (q) {
     add(
-      "(m.body_text ILIKE '%' || $N || '%' OR mm.file_name ILIKE '%' || $N || '%' OR m.sender_display_name ILIKE '%' || $N || '%')",
+      "(m.body_text ILIKE '%' || $N || '%' OR mm.file_name ILIKE '%' || $N || '%' OR m.sender_display_name ILIKE '%' || $N || '%' OR EXISTS (SELECT 1 FROM whatsapp_capture.media_analyses a WHERE a.sha256 = mm.sha256 AND a.analysis_type = 'ocr' AND a.result->>'text' ILIKE '%' || $N || '%'))",
       q
     );
   }

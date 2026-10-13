@@ -1,5 +1,16 @@
 # Constraints & Decisions Log
 
+## Lectura de texto (OCR) en fotos de WhatsApp (V50) — sin commit
+
+> Extrae el texto de cada foto (apps tipo **Timemark** y cámara con marca de agua) y propone un candidato de asistencia para revisarlo; aún no escribe en `attendance_entries` (pendiente definir reglas).
+
+- **face-service** (`/ocr`): Tesseract (`spa+eng`) instalado en la imagen; preprocesa (escala a ≥1600px, escala de grises), devuelve texto, líneas y confianza media.
+- **Worker** (`worker/src/ocr.js`): job que toma fotos sin análisis `ocr`, llama a `/ocr` y guarda `media_analyses` (`analysis_type='ocr'`) con texto, líneas, confianza y `parsed`. Se ejecuta junto al escaneo de rostros (cada 6h).
+- **Parser** (`worker/src/attendance-parse.js`): de las líneas + el caption infiere `date`, `time`, `type` (entrada/salida por palabras del caption: "me retiro"→salida, "buen día"→entrada), **jornada** `shift_in`/`shift_out` (Timemark "Trabajo 09:42 - 19:55"), `worked_hours`, `location`, `code` y `app`.
+- **API**: `GET /api/whatsapp/media/{sha256}/ocr` (texto + candidato). La búsqueda `?q=` de la galería ahora también **busca dentro del texto OCR**.
+- **UI `/whatsapp`**: en el visor se muestra "Texto detectado (OCR)" con el candidato (fecha, hora, tipo, entrada/salida, horas, ubicación, código, app) y el texto completo desplegable; marca "posible registro de asistencia".
+- Verificado con fotos reales: 19/19 procesadas; se reconocieron fecha, ubicación y jornadas (p. ej. `09:42–19:55`, 10.18 h); la búsqueda por texto OCR devuelve resultados.
+
 ## 0.4.6 — RC (2026-10-13)
 
 Release candidate con el mayor salto de la app: permisos por perfil, KPIs semanales, estrategia de fotos de WhatsApp y reconocimiento facial.

@@ -1,6 +1,7 @@
 import "dotenv/config";
 import pg from "pg";
 import { runFaceScan, runFaceTraining } from "./faces.js";
+import { runOcrScan } from "./ocr.js";
 
 const connectionString = process.env.DATABASE_URL;
 const webUrl = process.env.WEB_INTERNAL_URL || "http://web:3000";
@@ -76,6 +77,14 @@ async function main() {
         }
       } catch (err) {
         console.error("[faces] error en escaneo:", err.message);
+      }
+      try {
+        const o = await runOcrScan({ pool, webUrl, faceUrl });
+        if (o.pending > 0) {
+          console.log(`[ocr] ${new Date().toISOString()} pendientes=${o.pending} procesadas=${o.processed} fallidas=${o.failed}`);
+        }
+      } catch (err) {
+        console.error("[ocr] error en escaneo:", err.message);
       }
     };
     const faceTraining = async () => {

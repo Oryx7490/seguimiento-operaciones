@@ -24,6 +24,26 @@ interface FaceItem {
   user_id: string | null;
 }
 
+interface OcrParsed {
+  date: string | null;
+  time: string | null;
+  type: string | null;
+  shift_in: string | null;
+  shift_out: string | null;
+  worked_hours: number | null;
+  location: string | null;
+  code: string | null;
+  app: string | null;
+}
+
+interface OcrData {
+  state: string;
+  text: string;
+  lines: string[];
+  mean_conf: number | null;
+  parsed: OcrParsed | null;
+}
+
 interface MediaItem {
   media_id: string;
   sha256: string;
@@ -426,6 +446,7 @@ function PhotoDetail({
   const facesRes = useResource<{ faces: FaceItem[]; width: number | null; height: number | null }>(
     `/api/whatsapp/media/${item.sha256}/faces`
   );
+  const ocrRes = useResource<{ ocr: OcrData | null }>(`/api/whatsapp/media/${item.sha256}/ocr`);
   const usersRes = useResource<{ users: { id: string; name: string }[] }>("/api/users");
   const [hoverFace, setHoverFace] = useState<string | null>(null);
 
@@ -589,6 +610,10 @@ function PhotoDetail({
 
   const noteDirty = note.trim() !== savedNote;
 
+  const ocr = ocrRes.data?.ocr ?? null;
+  const op = ocr?.parsed ?? null;
+  const isAttendance = Boolean(op?.app) || Boolean(op?.date && (op?.time || op?.shift_in));
+
   return (
     <Modal open={true} onClose={onClose} title={item.file_name || "Archivo"} wide>
       <div className="space-y-4">
@@ -695,6 +720,40 @@ function PhotoDetail({
           {item.caption && <Info label="Leyenda" value={item.caption} full />}
           {item.size_bytes != null && <Info label="Tamaño" value={`${(item.size_bytes / 1024).toLocaleString("es-MX", { maximumFractionDigits: 0 })} KB`} />}
         </div>
+
+        {ocr && (op || ocr.text.trim()) && (
+          <div>
+            <p className="mb-1 flex flex-wrap items-center gap-2 text-xs font-medium text-zinc-600">
+              Texto detectado (OCR)
+              {op?.app && (
+                <span className="rounded bg-zinc-100 px-1.5 py-0.5 text-[10px] font-normal uppercase text-zinc-500">{op.app}</span>
+              )}
+              {isAttendance && (
+                <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
+                  posible registro de asistencia
+                </span>
+              )}
+            </p>
+            {op && (
+              <div className="mb-2 grid grid-cols-2 gap-x-4 gap-y-1 rounded-md border border-zinc-200 bg-zinc-50 p-2 sm:grid-cols-3">
+                {op.date && <Info label="Fecha" value={op.date} />}
+                {op.time && <Info label="Hora" value={op.time} />}
+                {op.type && <Info label="Tipo" value={op.type} />}
+                {op.shift_in && <Info label="Entrada" value={op.shift_in} />}
+                {op.shift_out && <Info label="Salida" value={op.shift_out} />}
+                {op.worked_hours != null && <Info label="Horas" value={String(op.worked_hours)} />}
+                {op.code && <Info label="Código" value={op.code} />}
+                {op.location && <Info label="Ubicación" value={op.location} full />}
+              </div>
+            )}
+            <details className="text-xs text-zinc-500">
+              <summary className="cursor-pointer select-none">Ver texto completo ({ocr.lines.length} líneas)</summary>
+              <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-zinc-100 p-2 text-[11px] text-zinc-600">
+                {ocr.text}
+              </pre>
+            </details>
+          </div>
+        )}
 
         <div>
           <p className="mb-1 text-xs font-medium text-zinc-600">Nota</p>

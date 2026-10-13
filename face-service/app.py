@@ -4,6 +4,7 @@ import os
 
 import cv2
 import numpy as np
+import pytesseract
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from insightface.app import FaceAnalysis
@@ -12,6 +13,7 @@ MODEL_PACK = os.environ.get("FACE_MODEL_PACK", "buffalo_l")
 DET_SIZE = int(os.environ.get("FACE_DET_SIZE", "640"))
 MIN_SCORE = float(os.environ.get("FACE_MIN_SCORE", "0.5"))
 MODEL_ROOT = os.environ.get("INSIGHTFACE_HOME", "/models")
+OCR_LANG = os.environ.get("OCR_LANG", "spa+eng")
 
 app = FastAPI(title="face-service", version="1.0.0")
 analyzer: FaceAnalysis | None = None
@@ -26,7 +28,7 @@ def load_model() -> None:
 
 @app.get("/health")
 def health() -> dict:
-    return {"status": "ok", "model": MODEL_PACK, "ready": analyzer is not None, "dim": 512, "det_size": DET_SIZE}
+    return {"status": "ok", "model": MODEL_PACK, "ready": analyzer is not None, "dim": 512, "det_size": DET_SIZE, "ocr_lang": OCR_LANG}
 
 
 class DetectRequest(BaseModel):
@@ -79,3 +81,43 @@ def detect(req: DetectRequest) -> dict:
 
     results.sort(key=lambda r: r["det_score"], reverse=True)
     return {"width": width, "height": height, "count": len(results), "faces": results}
+
+
+class OcrRequest(BaseModel):
+    image_base64: str
+    lang: str | None = None
+
+
+def _preprocess_for_ocr(img: np.ndarray) -> np.ndarray:
+    # Las marcas de agua (hora/fecha/ubicación) suelen ser chicas: se amplía.
+    height, width = img.shape[:2]
+    largest = max(height, width)
+    if largest < 1600:
+        scale = 1600.0 / largest
+        img = cv2.resize(img, None, fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    return gray
+
+
+@app.post("/ocr")
+def ocr(req: OcrRequest) -> dict:
+    img = _decode(req.image_base64)
+    lang = req.lang or OCR_LANG
+    try:
+        gray = _preprocess_for_ocr(img)
+
+        # Texto normal + intento en modo "bloque uniforme" (marcas de agua).
+        text = pytesseract.image_to_string(gray, lang=lang)
+        alt = pytesseract.image_to_string(gray, lang=lang, config="--psm 6")
+
+        data = pytesseract.image_to_data(gray, lang=lang, output_type=pytesseract.Output.DICT)
+        confs = [int(c) for c in data.get("conf", []) if str(c).lstrip("-").isdigit() and int(c) >= 0]
+        mean_conf = sum(confs) / len(confs) if confs else None
+
+        # Se conserva la lectura con más texto reconocido.
+        best = text if len(text.strip()) >= len(alt.strip()) else alt
+        lines = [line.strip() for line in best.splitlines() if line.strip()]
+        return {"text": best, "alt_text": alt, "lines": lines, "mean_conf": mean_conf, "lang": lang}
+    except pytesseract.TesseractError as exc:  # pragma: no cover
+        raise HTTPException(status_code=500, detail=f"OCR error: {exc}") from exc
+

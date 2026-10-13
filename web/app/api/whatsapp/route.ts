@@ -17,6 +17,7 @@ export async function GET() {
       dates: "Filtros de fecha en formato YYYY-MM-DD, zona America/Mexico_City.",
       kinds: ["image", "video", "audio", "document", "sticker", "other"],
       faces: "Detección/embeddings con insightface (ArcFace 512d) vía face-service; identidades enlazadas a técnicos/usuarios.",
+      ocr: "Texto extraído con Tesseract (español+inglés) vía face-service; el campo 'parsed' propone candidatos de asistencia (fecha/hora/tipo/jornada/ubicación).",
     },
     endpoints: [
       { method: "GET", path: "/api/whatsapp", description: "Este índice." },
@@ -44,6 +45,7 @@ export async function GET() {
       { method: "DELETE", path: "/api/whatsapp/media/{sha256}/links?id=", description: "Elimina un vínculo." },
       { method: "GET", path: "/api/whatsapp/filters", description: "Remitentes, etiquetas, conversaciones y estadísticas." },
       { method: "GET", path: "/api/whatsapp/media/{sha256}/faces", description: "Rostros detectados en la foto (bbox, score, identidad asignada)." },
+      { method: "GET", path: "/api/whatsapp/media/{sha256}/ocr", description: "Texto extraído por OCR y candidato de asistencia (fecha/hora/tipo/jornada/ubicación)." },
       { method: "POST", path: "/api/whatsapp/faces/{id}/assign", description: "Asigna el rostro a un técnico o usuario ({ technician_id | user_id | display_name })." },
       { method: "DELETE", path: "/api/whatsapp/faces/{id}/assign", description: "Quita la asignación del rostro." },
       { method: "GET", path: "/api/whatsapp/face-identities", description: "Identidades faciales enroladas con conteo de caras." },
