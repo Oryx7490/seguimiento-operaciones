@@ -1,0 +1,22 @@
+{
+  "id": "whatsapp-capture",
+  "name": "WhatsApp Capture",
+  "description": "Stores allowlisted WhatsApp messages in PostgreSQL and deduplicated media in MinIO.",
+  "activation": {
+    "onStartup": true,
+    "onCapabilities": ["hook"]
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "allowedChats": {
+        "type": "array",
+        "items": { "type": "string", "minLength": 1 },
+        "description": "Exact WhatsApp chat IDs allowed for capture. An empty list stores nothing."
+      },
+      "captureInbound": { "type": "boolean" },
+      "captureOutbound": { "type": "boolean" }
+    }
+  }
+}

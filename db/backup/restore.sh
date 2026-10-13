@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Restaura PostgreSQL y MinIO desde el respaldo más reciente o desde rutas dadas.
-# Uso: ./restore.sh [pg_dump.dump] [dir_minio]
+# Uso: ./restore.sh [pg_dump.dump] [dir_minio] [dir_minio_whatsapp]
 # PRECAUCIÓN: sobrescribe los datos actuales.
 set -euo pipefail
 
@@ -14,7 +14,15 @@ fi
 set -a; source "$ROOT/.env"; set +a
 
 PG_DUMP="${1:-$(ls -1t "$ROOT"/db/backup/pg_*.dump 2>/dev/null | head -1)}"
-MINIO_DIR="${2:-$(ls -1dt "$ROOT"/db/backup/minio_* 2>/dev/null | head -1)}"
+MINIO_DIR="${2:-$(ls -1dt "$ROOT"/db/backup/minio_[0-9]* 2>/dev/null | head -1)}"
+MINIO_WHATSAPP_DIR="${3:-}"
+
+if [[ -z "$MINIO_WHATSAPP_DIR" && -n "$MINIO_DIR" ]]; then
+  STAMP="${MINIO_DIR##*/minio_}"
+  if [[ -d "$ROOT/db/backup/minio_whatsapp_$STAMP" ]]; then
+    MINIO_WHATSAPP_DIR="$ROOT/db/backup/minio_whatsapp_$STAMP"
+  fi
+fi
 
 if [[ -z "$PG_DUMP" || -z "$MINIO_DIR" ]]; then
   echo "ERROR: no hay respaldos en $ROOT/db/backup. Pasa rutas explícitas." >&2
@@ -32,6 +40,14 @@ if [[ -d "$MINIO_DIR" ]]; then
     -v "$MINIO_DIR":/backup:ro \
     -e "MC_HOST_local=http://$S3_ACCESS_KEY:$S3_SECRET_KEY@minio:9000" \
     quay.io/minio/mc mirror --overwrite "/backup" "local/$S3_BUCKET"
+fi
+
+if [[ -n "$MINIO_WHATSAPP_DIR" && -d "$MINIO_WHATSAPP_DIR" ]]; then
+  echo "==> Restaurando MinIO (whatsapp-media: $MINIO_WHATSAPP_DIR)..."
+  docker run --rm --network "$NETWORK" \
+    -v "$MINIO_WHATSAPP_DIR":/backup:ro \
+    -e "MC_HOST_local=http://$S3_ACCESS_KEY:$S3_SECRET_KEY@minio:9000" \
+    quay.io/minio/mc mirror --overwrite "/backup" "local/whatsapp-media"
 fi
 
 echo "OK — restauración completada."

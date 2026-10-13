@@ -20,6 +20,7 @@ import type {
   Specialty,
   TechnicianDetailResponse,
 } from "@/app/lib/types";
+import { useNewQuery } from "@/app/lib/use-new-query";
 
 export default function TechniciansPage() {
   const [showInactive, setShowInactive] = useState(false);
@@ -33,6 +34,11 @@ export default function TechniciansPage() {
   const techs = data?.technicians ?? [];
   const catalog = catalogRes.data?.specialties ?? [];
   const loading = !data && !error;
+
+  useNewQuery("tecnico", () => {
+    setSelected(null);
+    setModalOpen(true);
+  });
 
   async function send(method: "PATCH" | "DELETE", t: Technician, body?: object) {
     try {

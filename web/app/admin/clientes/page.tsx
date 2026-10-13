@@ -15,6 +15,7 @@ import {
 } from "@/app/components/ui";
 import CommentSection from "@/app/components/comment-section";
 import type { Client, ClientContact, ClientDetail, ClientsResponse } from "@/app/lib/types";
+import { useNewQuery } from "@/app/lib/use-new-query";
 
 export default function ClientsPage() {
   const { data, error, reload } = useResource<ClientsResponse>("/api/clients");
@@ -25,6 +26,11 @@ export default function ClientsPage() {
 
   const clients = data?.clients ?? [];
   const loading = !data && !error;
+
+  useNewQuery("cliente", () => {
+    setSelected(null);
+    setModalOpen(true);
+  });
 
   function norm(s: string | null | undefined): string {
     return (s ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");

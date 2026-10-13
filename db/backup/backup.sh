@@ -28,5 +28,11 @@ docker run --rm --network "$NETWORK" \
   -e "MC_HOST_local=http://$S3_ACCESS_KEY:$S3_SECRET_KEY@minio:9000" \
   quay.io/minio/mc mirror --overwrite "local/$S3_BUCKET" "/backup/minio_$STAMP"
 
+echo "==> MinIO (whatsapp-media) → $DEST/minio_whatsapp_$STAMP/"
+docker run --rm --network "$NETWORK" \
+  -v "$DEST:/backup" \
+  -e "MC_HOST_local=http://$S3_ACCESS_KEY:$S3_SECRET_KEY@minio:9000" \
+  quay.io/minio/mc mirror --overwrite "local/whatsapp-media" "/backup/minio_whatsapp_$STAMP"
+
 size="$(du -h "$PG_DUMP" | cut -f1)"
 echo "OK — respaldo completado ($size). Conserva también una copia en un segundo dispositivo."

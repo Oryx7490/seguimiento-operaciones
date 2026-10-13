@@ -13,6 +13,8 @@ const PAGES: { path: string; id: string; exact?: boolean }[] = [
   { path: "/tickets", id: "V5", exact: true },
   { path: "/tickets/", id: "V6" },
   { path: "/pendientes", id: "V7" },
+  { path: "/pantallas-pendientes", id: "V47" },
+  { path: "/whatsapp", id: "V48" },
   { path: "/notificaciones", id: "V8" },
   { path: "/tecnico/perfil", id: "V10" },
   { path: "/tecnico", id: "V9" },

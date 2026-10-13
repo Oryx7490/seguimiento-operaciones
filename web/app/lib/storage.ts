@@ -32,6 +32,33 @@ export async function storageDownloadUrl(key: string): Promise<string> {
   return minio().presignedGetObject(storageBucket(), key, 5 * 60);
 }
 
+/** Bucket donde el plugin de capture deja los binarios de WhatsApp. */
+export function whatsappBucket(): string {
+  return process.env.WHATSAPP_MEDIA_BUCKET ?? "whatsapp-media";
+}
+
+export async function storageDownloadUrlInBucket(bucket: string, key: string, expirySeconds = 5 * 60): Promise<string> {
+  return minio().presignedGetObject(bucket, key, expirySeconds);
+}
+
 export async function deleteStorageObject(key: string) {
   await minio().removeObject(storageBucket(), key);
+}
+
+/** ¿Existe ya el objeto en el bucket principal? (para caché de miniaturas). */
+export async function storageObjectExists(key: string): Promise<boolean> {
+  try {
+    await minio().statObject(storageBucket(), key);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Descarga un objeto como Buffer desde cualquier bucket. */
+export async function getStorageObjectBuffer(bucket: string, key: string): Promise<Buffer> {
+  const url = await storageDownloadUrlInBucket(bucket, key, 5 * 60);
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`No se pudo descargar ${bucket}/${key}`);
+  return Buffer.from(await res.arrayBuffer());
 }

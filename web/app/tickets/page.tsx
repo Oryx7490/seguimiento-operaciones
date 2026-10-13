@@ -18,6 +18,7 @@ import {
   Textarea,
 } from "@/app/components/ui";
 import { ColumnSelector } from "@/app/components/column-selector";
+import { useNewQuery } from "@/app/lib/use-new-query";
 import type { CatalogItem, CatalogsResponse, Client, ClientsResponse, Location, LocationsResponse, Ticket, TicketsResponse } from "@/app/lib/types";
 
 const STATUS_OPTIONS = [
@@ -58,6 +59,8 @@ export default function TicketsPage() {
   const [includeArchived, setIncludeArchived] = useState(false);
 
   const toggleCol = (key: string) => setCols((prev) => ({ ...prev, [key]: !prev[key] }));
+
+  useNewQuery("ticket", () => setOpen(true));
 
   const params = new URLSearchParams();
   if (statusFilter) params.set("status", statusFilter);

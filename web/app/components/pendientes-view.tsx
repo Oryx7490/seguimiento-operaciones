@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useResource } from "@/app/lib/client";
+import { useState } from "react";
 import { formatDate, formatDateTime } from "@/app/lib/format";
 import { Badge } from "@/app/components/ui";
 
@@ -84,13 +85,16 @@ function Section({
   tone = "default",
   children,
   empty,
+  defaultCollapsed = true,
 }: {
   title: string;
   count: number;
   tone?: "default" | "danger" | "warn";
   children: React.ReactNode;
   empty: string;
+  defaultCollapsed?: boolean;
 }) {
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
   const toneCls =
     tone === "danger"
       ? "bg-rose-600"
@@ -99,16 +103,31 @@ function Section({
         : "bg-zinc-900";
   return (
     <section className="rounded-lg border border-zinc-200 bg-white shadow-sm">
-      <header className="flex items-center gap-2 border-b border-zinc-100 px-4 py-3">
+      <button
+        type="button"
+        onClick={() => setCollapsed((c) => !c)}
+        aria-expanded={!collapsed}
+        className="flex w-full items-center gap-2 border-b border-zinc-100 px-4 py-3 text-left hover:bg-zinc-50"
+      >
+        <svg
+          className={`h-4 w-4 text-zinc-400 transition-transform ${collapsed ? "-rotate-90" : "rotate-0"}`}
+          viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"
+        >
+          <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+        </svg>
         <h2 className="text-sm font-semibold text-zinc-800">{title}</h2>
         <span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold text-white ${toneCls}`}>
           {count}
         </span>
-      </header>
+      </button>
       {count === 0 ? (
         <p className="px-4 py-3 text-sm text-zinc-400">{empty}</p>
       ) : (
-        <ul className="divide-y divide-zinc-100">{children}</ul>
+        <div
+          className={`transition-all duration-200 ${collapsed ? "max-h-0 overflow-hidden" : "max-h-[4000px] overflow-visible"}`}
+        >
+          <ul className="divide-y divide-zinc-100">{children}</ul>
+        </div>
       )}
     </section>
   );

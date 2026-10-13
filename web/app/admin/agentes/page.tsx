@@ -91,8 +91,9 @@ export default function AgentTokensPage() {
           <h1 className="text-xl font-semibold text-zinc-900">Agentes CLI</h1>
           <p className="mt-1 max-w-2xl text-sm text-zinc-500">
             Tokens para que agentes/CLI creen tickets y proyectos, actualicen actividades y
-            consulten los proyectos en marcha. Cada acción queda registrada en el historial como
-            &quot;Agente CLI&quot;.
+            consulten los proyectos en marcha. También permiten consultar los mensajes y fotos
+            capturados de WhatsApp en modo de solo lectura. Las acciones que modifican proyectos,
+            tickets o actividades quedan registradas en el historial como &quot;Agente CLI&quot;.
           </p>
         </div>
         <PrimaryButton onClick={() => setCreateOpen(true)}>Nuevo token</PrimaryButton>
@@ -117,6 +118,15 @@ export default function AgentTokensPage() {
           </li>
           <li>
             <code className="rounded bg-white px-1 py-0.5">GET /api/agent/projects</code> — proyectos en marcha
+          </li>
+          <li>
+            <code className="rounded bg-white px-1 py-0.5">GET /api/agent/whatsapp/messages</code> — mensajes y adjuntos del grupo
+          </li>
+          <li>
+            <code className="rounded bg-white px-1 py-0.5">GET /api/agent/whatsapp/photos</code> — fotografías capturadas
+          </li>
+          <li>
+            <code className="rounded bg-white px-1 py-0.5">GET /api/agent/whatsapp/photos/&#123;sha256&#125;</code> — descargar una fotografía
           </li>
           <li>
             <code className="rounded bg-white px-1 py-0.5">PATCH /api/agent/activities/&#123;id&#125;</code>{" "}

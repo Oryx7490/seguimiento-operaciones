@@ -17,9 +17,38 @@ export async function GET() {
     ),
     currentUser(),
   ]);
+
+  let roles: Array<{ id: string; code: string; name: string }> = [];
+  let sections: string[] = [];
+  if (user) {
+    const { rows: roleRows } = await pool.query(
+      `SELECT r.id, r.code, r.name
+         FROM user_roles ur
+         JOIN roles r ON r.id = ur.role_id
+        WHERE ur.user_id = $1
+        ORDER BY r.name`,
+      [user.id]
+    );
+    roles = roleRows as Array<{ id: string; code: string; name: string }>;
+    if (roles.some((r) => r.code === "admin")) {
+      sections = ["*"];
+    } else {
+      const { rows } = await pool.query(
+        `SELECT DISTINCT rp.section_key
+           FROM user_roles ur
+           JOIN role_permissions rp ON rp.role_id = ur.role_id
+          WHERE ur.user_id = $1 AND rp.can_view`,
+        [user.id]
+      );
+      sections = rows.map((r) => r.section_key as string);
+    }
+  }
+
   return jsonOk({
     user: user ? { id: user.id, name: user.name, role: user.role } : null,
     users: users.map((row) => ({ id: row.id, name: row.name, role: row.role })),
+    roles,
+    sections,
   });
 }
 

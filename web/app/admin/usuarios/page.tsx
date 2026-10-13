@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { fetchJson, useResource } from "@/app/lib/client";
 import { formatDateTime } from "@/app/lib/format";
 import {
@@ -11,11 +11,11 @@ import {
   Modal,
   PrimaryButton,
   SecondaryButton,
-  Select,
   Spinner,
   TextInput,
 } from "@/app/components/ui";
 import type { User, UsersResponse } from "@/app/lib/types";
+import { useNewQuery } from "@/app/lib/use-new-query";
 
 const ROLE_LABEL: Record<string, string> = {
   admin: "Administrador",
@@ -23,13 +23,44 @@ const ROLE_LABEL: Record<string, string> = {
   technician: "Técnico",
 };
 
+interface RoleOption {
+  id: string;
+  code: string;
+  name: string;
+}
+
 export default function UsersPage() {
   const { data, error, reload } = useResource<UsersResponse>("/api/users");
   const [selected, setSelected] = useState<User | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [roles, setRoles] = useState<RoleOption[]>([]);
+  const [userRoles, setUserRoles] = useState<Record<string, string[]>>({});
 
   const users = data?.users ?? [];
   const loading = !data && !error;
+
+  useNewQuery("usuario", () => {
+    setSelected(null);
+    setModalOpen(true);
+  });
+
+  useEffect(() => {
+    fetchJson<{ roles: RoleOption[] }>("/api/roles")
+      .then((r) => setRoles(r.roles))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (users.length === 0) return;
+    Promise.all(
+      users.map((u) =>
+        fetchJson<{ roles: RoleOption[] }>(`/api/users/${u.id}/roles`)
+          .then((r) => [u.id, r.roles.map((x) => x.name)] as const)
+          .catch(() => [u.id, [ROLE_LABEL[u.role] ?? u.role]] as const)
+      )
+    ).then((pairs) => setUserRoles(Object.fromEntries(pairs)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
 
   async function send(method: "PATCH" | "DELETE", u: User, body?: object) {
     try {
@@ -80,7 +111,11 @@ export default function UsersPage() {
                     <td className="px-4 py-3 font-medium text-zinc-800">{u.name}</td>
                     <td className="px-4 py-3 text-zinc-600">{u.email}</td>
                     <td className="px-4 py-3">
-                      <Badge className="bg-zinc-100 text-zinc-600">{ROLE_LABEL[u.role] ?? u.role}</Badge>
+                      <div className="flex flex-wrap gap-1">
+                        {(userRoles[u.id] ?? [ROLE_LABEL[u.role] ?? u.role]).map((r) => (
+                          <Badge key={r} className="bg-zinc-100 text-zinc-600">{r}</Badge>
+                        ))}
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       {u.active ? (
@@ -122,6 +157,7 @@ export default function UsersPage() {
         <UserModal
           key={selected?.id ?? "new"}
           user={selected}
+          roles={roles}
           onClose={() => setModalOpen(false)}
           onSaved={() => { setModalOpen(false); reload(); }}
         />
@@ -132,29 +168,49 @@ export default function UsersPage() {
 
 function UserModal({
   user,
+  roles,
   onClose,
   onSaved,
 }: {
   user: User | null;
+  roles: RoleOption[];
   onClose: () => void;
   onSaved: () => void;
 }) {
   const [name, setName] = useState(user?.name ?? "");
   const [email, setEmail] = useState(user?.email ?? "");
-  const [role, setRole] = useState<string>(user?.role ?? "technician");
   const [active, setActive] = useState(user?.active ?? true);
+  const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    fetchJson<{ roles: RoleOption[] }>(`/api/users/${user.id}/roles`)
+      .then((r) => setSelectedRoles(r.roles.map((x) => x.id)))
+      .catch(() => {});
+  }, [user]);
+
+  function toggleRole(id: string) {
+    setSelectedRoles((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
 
   async function submit() {
     setSaving(true);
     setErr(null);
     try {
       const url = user ? `/api/users/${user.id}` : "/api/users";
-      await fetchJson(url, {
+      const res = await fetchJson<{ user: User }>(url, {
         method: user ? "PATCH" : "POST",
-        body: JSON.stringify({ name, email, role, active }),
+        body: JSON.stringify({ name, email, active }),
       });
+      const userId = user ? user.id : res.user?.id;
+      if (userId) {
+        await fetchJson(`/api/users/${userId}/roles`, {
+          method: "PUT",
+          body: JSON.stringify({ roleIds: selectedRoles }),
+        });
+      }
       onSaved();
     } catch (e) {
       setErr(String(e));
@@ -184,16 +240,28 @@ function UserModal({
         <Field label="Correo electrónico">
           <TextInput value={email} onChange={setEmail} placeholder="correo@empresa.com" type="email" />
         </Field>
-        <Field label="Rol">
-          <Select
-            value={role}
-            onChange={setRole}
-            options={[
-              { value: "technician", label: "Técnico" },
-              { value: "coordinator", label: "Coordinador" },
-              { value: "admin", label: "Administrador" },
-            ]}
-          />
+        <Field label="Roles / perfiles">
+          <div className="flex flex-wrap gap-2">
+            {roles.length === 0 && <span className="text-xs text-zinc-400">Cargando perfiles…</span>}
+            {roles.map((r) => (
+              <label
+                key={r.id}
+                className={`flex cursor-pointer items-center gap-1.5 rounded-md border px-2 py-1 text-xs ${
+                  selectedRoles.includes(r.id)
+                    ? "border-zinc-900 bg-zinc-900 text-white"
+                    : "border-zinc-200 text-zinc-700 hover:bg-zinc-50"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  className="hidden"
+                  checked={selectedRoles.includes(r.id)}
+                  onChange={() => toggleRole(r.id)}
+                />
+                {r.name}
+              </label>
+            ))}
+          </div>
         </Field>
         <label className="flex items-center gap-2 text-sm text-zinc-700">
           <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} className="h-4 w-4 rounded border-zinc-300" />

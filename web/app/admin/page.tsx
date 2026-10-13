@@ -110,12 +110,28 @@ export default function AdminDashboard() {
               <p className="mt-1 text-xs text-zinc-500">Estimación de metros a instalar por mes</p>
             </Link>
             <Link
+              href="/pantallas-pendientes"
+              className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-zinc-300 hover:shadow"
+            >
+              <p className="text-sm font-medium text-zinc-800">Pantallas por instalarse</p>
+              <p className="mt-1 text-xs text-zinc-500">Listado global de pantallas pendientes de instalación</p>
+            </Link>
+
+            <Link
               href="/admin/proyeccion"
               className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-zinc-300 hover:shadow"
             >
               <p className="text-sm font-medium text-zinc-800">Proyección</p>
               <p className="mt-1 text-xs text-zinc-500">m² a instalar en corto, mediano y largo plazo</p>
             </Link>
+            <Link
+              href="/admin/kpis-semanales"
+              className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-zinc-300 hover:shadow"
+            >
+              <p className="text-sm font-medium text-zinc-800">KPIs semanales</p>
+              <p className="mt-1 text-xs text-zinc-500">Cierre semanal (domingo), m² instalados y métricas</p>
+            </Link>
+
             <Link
               href="/admin/revision-pantallas"
               className="rounded-lg border border-amber-200 bg-amber-50 p-4 shadow-sm transition hover:border-amber-300 hover:shadow"
@@ -194,3 +210,10 @@ export default function AdminDashboard() {
     </div>
   );
 }
+            <Link
+              href="/admin/roles"
+              className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm transition hover:border-zinc-300 hover:shadow"
+            >
+              <p className="text-sm font-medium text-zinc-800">Roles y permisos</p>
+              <p className="mt-1 text-xs text-zinc-500">Matriz de permisos por perfil</p>
+            </Link>

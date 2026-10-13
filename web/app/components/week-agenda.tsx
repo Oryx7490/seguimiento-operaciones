@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useResource, fetchJson } from "@/app/lib/client";
 import { mondayOfWeek, weekDays, formatShortDate, isToday } from "@/app/lib/prototype-data";
 import { dateAtNoon, todayIso } from "@/app/lib/time";
+import { useNewQuery } from "@/app/lib/use-new-query";
 import {
   Field,
   Modal,
@@ -122,6 +123,8 @@ export default function WeekAgenda() {
   const [dropIso, setDropIso] = useState<string | null>(null);
   const [moveErr, setMoveErr] = useState<string | null>(null);
   const [pendingActivityId, setPendingActivityId] = useState<string | null>(() => link?.activityId ?? null);
+
+  useNewQuery("actividad", () => setCreating({ date: day, techIds: [] }));
 
   const days = weekDays(monday);
   const showDays = compact ? days.slice(0, 5) : days;

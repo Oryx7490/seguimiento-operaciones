@@ -311,9 +311,9 @@ async function claimPending(limit: number): Promise<PendingNotification[]> {
          JOIN users u ON u.id = n.recipient_id
          LEFT JOIN technicians t ON t.user_id = u.id
         WHERE n.status = 'pending' AND n.channel IN ('email','whatsapp')
-        ORDER BY n.created_at ASC
-        LIMIT $1
-        FOR UPDATE SKIP LOCKED`,
+         ORDER BY n.created_at ASC
+         LIMIT $1
+         FOR UPDATE OF n SKIP LOCKED`,
       [limit]
     );
     for (const n of rows) {

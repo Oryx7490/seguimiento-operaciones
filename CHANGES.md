@@ -1,5 +1,127 @@
 # Constraints & Decisions Log
 
+## 0.4.6 — RC (2026-10-13)
+
+Release candidate con el mayor salto de la app: permisos por perfil, KPIs semanales, estrategia de fotos de WhatsApp y reconocimiento facial.
+
+- **Permisos por perfil (V45)**: cada persona elige su perfil al entrar (sin contraseñas); menú y secciones filtrados por rol, con roles, permisos por sección y asignación multi-rol por usuario.
+- **Paleta de comandos y atajos (V46)**: `Ctrl/⌘ K`, secuencias `g` + letra y acciones de creación ("nuevo proyecto/ticket/…") por teclado.
+- **Pantallas por instalar (V47/V47b)**: marca de página, buscador, orden manual global y semáforo de armado (amarillo = por armar, verde = lista).
+- **Fotos de WhatsApp (V48/V48b/V48c)**: visor agrupado por semana ISO, miniaturas al 25% cacheadas en MinIO, etiquetas, vínculos a proyecto/ticket y campos administrables (nota/favorito/archivado); API de administración e índice.
+- **Reconocimiento facial (V49)**: `face-service` (insightface ArcFace 512d, ONNX) + pgvector; detección/embeddings por foto, enrolamiento a técnicos/usuarios, sugerencias por centroide y cabeza clasificadora nocturna (regresión logística).
+- **KPIs semanales**: periodos y métricas con cierre dominical.
+- **Infra**: PostgreSQL migrado a `pgvector/pgvector:pg17` (conserva datos); nuevo servicio `face-service` con modelos horneados; respaldo/restauración documentados.
+- **Fix**: `notifications.claimPending` usaba `FOR UPDATE` sobre el lado nullable de un `LEFT JOIN` (rompía el escaneo de alertas).
+
+## Reconocimiento facial sobre fotos de WhatsApp (V49) — sin commit
+
+> Enrolamiento incremental: se detectan rostros y se guardan embeddings ArcFace (512d) en PostgreSQL con pgvector; el humano asigna cada rostro a un técnico/usuario y, de noche, el worker recalcula centroides por identidad y sugiere asignaciones. El "entrenamiento diario" es agregar embeddings + actualizar centroides (no reentrenar la red).
+
+- **Infra**: Postgres cambiado a `pgvector/pgvector:pg17` (mismo data dir PG17; conserva datos) con extensión `vector` 0.8.7. Nuevo servicio `face-service` (Python/FastAPI + insightface `buffalo_l`, ONNX CPU) con modelos **horneados en la imagen** (sin descargas en runtime).
+- **Migración `065_whatsapp_faces.sql`**: `faces` (sha256, bbox, det_score, `embedding vector(512)`, índice HNSW coseno), `face_identities` (enlazadas a `technicians`/`users`, `centroid vector(512)`), `face_assignments` (source manual/model, revisable) y `face_models` (versiones de centroides/clasificador).
+- **Worker** (`worker/src/faces.js`): `runFaceScan` busca fotos nuevas, pide embeddings a `face-service`, guarda `faces` (idempotente por `(sha256, model, bbox)`) y registra `media_analyses` (`face_detect`). `runFaceTraining` recalcula centroides, versiona el modelo y **sugiere** asignaciones por distancia coseno (< 0.35). Escaneo cada `FACE_SCAN_INTERVAL_MS` (6h) y entrenamiento cada 24h.
+- **API web**: `GET /api/whatsapp/media/{sha256}/faces` (bbox + score + identidad y dimensiones para el overlay), `POST/DELETE /api/whatsapp/faces/{id}/assign` (crea/reutiliza identidad por técnico/usuario), `GET /api/whatsapp/face-identities`; índice `/api/whatsapp` actualizado.
+- **UI `/whatsapp`**: en el lightbox se dibujan las **cajas de rostros** sobre la foto y una lista para asignar cada rostro a un técnico o usuario (o quitarlo), con indicador de sugerencia del modelo.
+- **Fix colateral**: `notifications.claimPending` usaba `FOR UPDATE` sobre el lado nullable de un `LEFT JOIN` (rompía `/api/internal/scan`); ahora `FOR UPDATE OF n`.
+- Verificado: imagen face-service construida con modelos; `/health` OK; detección real (12 rostros en 19 fotos); asignación/desasignación por API; centroides calculados y limpiados según asignaciones; versiones de modelo incrementando.
+
+## API de lectura de WhatsApp para agentes (2026-10-13) — sin commit
+
+- Se agregan rutas protegidas con tokens `Bearer` existentes: `GET /api/agent/whatsapp` (índice), `/messages` (texto/caption y adjuntos), `/photos` (listado paginado) y `/photos/{sha256}` (descarga autenticada).
+- Los listados filtran solo mensajes entrantes de grupos capturados; admiten búsqueda, remitente, conversación, rango ISO 8601 y paginación. Las fotos incluyen una ruta de descarga reutilizable.
+- Se documenta el uso en el README y en Configuración → Agentes CLI. La API no envía mensajes.
+
+## API de administración de Fotos de WhatsApp (V48c) — sin commit
+
+> Superficie REST para leer y **manejar** los archivos capturados del grupo: detalle, etiquetas CRUD, vínculos a entidades, campos administrables, conversaciones/mensajes e índice. Todas las etiquetas y campos se guardan por SHA-256 (aplican a reenvíos).
+
+- Migración `064_whatsapp_media_manage.sql`: en `whatsapp_capture.media_objects` agrega `note`, `is_favorite`, `is_archived`, `note_updated_by`, `note_updated_at` + índices.
+- `GET /api/whatsapp`: índice autodescriptivo de endpoints y convenciones.
+- `GET /api/whatsapp/media`: ahora incluye `note`/`is_favorite`/`is_archived` y filtros `favorite`/`archived` (`archived=all` incluye archivadas; por defecto se ocultan).
+- `GET /api/whatsapp/media/[sha256]/info`: detalle JSON (media, etiquetas, apariciones con remitente/fecha/leyenda, vínculos a proyecto/ticket/actividad/técnico y análisis de IA).
+- `PATCH /api/whatsapp/media/[sha256]`: actualiza `note`, `is_favorite`, `is_archived`.
+- Etiquetas: `GET`/`POST`/`PATCH`(rename)/`DELETE` por foto en `.../[sha256]/tags`; `GET` (conteos) y `PATCH` (rename global) en `/api/whatsapp/tags`. Renombrar colapsa duplicados.
+- Vínculos `.../[sha256]/links`: `GET`, `POST` (`{ type: project|ticket|activity|technician, id, message_id? }`, `source=human`, `status=confirmed`) y `DELETE ?id=`. Se anclan al mensaje donde apareció la foto.
+- Conversaciones: `GET /api/whatsapp/conversations` (con conteos) y `GET /api/whatsapp/conversations/[id]/messages` (paginado, filtros `from/to/sender/q`, adjuntos embebidos).
+- Verificado: migración aplicada, `tsc` limpio, build/arranque OK; probados índice, info, campos administrables, alta/renombrado/borrado de etiquetas (por foto y global), vínculos proyecto/ticket (alta y baja), conversaciones y mensajes; validaciones y limpieza de datos de prueba. Backfill de miniaturas: 19/19 imágenes con caché (436 KB).
+
+## Fotos WhatsApp: miniaturas 25% y agrupación por semana (V48b) — sin commit
+
+- **Miniaturas al 25%**: `GET /api/whatsapp/media/[sha256]/thumb` genera con `sharp` una imagen al 25% de ancho y alto del original (p. ej. 1200×1600 → 300×400 JPEG q80) y la **cachea en MinIO** (`seguimiento-archivos/whatsapp-thumbs/25/<sha>.jpg`); las siguientes peticiones sirven la caché. Solo imágenes (415 en otros tipos). La rejilla usa la miniatura; el lightbox sigue usando la foto completa.
+- `sharp` agregado a dependencias de `web` y a `serverExternalPackages` en `next.config.ts`; helpers `storageObjectExists()` y `getStorageObjectBuffer()` en `web/app/lib/storage.ts`.
+- **Agrupación por semana ISO del año** en `web/app/whatsapp/page.tsx` (zona `America/Mexico_City`): encabezados «Semana N · AAAA · (lun–dom)» con conteo por semana; las semanas se ordenan de la más reciente a la más antigua. Función `isoWeekInfo()` (correcta en cruces de año: 29 dic 2025 y 1 ene 2026 caen en Semana 1 · 2026).
+- Verificado: `tsc` limpio, build/arranque OK; miniatura 300×400 (23 KB vs 184 KB original) servida y cacheada; página 200.
+
+## Visor de fotos de WhatsApp con etiquetas (V48) — sin commit
+
+> Galería web de los archivos capturados del grupo por el plugin `whatsapp-capture` (MinIO `whatsapp-media` + esquema `whatsapp_capture`). Permite filtrar por rango de fechas, remitente, etiqueta, tipo y texto; ver metadatos y vínculos; y etiquetar contenido. Preparado para enriquecer con IA.
+
+- Migración `063_whatsapp_media_tags.sql`: tabla `whatsapp_capture.media_tags` (etiquetas por `sha256`, `source` `manual`/`ai`, `created_by`), índice único `(sha256, lower(tag))`; y alta de la sección RBAC `whatsapp` (ve todos; crear/editar admin+coordinator; borrar admin).
+- `web/app/lib/storage.ts`: `whatsappBucket()` y `storageDownloadUrlInBucket(bucket, key)` para servir objetos del bucket `whatsapp-media`.
+- APIs:
+  - `GET /api/whatsapp/media`: lista filtrable (`from`,`to`,`sender`,`conversation`,`tag`,`q`,`kind`,`limit`,`offset`) con etiquetas agregadas y vínculos a proyecto/ticket (`message_entity_links`); paginación con `total`.
+  - `GET /api/whatsapp/media/[sha256]`: sirve el binario (presign + fetch, `Content-Type` real, cache privado).
+  - `POST/DELETE /api/whatsapp/media/[sha256]/tags`: agrega/quita etiquetas (normaliza espacios, dedupe case-insensitive).
+  - `GET /api/whatsapp/filters`: remitentes, etiquetas, conversaciones y estadísticas (total y rango).
+- UI `web/app/whatsapp/page.tsx` (nav «Fotos WhatsApp», mark `V48`): rejilla agrupada por día (zona `America/Mexico_City`), filtros, "Cargar más", y lightbox con detalle, vínculos y editor de etiquetas. Estado por objeto (sha256), por lo que aplica a reenvíos del mismo archivo.
+- Preparado para IA: las etiquetas admiten `source='ai'` y ya existe `whatsapp_capture.media_analyses` para resultados de OCR/reconocimiento.
+- Verificado: migración aplicada, `tsc` limpio, restart de `web`; `filters`/`media` con datos reales (5 imágenes), servido de imagen (JPEG 184 KB) y CRUD de etiquetas (alta, dedupe, filtro, baja) y validaciones.
+
+## WhatsApp: escucha continua del grupo y captura silenciosa (2026-10-12) — sin commit
+
+> Objetivo: guardar en PostgreSQL los mensajes de texto nuevos de todos los participantes del grupo configurado, aunque no mencionen al agente, y mantener el grupo en modo de solo lectura.
+
+- Diagnóstico: los eventos recientes observados en OpenClaw llegaban como mensajes directos, no como mensajes del grupo. El plugin ya tenía una lista permitida limitada al JID exacto del grupo, por lo que esos DMs no se guardaban en `whatsapp_capture`.
+- Activación del plugin: la inspección local lo mostraba cargado, pero el Gateway no lo incluía en su lista de plugins. Se añadió en `openclaw-whatsapp-capture/openclaw.plugin.json` la activación al inicio (`onStartup`) y al ofrecer hooks (`onCapabilities: ["hook"]`). Tras reiniciar, el log del Gateway confirmó `whatsapp-capture` entre los 17 plugins cargados y WhatsApp escuchando DMs más un grupo configurado.
+- Captura antes del modelo: `openclaw-whatsapp-capture/index.mjs` registra `before_dispatch` para persistir el mensaje entrante del grupo permitido y atenderlo con `{ handled: true }`. Así el texto y sus metadatos se guardan sin iniciar un turno del modelo ni responder. Los adjuntos no están disponibles en ese hook y no forman parte de esta captura grupal.
+- Configuración aplicada en `~/.openclaw/openclaw.json`: `requireMention: false` solo para el grupo seleccionado; `captureInbound: true`, `captureOutbound: false` y `allowedChats` conserva únicamente ese grupo. Se mantienen los bloqueos de salida para que OpenClaw no publique respuestas allí.
+- Intento de recarga: el Gateway rechazó la recarga en caliente porque no pudo verificar el ownership de `~/.openclaw/state/openclaw.sqlite`. Se reinició el servicio; el cierre agotó el límite de 330 segundos por fallos de limpieza asociados al mismo estado SQLite. Después systemd inició una instancia nueva.
+- Verificación de recepción y archivos: se encontraron **3 mensajes entrantes** del grupo, cada uno con texto/caption y una imagen JPEG. En PostgreSQL los adjuntos figuran como `stored`; `statObject` confirmó que los tres objetos existen en MinIO y que sus bytes coinciden con `size_bytes`.
+- Hallazgo y corrección de despacho: los primeros eventos sí se guardaron por `message_received`, pero `before_dispatch` no reconocía el JID cuando llegaba dentro de `sessionKey`; OpenClaw inició turnos del modelo y los hooks bloquearon las salidas. Se actualizó el matcher para revisar `ctx.conversationId`, `event.threadId` y las session keys. Si reconoce el grupo permitido, ahora atiende el evento incluso si la escritura previa falla, para evitar que el mensaje pase al modelo; el hook `message_received` sigue guardando texto y adjuntos.
+- Incidencia durante recarga: el 2026-10-12 a las 03:35:39 UTC se recargó el plugin mientras se procesaba otro mensaje del grupo. Los hooks de salida de la versión que se estaba reemplazando fallaron y el log registra un envío completado al JID del grupo (el destino aparece anonimizado; su hash coincide con ese JID). No se pudo recuperar el texto enviado del log. La nueva versión se aplicó a las 03:35:41 UTC sin reiniciar Gateway.
+- Auditoría por mensajes faltantes (2026-10-12): el journal de OpenClaw registra cinco entradas del grupo (03:20:34, 03:20:52, 03:35:28, 16:24:20 y 16:54:11 UTC); PostgreSQL contiene exactamente esas cinco entradas, y cada una tiene una imagen en estado `stored` en MinIO. No aparece una entrada del grupo recibida por Gateway que falte en la base. Los tres eventos con error de `message_received` a las 04:54–04:55 eran mensajes directos; la lista permitida solo incluye el grupo y no los captura. No se encontró contenido de grupo adicional en el transcript local para recuperar.
+- Reinicio y verificación posterior: el Gateway nuevo arrancó a las 15:56:26 UTC con `whatsapp-capture` entre sus plugins y WhatsApp escuchando DMs más el grupo configurado. A las 16:24:20 y 16:54:11 UTC entraron mensajes grupales; en ambos casos el registro de ejecución confirma `before_dispatch_handled` sin respuesta encolada y PostgreSQL guardó el mensaje y su imagen. Los registros disponibles no permiten determinar si hubo mensajes en el grupo que nunca llegaron a Gateway.
+- Alcance: no se amplió la captura a otros grupos ni a chats directos. La lista permitida continúa siendo exacta y privada; el identificador del grupo no se copia a este changelog.
+
+## Pantallas por instalar: orden manual global + color de armado (V47b) — sin commit
+
+- Migración `062_pending_install_order_status.sql`: en `project_screens` agrega `install_sort` (orden manual de la lista global de pendientes, separado del `sort_order` por proyecto de 056) y `assembly_status` (`'to_assemble'` amarillo, `'ready'` verde, `NULL` = blanco), con backfill del orden actual e índice.
+- API `web/app/api/pending-installations/route.ts`: `GET` devuelve `install_sort` y `assembly_status` y ordena por `install_sort NULLS LAST`; nuevo `PATCH` transaccional con `{ order: string[] }` (reordena la lista global asignando 0..n-1) y `{ states: [{ id, assembly_status }] }` (color).
+- UI `web/app/pantallas-pendientes/page.tsx`: primera columna **Orden** con ▲▼ (deshabilitadas en extremos, al guardar y con búsqueda activa); columna **Estado** con tres puntos (blanco/amarillo/verde); fondo de fila tintado (amarillo `bg-amber-50`, verde `bg-emerald-50`); leyenda de colores.
+- Decisiones: el orden es sobre toda la lista (cruza proyectos); al buscar se desactiva el reordenamiento; el color solo se edita en esta ventana.
+- Verificado: migración aplicada (35 pendientes con `install_sort`), `tsc` limpio, restart de `web`, `GET`/`PATCH` probados (estado y orden, con reversa) y validaciones de error.
+
+## Pantallas por instalar: marca de página y buscador (V47) — sin commit
+
+- Se agrega `/pantallas-pendientes` a `web/app/components/page-mark.tsx` (mark `V47`): antes la página no mostraba el identificador arriba a la izquierda que sí tienen las demás.
+- Buscador en `web/app/pantallas-pendientes/page.tsx`: filtra por proyecto (código/nombre), tipo, ambiente, tensión, pitch, dimensiones, área y notas; insensible a acentos; muestra "N de M pantallas".
+
+## Paleta de comandos y atajos de teclado (V46) — sin commit
+
+> Navegación y acciones por teclado en cualquier sección, para reducir el uso del mouse. Sin atajos que choquen con Chrome/TeamViewer (se evita Ctrl+F): se usa el estándar Ctrl+K / Ctrl+Shift+P y secuencias `G` + letra.
+
+- Componente global `web/app/components/command-palette.tsx` montado en `web/app/layout.tsx` (dentro de `ProfileGate`): buscador de secciones, acciones de creación y utilidades. Filtro insensible a acentos; navegación con flechas, `Enter` ejecuta y `Esc` cierra.
+- Atajos: **Ctrl K** (abrir/cerrar), **Ctrl ⇧ P** (abrir), **Ctrl /** o **?** (ayuda de atajos), secuencias **G** → I/A/G/P/T/D/N/S/U/C (Inicio, Agenda, Gantt, Proyectos, Tickets, Pendientes, Notificaciones, Pantallas por instalar, Usuarios, Clientes). No se disparan mientras se escribe en un campo.
+- Comandos "Crear": Nuevo proyecto, ticket, actividad, usuario, cliente, técnico y ubicación. Respetan los permisos RBAC (se ocultan según `/api/session`). Si la página destino no es la actual navegan con `?new=1`; si ya están en ella disparan el evento `sg:new`.
+- Registro compartido de navegación `web/app/lib/nav.ts` (usado por `app-nav.tsx` y la paleta) para no duplicar la lista de secciones/etiquetas.
+- Hook `web/app/lib/use-new-query.ts`: abre el modal de alta al llegar con `?new=1` o al recibir `sg:new`, y limpia el parámetro de la URL.
+- Cableado de `?new=1`/`sg:new` en: `web/app/proyectos/page.tsx`, `web/app/tickets/page.tsx`, `web/app/components/week-agenda.tsx` (nueva actividad), `web/app/admin/usuarios/page.tsx`, `web/app/admin/clientes/page.tsx`, `web/app/admin/tecnicos/page.tsx`, `web/app/admin/ubicaciones/page.tsx`.
+- Botón "Buscar… Ctrl K" en la cabecera del menú lateral (`app-nav.tsx`) que abre la paleta.
+- Verificado: `tsc --noEmit` sin errores; build y arranque de `web` OK.
+
+## Roles y permisos por secciones (V45) — sin commit
+
+> Sin contraseñas por ahora: cada persona elige su perfil al entrar ("¿Quién eres?") y ese perfil determina qué secciones ve en el menú. Se introduce un modelo RBAC de roles → permisos por sección y asignación multi-rol por usuario.
+
+- Migración `061_roles_rbac.sql` (aplicada): tipos enumerados `app_role_code`; tablas `roles`, `role_permissions` (rol × sección con `can_view/create/update/delete/export`), `user_roles` (multi-rol). Seed de 9 roles (admin, coordinator, technician, vendedor, tecnico_operativo, director_proyecto, finanzas, logistica, gerente) y 31 secciones. Backfill `user_roles` desde `users.role` y reglas de visibilidad por rol.
+- Retrocompatibilidad: `users.role` (enum `user_role`) se conserva; al asignar roles se mapea a `admin`/`coordinator`/`technician` cuando alguno de ellos está presente.
+- API: `GET /api/roles`; `GET/PUT /api/admin/roles/[id]/permissions`; `GET/PUT /api/users/[id]/roles`. `GET /api/session` ahora devuelve `roles` y `sections` (lista de secciones visibles, `["*"]` para admin).
+- UI `/admin/roles`: matriz de checkboxes sección × acción por rol, agrupada; guardado transaccional.
+- UI `/admin/usuarios`: el modal asigna múltiples perfiles (chips); la lista muestra todos los roles del usuario.
+- Gating del menú (`web/app/components/app-nav.tsx`): cada ítem declara su `section`; se filtran según `sections` de `/api/session`. Nuevos enlaces: "Pantallas por instalar", "Roles y permisos", "KPIs semanales".
+- Puerta de perfil (`web/app/components/profile-gate.tsx`): si no existe cookie `sg_uid`, se muestra a pantalla completa el selector de perfil y no se entra a la app hasta elegir. Envuelve el layout.
+- Archivos: `web/app/lib/permissions.ts`, `web/app/api/roles/route.ts`, `web/app/api/admin/roles/[id]/permissions/route.ts`, `web/app/api/users/[id]/roles/route.ts`, `web/app/admin/roles/page.tsx`, `web/app/components/profile-gate.tsx`.
+
 ## Auditoría de medidas de pantallas (V44) — sin commit
 
 > Un usuario detectó cenefas con alto «0.016 m» en vez de «0.16 m» (error de orden de magnitud al capturar). Se agrega una auditoría que recorre todas las pantallas de proyectos no cancelados y marca posibles errores de captura.

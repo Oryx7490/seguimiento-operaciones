@@ -294,7 +294,7 @@ export default function ProjectDetailPage() {
       <CollapsibleSection
         title="Asignaciones"
         summary={`${detail.assignments.length} ${detail.assignments.length === 1 ? "técnico" : "técnicos"}`}
-        defaultOpen={detail.assignments.length === 0}
+        defaultOpen={true}
         actions={<AddAssignment projectId={id} onSaved={reload} />}
       >
         {detail.assignments.length === 0 ? (
@@ -302,12 +302,15 @@ export default function ProjectDetailPage() {
         ) : (
           <ul className="mt-3 divide-y divide-zinc-100">
             {detail.assignments.map((a) => (
-              <li key={a.id} className="flex items-center justify-between gap-3 py-2">
+              <li key={a.id} className="flex flex-wrap items-center justify-between gap-3 py-2">
                 <span className="text-sm text-zinc-800">
                   {a.technician_name}
                   <span className="ml-1 text-xs text-zinc-400">{a.role}</span>
                 </span>
-                <span className="text-xs text-zinc-400">{formatDateTime(a.assigned_at)}</span>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-zinc-400">{formatDateTime(a.assigned_at)}</span>
+                  <RemoveAssignment assignmentId={a.id} technicianName={a.technician_name} onSaved={reload} />
+                </div>
               </li>
             ))}
           </ul>
@@ -909,6 +912,48 @@ function AddAssignment({ projectId, onSaved }: { projectId: string; onSaved: () 
     </>
   );
 }
+
+function RemoveAssignment({
+  assignmentId,
+  technicianName,
+  onSaved,
+}: {
+  assignmentId: string;
+  technicianName: string;
+  onSaved: () => void;
+}) {
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function remove() {
+    if (!window.confirm(`¿Quitar a ${technicianName} de este proyecto?`)) return;
+    setSaving(true);
+    setErr(null);
+    try {
+      await fetchJson(`/api/assignments/${assignmentId}`, { method: "DELETE" });
+      onSaved();
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <span className="flex items-center gap-2">
+      {err && <span className="text-xs text-red-600" role="alert">{err}</span>}
+      <button
+        type="button"
+        onClick={() => void remove()}
+        disabled={saving}
+        aria-label={`Quitar a ${technicianName} del proyecto`}
+        className="rounded px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+      >
+        {saving ? "Quitando…" : "Quitar"}
+      </button>
+    </span>
+  );
+}
 /* ── Pantallas a instalar ─────────────────── */
 
 interface ScreenPatchInput {
@@ -936,6 +981,8 @@ function ScreensSection({ projectId, detail, onSaved, summary, defaultOpen }: { 
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   const [orderSaving, setOrderSaving] = useState(false);
+  const [installSel, setInstallSel] = useState<{ screen: ProjectScreen } | null>(null);
+  const [installDate, setInstallDate] = useState(() => new Date().toISOString().slice(0,10));
   const [orderError, setOrderError] = useState<string | null>(null);
 
   async function persistOrder(ids: string[]) {
@@ -979,7 +1026,7 @@ function ScreensSection({ projectId, detail, onSaved, summary, defaultOpen }: { 
     void persistOrder(next);
   }
 
-  async function patchScreenStatus(screen: ProjectScreen, patch: { installed?: boolean; cancelled?: boolean; cancel_reason?: string | null }) {
+  async function patchScreenStatus(screen: ProjectScreen, patch: { installed?: boolean; cancelled?: boolean; cancel_reason?: string | null; screen_installed_at?: string | null }) {
     await fetchJson(`/api/projects/${projectId}`, {
       method: "PATCH",
       body: JSON.stringify({ screens: [{ id: screen.id, ...patch }] }),
@@ -1199,13 +1246,13 @@ ${equipRows ? `<tfoot><tr><td>Total de equipos</td><td style="text-align:right">
                 </th>
                 <th className="px-3 py-2 text-left">Tipo</th>
                 <th className="px-3 py-2 text-left">Descripción</th>
-                <th className="px-3 py-2 text-center">Cantidad</th>
+                <th className="px-2 py-2 text-center">Cant</th>
                 <th className="px-3 py-2 text-left">Dimensiones</th>
                 <th className="px-3 py-2 text-right">Pitch (mm)</th>
-                <th className="px-3 py-2 text-right">m² (total)</th>
-                <th className="px-3 py-2 text-right">MP (total)</th>
+                <th className="px-3 py-2 text-right">m²</th>
+                <th className="px-3 py-2 text-right">MP</th>
                 <th className="px-3 py-2 text-left">Controladores</th>
-                <th className="px-3 py-2 text-left">Fichas</th>
+                <th className="px-2 py-2 text-left w-16">Fichas</th>
                 <th className="px-3 py-2 text-right">Acciones</th>
               </tr>
             </thead>
@@ -1314,7 +1361,7 @@ ${equipRows ? `<tfoot><tr><td>Total de equipos</td><td style="text-align:right">
                   <td className="px-3 py-2">
                     <ScreenControllersCell screen={s} onEdit={() => setCtlEditing(s)} />
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="px-2 py-2">
                     <ScreenPdf screen={s} onChanged={onSaved} />
                   </td>
                   <td className="px-3 py-2 text-right">
@@ -1358,7 +1405,13 @@ ${equipRows ? `<tfoot><tr><td>Total de equipos</td><td style="text-align:right">
           rect={menu.rect}
           onClose={() => setMenu(null)}
           onEdit={() => setEditing(menu.screen)}
-          onInstall={() => void patchScreenStatus(menu.screen, { installed: !menu.screen.installed })}
+          onInstall={() => {
+            if (menu.screen.installed) {
+              void patchScreenStatus(menu.screen, { installed: false, screen_installed_at: null });
+            } else {
+              setInstallSel({ screen: menu.screen });
+            }
+          }}
           onCancel={() => setCancelling(menu.screen)}
           onReactivate={() => void patchScreenStatus(menu.screen, { cancelled: false })}
           onDelete={() => void remove(menu.screen)}
@@ -2034,9 +2087,32 @@ function ScreenPdf({ screen, onChanged }: { screen: ProjectScreen; onChanged: ()
       {screen.attachment.length === 0 ? (
         <button
           onClick={() => inputRef.current?.click()}
-          className="rounded border border-dashed border-zinc-300 px-2 py-1 text-xs text-zinc-500 hover:bg-zinc-50"
+          aria-label={uploading ? "Subiendo ficha" : "Agregar ficha (PDF/imagen/DWG)"}
+          title={uploading ? "Subiendo…" : "Agregar ficha (PDF/imagen/DWG)"}
+          className="inline-flex items-center justify-center rounded border border-dashed border-zinc-300 p-1 text-zinc-400 hover:bg-zinc-50"
         >
-          {uploading ? "Subiendo…" : "+ Ficha (PDF/imagen/DWG)"}
+          {uploading ? (
+            <span className="text-[10px] leading-none">…</span>
+          ) : (
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+              <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+              <path d="M10 9H8" />
+              <path d="M16 13H8" />
+              <path d="M16 17H8" />
+            </svg>
+          )}
         </button>
       ) : (
         <ul className="space-y-1">
@@ -2044,7 +2120,7 @@ function ScreenPdf({ screen, onChanged }: { screen: ProjectScreen; onChanged: ()
             <li key={a.id} className="flex items-center gap-1 text-xs">
               <a
                 href={`/api/attachments/${a.id}/download`}
-                className="max-w-[140px] truncate text-sky-700 underline-offset-2 hover:underline"
+                className="max-w-[55px] truncate text-sky-700 underline-offset-2 hover:underline"
                 title={a.file_name}
               >
                 {a.file_name}
@@ -2061,9 +2137,43 @@ function ScreenPdf({ screen, onChanged }: { screen: ProjectScreen; onChanged: ()
           <li>
             <button
               onClick={() => inputRef.current?.click()}
-              className="text-xs text-sky-700 hover:underline"
+              aria-label={uploading ? "Subiendo ficha" : "Agregar ficha (PDF/imagen/DWG)"}
+              title={uploading ? "Subiendo…" : "Agregar ficha (PDF/imagen/DWG)"}
+              className="inline-flex items-center justify-center rounded p-0.5 text-[#D52B1E] hover:bg-red-50"
             >
-              {uploading ? "Subiendo…" : "+ Adjuntar archivo"}
+              {uploading ? (
+                <span className="text-[10px] leading-none">…</span>
+              ) : (
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="14"
+                  height="14"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" />
+                  <path d="M14 2v4a2 2 0 0 0 2 2h4" />
+                  <path d="M10 9H8" />
+                  <path d="M16 13H8" />
+                  <path d="M16 17H8" />
+                </svg>
+              )}
+            </button>
+            <button
+              onClick={() => inputRef.current?.click()}
+              aria-label="Adjuntar otro archivo"
+              title="Adjuntar otro archivo"
+              className="ml-0.5 inline-flex items-center justify-center rounded p-0.5 text-zinc-400 hover:bg-zinc-50"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M5 12h14" />
+                <path d="M12 5v14" />
+              </svg>
             </button>
           </li>
         </ul>

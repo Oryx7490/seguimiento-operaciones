@@ -19,6 +19,7 @@ import {
 } from "@/app/components/ui";
 import { projectStatusLabel } from "@/app/lib/format";
 import { ColumnSelector } from "@/app/components/column-selector";
+import { useNewQuery } from "@/app/lib/use-new-query";
 import type { CatalogItem, CatalogsResponse, Client, ClientsResponse, Location, LocationsResponse, Project, ProjectsResponse } from "@/app/lib/types";
 
 const PROJECT_COLUMNS = [
@@ -63,6 +64,8 @@ export default function ProjectsPage() {
   const [cols, setCols] = useState<Record<string, boolean>>(DEFAULT_PROJECT_COLS);
 
   const toggleCol = (key: string) => setCols((prev) => ({ ...prev, [key]: !prev[key] }));
+
+  useNewQuery("proyecto", () => setOpen(true));
 
   const params = new URLSearchParams();
   if (statusFilter) params.set("status", statusFilter);

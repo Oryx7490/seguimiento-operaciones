@@ -479,15 +479,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
             );
           }
           if (sc.installed === true) {
+            const instDate = (sc as any).screen_installed_at ? (new Date((sc as any).screen_installed_at).toISOString()) : null;
             await client.query(
               `UPDATE project_screens
-                  SET installed = true, cancelled = false, cancel_reason = NULL
+                  SET installed = true, cancelled = false, cancel_reason = NULL, screen_installed_at = COALESCE($3, now())
                 WHERE id = $1 AND project_id = $2`,
-              [sc.id, id]
+              [sc.id, id, instDate]
             );
           } else if (sc.installed === false && sc.cancelled === undefined) {
             await client.query(
-              `UPDATE project_screens SET installed = false WHERE id = $1 AND project_id = $2`,
+              `UPDATE project_screens SET installed = false, screen_installed_at = NULL WHERE id = $1 AND project_id = $2`,
               [sc.id, id]
             );
           }

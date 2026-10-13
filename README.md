@@ -43,8 +43,8 @@ La web queda en http://localhost:8080 y la consola de MinIO en http://localhost:
 ## Respaldo y restauración
 
 ```bash
-db/backup/backup.sh [destino]    # pg_dump (formato custom) + mirror de MinIO
-db/backup/restore.sh [pg.dump] [dir_minio]   # restaura sobre los datos actuales
+db/backup/backup.sh [destino]    # pg_dump (formato custom) + mirrors MinIO
+db/backup/restore.sh [pg.dump] [dir_minio] [dir_minio_whatsapp]
 ```
 
 Sugerencia cron (diario 00:15 + copia a segundo dispositivo):
@@ -52,6 +52,12 @@ Sugerencia cron (diario 00:15 + copia a segundo dispositivo):
 ```
 15 0 * * * /home/saruman/seguimiento-operaciones/db/backup/backup.sh /mnt/respaldo >> /var/log/seguimiento-backup.log 2>&1
 ```
+
+La ingesta de WhatsApp usa el esquema `whatsapp_capture` en PostgreSQL y un bucket
+independiente `whatsapp-media` en MinIO. Los archivos se nombran por SHA-256 y las tablas
+`media_objects`/`message_media` reutilizan el mismo objeto cuando se reenvía. El respaldo
+incluye ambos buckets. El plugin de OpenClaw está en `openclaw-whatsapp-capture/`; la
+captura permanece desactivada hasta configurar chats permitidos y credenciales locales.
 
 ## Decisiones de modelo incorporadas
 
@@ -107,6 +113,28 @@ Sugerencia cron (diario 00:15 + copia a segundo dispositivo):
 - ⏳ **Fase 1 — inicio de sesión:** omitido por ahora; despliegue en red local con actor único y
   captura de usuario en el cliente (ver sección 12 del diseño).
 - ⏳ **Fase 6 — Piloto:** prueba en campo, ajustes y autorización de salida.
+
+## API de lectura de WhatsApp
+
+Los tokens de agente también pueden consultar los mensajes entrantes y fotografías de los grupos
+capturados. Crea un token en **Configuración → Agentes CLI** y envíalo como
+`Authorization: Bearer <token>`.
+
+- `GET /api/agent/whatsapp` — índice y parámetros disponibles.
+- `GET /api/agent/whatsapp/messages` — mensajes, texto/caption, remitente y adjuntos.
+- `GET /api/agent/whatsapp/photos` — fotografías guardadas y sus captions.
+- `GET /api/agent/whatsapp/photos/{sha256}` — descarga autenticada del archivo original.
+
+Los listados aceptan `q`, `sender`, `conversation_id`, `after`, `before`, `limit` y `offset`.
+Las fechas `after`/`before` deben estar en ISO 8601 con zona horaria; `before` es exclusivo.
+`limit` va de 1 a 200 (predeterminado 50). Ejemplo:
+
+```bash
+curl -H "Authorization: Bearer ag_..." \
+  "http://localhost:8080/api/agent/whatsapp/messages?limit=20"
+```
+
+Estos endpoints solo leen mensajes entrantes y fotos. No envían mensajes de WhatsApp.
 
 ## Cambios de esquema recientes
 

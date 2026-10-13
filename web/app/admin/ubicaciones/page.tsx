@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { fetchJson, useResource } from "@/app/lib/client";
+import { useNewQuery } from "@/app/lib/use-new-query";
 import {
   Badge,
   DangerButton,
@@ -20,6 +21,11 @@ export default function LocationsPage() {
   const { data, error, reload } = useResource<LocationsResponse>("/api/locations");
   const [selected, setSelected] = useState<Location | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+
+  useNewQuery("ubicacion", () => {
+    setSelected(null);
+    setModalOpen(true);
+  });
   const [search, setSearch] = useState("");
 
   const locations = useMemo(() => {
