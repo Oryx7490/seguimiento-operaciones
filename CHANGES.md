@@ -1,5 +1,19 @@
 # Constraints & Decisions Log
 
+## 0.4.8 — RC (2026-10-15)
+
+Release candidate con reconocimiento facial y OCR de las fotos de WhatsApp, asistencia derivada de fotos, pólizas de mantenimiento, metas/equipo y mejoras de UX.
+
+- **Fotos de WhatsApp (V48–V48c)**: visor por semana ISO, miniaturas 25% cacheadas en MinIO, etiquetas, vínculos a proyecto/ticket, campos administrables y API de administración.
+- **Reconocimiento facial (V49)**: `face-service` (insightface ArcFace 512d, ONNX) + pgvector; enrolamiento a técnicos/usuarios, sugerencias por centroide y cabeza clasificadora nocturna.
+- **OCR + asistencia por fotos (V50–V58)**: Tesseract; candidatos de entrada/salida con identificación por remitente/rostro, captura manual de fecha/hora, borrado de horas, notas y detección de discrepancia; segmentos por día para dobles/triples turnos.
+- **Horas y metas (V52/V54/V55)**: perfil de horas por técnico (día/semana/mes/año), resumen semanal por equipo con KPIs y metas con semáforo.
+- **Pólizas de mantenimiento (V61)**: catálogo por cliente (cambios de contenido o mantenimiento correctivo/preventivo) y tipo de actividad "Póliza".
+- **Selector de cliente unificado (V63)**: 5 más usados, búsqueda y alta de cliente en línea en todas las secciones que asocian cliente.
+- **Actividades↔tickets (V57)**, cliente visible en actividades con ticket (V60), creación de ticket desde W23 (V59).
+- **WhatsApp**: perfiles de participantes, import/export y mejoras del agente.
+- **Infra**: PostgreSQL migrado a `pgvector/pgvector:pg17`; nuevo servicio `face-service`; fix de `FOR UPDATE` en notificaciones.
+
 ## Selector de cliente unificado (5 más usados + alta en línea) (V63) — sin commit
 
 - Nuevo componente reutilizable `web/app/components/client-select.tsx` (`ClientSelect`): busca clientes, muestra los **5 más usados** (por `activity_count`) y, si la búsqueda no coincide, ofrece **«+ Agregar “<texto>”»** que abre un modal **Nuevo cliente** (nombre, contacto, teléfono, correo) sin salir del flujo.
