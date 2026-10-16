@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { fetchJson, useResource } from "@/app/lib/client";
+import ClientSelect from "@/app/components/client-select";
 import { useNewQuery } from "@/app/lib/use-new-query";
 import {
   Badge,
@@ -221,12 +222,7 @@ function LocationModal({
             <TextInput value={name} onChange={setName} placeholder="P. ej. Sucursal Reforma" />
           </Field>
           <Field label="Cliente">
-            <Select
-              value={clientId}
-              onChange={setClientId}
-              placeholder="— Sin cliente —"
-              options={clients.map((c) => ({ value: c.id, label: c.name }))}
-            />
+            <ClientSelect value={clientId} onChange={setClientId} placeholder="Buscar cliente…" clearLabel="— Sin cliente —" />
           </Field>
         </div>
         <Field label="Dirección">

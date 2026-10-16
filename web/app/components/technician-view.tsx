@@ -21,6 +21,7 @@ import {
   Textarea,
   TextInput,
 } from "@/app/components/ui";
+import ClientSelect from "@/app/components/client-select";
 import type {
   Activity,
   ActivitiesResponse,
@@ -35,6 +36,7 @@ import type {
 const KIND_META: Record<Activity["kind"], { label: string; chip: string }> = {
   project: { label: "Proyecto", chip: "bg-sky-100 text-sky-700" },
   ticket: { label: "Ticket", chip: "bg-violet-100 text-violet-700" },
+  policy: { label: "Póliza", chip: "bg-teal-100 text-teal-700" },
   internal: { label: "Interna", chip: "bg-zinc-100 text-zinc-600" },
 };
 
@@ -370,12 +372,7 @@ function ReportTicketModal({
           <Textarea value={description} onChange={setDescription} rows={3} placeholder="¿Qué ocurrió y dónde?" />
         </Field>
         <Field label="Cliente">
-          <Select
-            value={clientId}
-            onChange={setClientId}
-            placeholder="Seleccionar cliente…"
-            options={clients.map((c) => ({ value: c.id, label: c.name }))}
-          />
+          <ClientSelect value={clientId} onChange={setClientId} placeholder="Buscar cliente…" />
         </Field>
         <Field label="Prioridad">
           <Select

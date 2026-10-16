@@ -33,11 +33,19 @@ export async function GET(request: NextRequest) {
 
   const conversationId = params.get("conversation_id")?.trim() || null;
   if (conversationId && !parseId(conversationId)) return jsonError("conversation_id inválido");
+  const participantId = params.get("participant_id")?.trim() || null;
+  const userId = params.get("user_id")?.trim() || null;
+  const technicianId = params.get("technician_id")?.trim() || null;
+  if (participantId && !parseId(participantId)) return jsonError("participant_id inválido");
+  if (userId && !parseId(userId)) return jsonError("user_id inválido");
+  if (technicianId && !parseId(technicianId)) return jsonError("technician_id inválido");
 
   const q = params.get("q")?.trim() || null;
   const sender = params.get("sender")?.trim() || null;
+  const direction = params.get("direction")?.trim() || "inbound";
   if (q && q.length > 200) return jsonError("q no puede exceder 200 caracteres");
   if (sender && sender.length > 128) return jsonError("sender no puede exceder 128 caracteres");
+  if (!["inbound", "outbound", "all"].includes(direction)) return jsonError("direction debe ser inbound, outbound o all");
 
   const after = parseTimestamp(params.get("after"));
   const before = parseTimestamp(params.get("before"));
@@ -46,13 +54,17 @@ export async function GET(request: NextRequest) {
   }
   if (after && before && after >= before) return jsonError("after debe ser anterior a before");
 
-  const where = ["c.is_group = true", "m.direction = 'inbound'"];
+  const where = ["c.is_group = true"];
   const values: unknown[] = [];
   const add = (clause: string, value: unknown) => {
     values.push(value);
     where.push(clause.replaceAll("$N", `$${values.length}`));
   };
+  if (direction !== "all") add("m.direction = $N::whatsapp_capture.message_direction", direction);
   if (conversationId) add("c.id = $N::uuid", conversationId);
+  if (participantId) add("p.id = $N::uuid", participantId);
+  if (userId) add("p.user_id = $N::uuid", userId);
+  if (technicianId) add("p.technician_id = $N::uuid", technicianId);
   if (q) add("m.body_text ILIKE '%' || $N || '%'", q);
   if (sender) add("(m.sender_id = $N OR m.sender_display_name ILIKE '%' || $N || '%')", sender);
   if (after) add("COALESCE(m.sent_at, m.received_at) >= $N::timestamptz", after);
@@ -64,6 +76,7 @@ export async function GET(request: NextRequest) {
       `SELECT count(*)::int AS total
          FROM whatsapp_capture.messages m
          JOIN whatsapp_capture.conversations c ON c.id = m.conversation_id
+         LEFT JOIN whatsapp_capture.participants p ON p.id = m.participant_id
         WHERE ${filter}`,
       values
     );
@@ -72,6 +85,11 @@ export async function GET(request: NextRequest) {
       `SELECT m.id, m.external_message_id, m.sender_id, m.sender_display_name,
               m.body_text, m.message_kind,
               COALESCE(m.sent_at, m.received_at) AS sent_at,
+              CASE WHEN p.id IS NULL THEN NULL ELSE jsonb_build_object(
+                'id', p.id, 'display_name', p.display_name, 'company_status', p.company_status,
+                'user_id', p.user_id, 'user_name', u.name,
+                'technician_id', p.technician_id, 'technician_name', t.display_name
+              ) END AS participant,
               c.id AS conversation_id, c.display_name AS conversation_name,
               COALESCE((
                 SELECT jsonb_agg(jsonb_build_object(
@@ -82,6 +100,7 @@ export async function GET(request: NextRequest) {
                   'size_bytes', mm.size_bytes,
                   'sha256', CASE WHEN mm.sha256 IS NULL THEN NULL ELSE btrim(mm.sha256::text) END,
                   'state', mm.state,
+                  'missing_reason', CASE WHEN mm.state = 'unavailable' THEN COALESCE(mm.last_error, 'media_unavailable') ELSE NULL END,
                   'download_path', CASE
                     WHEN mm.state = 'stored' AND mm.media_kind = 'image' AND mm.sha256 IS NOT NULL
                     THEN '/api/agent/whatsapp/photos/' || btrim(mm.sha256::text)
@@ -93,13 +112,16 @@ export async function GET(request: NextRequest) {
               ), '[]'::jsonb) AS attachments
          FROM whatsapp_capture.messages m
          JOIN whatsapp_capture.conversations c ON c.id = m.conversation_id
+         LEFT JOIN whatsapp_capture.participants p ON p.id = m.participant_id
+         LEFT JOIN users u ON u.id = p.user_id
+         LEFT JOIN technicians t ON t.id = p.technician_id
         WHERE ${filter}
         ORDER BY COALESCE(m.sent_at, m.received_at) DESC, m.id DESC
         LIMIT $${pageValues.length - 1} OFFSET $${pageValues.length}`,
       pageValues
     );
     const [count, messages] = await Promise.all([countPromise, messagesPromise]);
-    return jsonOk({ messages: messages.rows, total: count.rows[0]?.total ?? 0, ...page });
+    return jsonOk({ messages: messages.rows, total: count.rows[0]?.total ?? 0, direction, ...page });
   } catch {
     return jsonError("No se pudieron consultar los mensajes de WhatsApp", 500);
   }

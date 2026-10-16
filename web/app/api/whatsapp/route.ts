@@ -11,7 +11,7 @@ import { jsonOk } from "@/app/lib/api";
 export async function GET() {
   return jsonOk({
     resource: "whatsapp",
-    description: "Lectura, etiquetado y administración de los archivos capturados del grupo de WhatsApp.",
+    description: "Lectura, etiquetado y administración de archivos capturados y de referencias de medios omitidos en respaldos.",
     conventions: {
       media_id: "El identificador canónico de un archivo es su SHA-256 (64 hex).",
       dates: "Filtros de fecha en formato YYYY-MM-DD, zona America/Mexico_City.",
@@ -24,7 +24,7 @@ export async function GET() {
       {
         method: "GET",
         path: "/api/whatsapp/media",
-        description: "Lista archivos. Filtros: from, to, sender, conversation, tag, q, kind, favorite, archived, limit, offset.",
+        description: "Lista archivos y marcadores de medios no incluidos. Los marcadores devuelven state=unavailable, fecha, remitente y missing_reason. Filtros: from, to, sender, conversation, tag, q, kind, favorite, archived, limit, offset.",
       },
       { method: "GET", path: "/api/whatsapp/media/{sha256}", description: "Sirve el binario original." },
       { method: "GET", path: "/api/whatsapp/media/{sha256}/thumb", description: "Miniatura al 25% (JPEG, cacheada)." },
@@ -51,6 +51,11 @@ export async function GET() {
       { method: "GET", path: "/api/whatsapp/face-identities", description: "Identidades faciales enroladas con conteo de caras." },
       { method: "GET", path: "/api/whatsapp/conversations", description: "Conversaciones (grupos/chats) con conteos." },
       { method: "GET", path: "/api/whatsapp/conversations/{id}/messages", description: "Mensajes de una conversación (texto + adjuntos)." },
+      { method: "GET", path: "/api/whatsapp/participants", description: "Perfiles, alias históricos y remitentes aún no identificados (admin/coordinator)." },
+      { method: "POST", path: "/api/whatsapp/participants", description: "Crea un perfil independiente y opcionalmente lo vincula con usuarios/técnicos y alias (admin/coordinator)." },
+      { method: "GET/PATCH", path: "/api/whatsapp/participants/{id}", description: "Consulta o edita el perfil y sus vínculos (admin/coordinator)." },
+      { method: "GET/POST", path: "/api/whatsapp/participants/{id}/aliases", description: "Lista o agrega un teléfono/nombre/ID con categoría y vigencia (admin/coordinator)." },
+      { method: "PATCH", path: "/api/whatsapp/participants/{id}/aliases/{aliasId}", description: "Verifica o retira un alias estableciendo valid_to; conserva su historial." },
       { method: "POST", path: "/api/whatsapp/media/thumbs/backfill", description: "Genera las miniaturas faltantes (idempotente)." },
     ],
   });

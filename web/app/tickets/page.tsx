@@ -18,6 +18,7 @@ import {
   Textarea,
 } from "@/app/components/ui";
 import { ColumnSelector } from "@/app/components/column-selector";
+import ClientSelect from "@/app/components/client-select";
 import { useNewQuery } from "@/app/lib/use-new-query";
 import type { CatalogItem, CatalogsResponse, Client, ClientsResponse, Location, LocationsResponse, Ticket, TicketsResponse } from "@/app/lib/types";
 
@@ -302,7 +303,7 @@ function NewTicketModal({ onClose, onSaved }: { onClose: () => void; onSaved: ()
             {ticketType === "internal" ? (
               <TextInput value="RGB" onChange={() => {}} disabled />
             ) : (
-              <Select value={clientId} onChange={setClientId} placeholder="Seleccionar cliente…" options={clients.map((c) => ({ value: c.id, label: c.name }))} />
+              <ClientSelect value={clientId} onChange={setClientId} placeholder="Buscar cliente…" />
             )}
           </Field>
           <Field label="Prioridad">

@@ -16,9 +16,11 @@ import {
   Spinner,
   TextInput,
 } from "@/app/components/ui";
+import ClientSelect from "@/app/components/client-select";
 import type {
   Activity,
   ActivitiesResponse,
+  CatalogsResponse,
   ClientsResponse,
   ProjectsResponse,
   TechniciansResponse,
@@ -39,7 +41,13 @@ const ACTIVE_PROJECT_STATUS = new Set([
 const KIND_META: Record<Activity["kind"], { label: string; chip: string }> = {
   project: { label: "Proyecto", chip: "bg-sky-100 text-sky-700" },
   ticket: { label: "Ticket", chip: "bg-violet-100 text-violet-700" },
+  policy: { label: "Póliza", chip: "bg-teal-100 text-teal-700" },
   internal: { label: "Interna", chip: "bg-zinc-100 text-zinc-600" },
+};
+
+const POLICY_TYPE_LABEL: Record<string, string> = {
+  content_changes: "Cambios de contenido",
+  corrective_preventive: "Mantenimiento correctivo y preventivo",
 };
 
 const STATUS_META: Record<Activity["status"], { label: string; card: string; dot: string }> = {
@@ -321,7 +329,7 @@ export default function WeekAgenda() {
           </button>
 
           <div className="ml-auto flex overflow-hidden rounded-md border border-zinc-300 text-sm">
-            {([["", "Todo"], ["project", "Proyectos"], ["ticket", "Tickets"], ["internal", "Internas"]] as const).map(([v, label]) => (
+            {([["", "Todo"], ["project", "Proyectos"], ["ticket", "Tickets"], ["policy", "Pólizas"], ["internal", "Internas"]] as const).map(([v, label]) => (
               <button key={v} onClick={() => setKind(v)} className={`px-3 py-1.5 ${kind === v ? "bg-zinc-900 text-white" : "bg-white text-zinc-600 hover:bg-zinc-50"}`}>
                 {label}
               </button>
@@ -603,6 +611,7 @@ function ActivityCard({ activity, onClick, large, showTechs, variant, draggable,
   const kind = KIND_META[activity.kind];
   const code = activity.kind === "project" ? activity.projects[0]?.project_code
     : activity.kind === "ticket" ? activity.ticket_code
+    : activity.kind === "policy" ? (activity.policy_name?.slice(0, 12) ?? "Póliza")
     : activity.internal_activity_type_name?.slice(0, 10);
   const hours = `${activity.planned_hours}h`;
   const overdue = activityEnd(activity) < todayIso() && (activity.status === "planned" || activity.status === "in_progress");
@@ -611,10 +620,14 @@ function ActivityCard({ activity, onClick, large, showTechs, variant, draggable,
     ? (activity.projects[0]?.project_name ?? activity.description)
     : activity.kind === "ticket"
       ? (activity.client_name ?? activity.ticket_title ?? "Ticket")
-      : (activity.internal_activity_type_name ?? "Interna");
+      : activity.kind === "policy"
+        ? (activity.client_name ?? activity.policy_name ?? "Póliza")
+        : (activity.internal_activity_type_name ?? "Interna");
   const daySub = activity.kind === "ticket" && activity.ticket_title
     ? `${activity.ticket_code ?? "Ticket"} · ${activity.ticket_title}`
-    : null;
+    : activity.kind === "policy" && activity.policy_name
+      ? activity.policy_name
+      : null;
 
   return (
     <div
@@ -884,6 +897,12 @@ function ActivityDetailModal({ activity, technicians, onClose, onSaved }: {
         {activity.kind === "internal" && activity.internal_activity_type_name && (
           <p className="text-xs text-zinc-500">Tipo interno: {activity.internal_activity_type_name}</p>
         )}
+        {activity.kind === "policy" && activity.policy_name && (
+          <p className="text-xs text-zinc-500">
+            Póliza: {activity.policy_name}
+            {activity.policy_type ? ` · ${POLICY_TYPE_LABEL[activity.policy_type] ?? activity.policy_type}` : ""}
+          </p>
+        )}
 
         <div className="space-y-3 border-t border-zinc-100 pt-4">
           <h3 className="text-xs font-semibold uppercase tracking-wide text-zinc-500">Fechas y duración</h3>
@@ -968,15 +987,18 @@ function NewActivityModal({ date, initialTechIds, technicians, onClose, onSaved 
   const [kind, setKind] = useState<string>("project");
   const [projectId, setProjectId] = useState("");
   const [ticketId, setTicketId] = useState("");
+  const [policyId, setPolicyId] = useState("");
   const [internalTypeId, setInternalTypeId] = useState("");
   const [plannedHours, setPlannedHours] = useState("8");
   const [techIds, setTechIds] = useState<string[]>(initialTechIds);
   const [projects, setProjects] = useState<ProjectsResponse["projects"]>([]);
   const [tickets, setTickets] = useState<TicketsResponse["tickets"]>([]);
+  const [policies, setPolicies] = useState<{ id: string; name: string; client_name: string }[]>([]);
   const [internalTypes, setInternalTypes] = useState<{ id: string; name: string }[]>([]);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [showAllProjects, setShowAllProjects] = useState(false);
+  const [newTicketTitle, setNewTicketTitle] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -984,12 +1006,14 @@ function NewActivityModal({ date, initialTechIds, technicians, onClose, onSaved 
       fetchJson<ProjectsResponse>("/api/projects"),
       fetchJson<TicketsResponse>("/api/tickets"),
       fetchJson<{ internal_activity_types: { id: string; name: string }[] }>("/api/catalogs"),
+      fetchJson<{ policies: { id: string; name: string; client_name: string }[] }>("/api/maintenance-policies?status=active"),
     ])
-      .then(([p, t, c]) => {
+      .then(([p, t, c, pol]) => {
         if (cancelled) return;
         setProjects(p.projects);
         setTickets(t.tickets);
         setInternalTypes(c.internal_activity_types);
+        setPolicies(pol.policies);
       })
       .catch(() => {});
     return () => {
@@ -1022,6 +1046,10 @@ function NewActivityModal({ date, initialTechIds, technicians, onClose, onSaved 
       setErr("Selecciona un ticket");
       return;
     }
+    if (kind === "policy" && !policyId) {
+      setErr("Selecciona la póliza de mantenimiento");
+      return;
+    }
     if (kind === "internal" && !internalTypeId) {
       setErr("Selecciona el tipo interno");
       return;
@@ -1037,6 +1065,7 @@ function NewActivityModal({ date, initialTechIds, technicians, onClose, onSaved 
           planned_hours: Number(plannedHours) || 0,
           project_ids: kind === "project" ? [projectId] : [],
           ticket_id: kind === "ticket" ? ticketId : undefined,
+          maintenance_policy_id: kind === "policy" ? policyId : undefined,
           internal_activity_type_id: kind === "internal" ? internalTypeId : undefined,
           technician_ids: techIds,
         }),
@@ -1070,6 +1099,7 @@ function NewActivityModal({ date, initialTechIds, technicians, onClose, onSaved 
           <Select value={kind} onChange={setKind} options={[
             { value: "project", label: "Proyecto" },
             { value: "ticket", label: "Ticket" },
+            { value: "policy", label: "Póliza de mantenimiento" },
             { value: "internal", label: "Interna" },
           ]} />
         </Field>
@@ -1108,6 +1138,7 @@ function NewActivityModal({ date, initialTechIds, technicians, onClose, onSaved 
               onChange={setTicketId}
               placeholder="Buscar ticket por código o título…"
               topN={5}
+              onCreate={(query) => setNewTicketTitle(query)}
               options={tickets
                 .filter((t) => t.status !== "cancelled")
                 .map((t) => ({
@@ -1115,6 +1146,16 @@ function NewActivityModal({ date, initialTechIds, technicians, onClose, onSaved 
                   label: `${t.code} · ${t.title}`,
                   frequency: recencyScore(t.last_activity_at ?? t.updated_at),
                 }))}
+            />
+          </Field>
+        )}
+        {kind === "policy" && (
+          <Field label="Póliza de mantenimiento">
+            <Select
+              value={policyId}
+              onChange={setPolicyId}
+              placeholder="Selecciona la póliza…"
+              options={policies.map((p) => ({ value: p.id, label: `${p.client_name} · ${p.name}` }))}
             />
           </Field>
         )}
@@ -1140,6 +1181,149 @@ function NewActivityModal({ date, initialTechIds, technicians, onClose, onSaved 
             })}
           </div>
         </Field>
+        {err && <p className="text-xs text-red-600">{err}</p>}
+        {newTicketTitle !== null && (
+          <QuickTicketModal
+            initialTitle={newTicketTitle}
+            onClose={() => setNewTicketTitle(null)}
+            onCreated={async (ticket) => {
+              setTicketId(ticket.id);
+              setNewTicketTitle(null);
+              try {
+                const t = await fetchJson<TicketsResponse>("/api/tickets");
+                setTickets(t.tickets);
+              } catch {
+                /* noop */
+              }
+            }}
+          />
+        )}
+      </div>
+    </Modal>
+  );
+}
+
+interface CreatedTicket {
+  id: string;
+  code: string;
+  title: string;
+  ticket_type: string;
+  status: string;
+  opened_at: string;
+}
+
+function QuickTicketModal({
+  initialTitle,
+  onClose,
+  onCreated,
+}: {
+  initialTitle: string;
+  onClose: () => void;
+  onCreated: (ticket: CreatedTicket) => void;
+}) {
+  const [clients, setClients] = useState<{ id: string; name: string }[]>([]);
+  const [priorities, setPriorities] = useState<{ id: string; name: string }[]>([]);
+  const [title, setTitle] = useState(initialTitle);
+  const [description, setDescription] = useState(initialTitle);
+  const [ticketType, setTicketType] = useState<"external" | "internal">("external");
+  const [clientId, setClientId] = useState("");
+  const [priorityId, setPriorityId] = useState("");
+  const [reportedBy, setReportedBy] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([
+      fetchJson<ClientsResponse>("/api/clients"),
+      fetchJson<CatalogsResponse>("/api/catalogs"),
+      fetchJson<{ user: { name: string } | null }>("/api/session").catch(() => ({ user: null })),
+    ])
+      .then(([c, cat, session]) => {
+        if (cancelled) return;
+        setClients(c.clients);
+        setPriorities(cat.priorities);
+        if (session?.user?.name) setReportedBy(session.user.name);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function submit() {
+    if (!title.trim()) return setErr("El título es obligatorio");
+    if (!description.trim()) return setErr("La descripción es obligatoria");
+    if (!reportedBy.trim()) return setErr("Indica quién reporta el ticket");
+    if (ticketType === "external" && !clientId) return setErr("Selecciona el cliente");
+    setSaving(true);
+    setErr(null);
+    try {
+      const { ticket } = await fetchJson<{ ticket: CreatedTicket }>("/api/tickets", {
+        method: "POST",
+        body: JSON.stringify({
+          title,
+          description,
+          ticket_type: ticketType,
+          client_id: clientId || undefined,
+          priority_id: priorityId || undefined,
+          reported_by: reportedBy || undefined,
+        }),
+      });
+      onCreated(ticket);
+    } catch (e) {
+      setErr(String(e));
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Modal
+      open={true}
+      onClose={onClose}
+      title="Nuevo ticket"
+      footer={
+        <>
+          <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
+          <PrimaryButton onClick={submit} disabled={saving}>
+            {saving ? "Creando…" : "Crear ticket"}
+          </PrimaryButton>
+        </>
+      }
+      wide
+    >
+      <div className="space-y-4">
+        <Field label="Título del ticket">
+          <TextInput value={title} onChange={setTitle} placeholder="Resumen breve del problema" />
+        </Field>
+        <Field label="Descripción">
+          <TextInput value={description} onChange={setDescription} placeholder="Detalles del ticket" />
+        </Field>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Tipo de ticket">
+            <Select
+              value={ticketType}
+              onChange={(v) => setTicketType(v as "external" | "internal")}
+              options={[
+                { value: "external", label: "Externo (cliente)" },
+                { value: "internal", label: "Interno (RGB)" },
+              ]}
+            />
+          </Field>
+          <Field label="Cliente">
+            {ticketType === "internal" ? (
+              <TextInput value="RGB" onChange={() => {}} disabled />
+            ) : (
+              <ClientSelect value={clientId} onChange={setClientId} placeholder="Buscar cliente…" />
+            )}
+          </Field>
+          <Field label="Prioridad">
+            <Select value={priorityId} onChange={setPriorityId} placeholder="— Sin prioridad —" options={priorities.map((p) => ({ value: p.id, label: p.name }))} />
+          </Field>
+          <Field label="Reportado por">
+            <TextInput value={reportedBy} onChange={setReportedBy} placeholder="Quién reporta" />
+          </Field>
+        </div>
         {err && <p className="text-xs text-red-600">{err}</p>}
       </div>
     </Modal>

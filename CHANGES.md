@@ -1,5 +1,70 @@
 # Constraints & Decisions Log
 
+## Selector de cliente unificado (5 más usados + alta en línea) (V63) — sin commit
+
+- Nuevo componente reutilizable `web/app/components/client-select.tsx` (`ClientSelect`): busca clientes, muestra los **5 más usados** (por `activity_count`) y, si la búsqueda no coincide, ofrece **«+ Agregar “<texto>”»** que abre un modal **Nuevo cliente** (nombre, contacto, teléfono, correo) sin salir del flujo.
+- Aplicado en todas las secciones que asocian cliente: **Pólizas** (V62), **Tickets** (alta y edición), **Proyectos** (ya lo tenía), **Ubicaciones**, **Ticket rápido del técnico** y **Ticket rápido de W23**.
+- **V62**: el modal de **Nueva/Editar póliza** ahora tiene identificador (`W63`).
+- Verificado: `/api/clients` expone `activity_count`; páginas 200; `tsc` limpio.
+
+## Pólizas de mantenimiento como tipo de actividad (V61) — sin commit
+
+> Nuevo catálogo de **pólizas de mantenimiento** por cliente (cambios de contenido o mantenimiento correctivo/preventivo) y un cuarto tipo de actividad en W23.
+
+- **Migración `073`**: tabla `maintenance_policies` (cliente, ubicación opcional, nombre, `policy_type`, vigencia, estado, notas) + `activities.maintenance_policy_id`; sección RBAC `admin.polizas`. **Migración `074`**: el trigger `check_activity_links` ahora acepta póliza como vínculo válido.
+- **API** `GET/POST /api/maintenance-policies` y `PATCH /api/maintenance-policies/{id}` (alta, edición, cambio de estado). `GET /api/activities` calcula `kind='policy'` y devuelve `policy_name`/`policy_type` y el cliente de la póliza. `POST /api/activities` acepta `maintenance_policy_id`.
+- **UI**: página **`/admin/polizas`** (nav «Pólizas de mantenimiento», mark `V62`) con listado, filtros por estado y modal de alta/edición (cliente, ubicación, tipo, vigencia, estado, notas). En **W23** se agrega el tipo **«Póliza de mantenimiento»** con selector de pólizas activas; la tarjeta y el detalle muestran el nombre de la póliza, su tipo y el cliente.
+- Tipos: `content_changes` (cambios de contenido) y `corrective_preventive` (mantenimiento correctivo y preventivo).
+- Verificado: crear póliza, crear actividad tipo póliza (kind=policy, cliente Price Shoes) y limpieza; páginas 200; `tsc` limpio.
+
+## Actividades con ticket muestran el cliente (V60) — sin commit
+
+- En `GET /api/activities`, `client_name` solo se tomaba de los proyectos; para actividades ligadas a un **ticket** quedaba nulo (la UI mostraba "—").
+- Se agrega `LEFT JOIN clients c ON c.id = t.client_id` y `client_name` cae al cliente del ticket cuando no hay proyecto.
+- Verificado: las 17 actividades con ticket ahora muestran su cliente (SSL, Quarry, Price Shoes…). `tsc` limpio.
+
+## W23: crear ticket desde "Nueva actividad" cuando no hay coincidencias (V59) — sin commit
+
+- En el buscador de **Ticket** del modal **W23** (Nueva actividad) se habilita `onCreate`: cuando la búsqueda no arroja resultados ("Sin coincidencias"), aparece **«+ Agregar “<texto>”»**.
+- Al elegirlo se abre un modal compacto **Nuevo ticket** (prellenado con el texto buscado en título y descripción; tipo externo/interno, cliente, prioridad y "reportado por" con el usuario de sesión), reutilizando `POST /api/tickets`.
+- Al crearlo, se selecciona automáticamente en la actividad y se refresca la lista de tickets.
+- Verificado: `POST /api/tickets` con el payload del modal crea el ticket (TK-029 de prueba, luego eliminado); `tsc` limpio; `/agenda` 200.
+
+## V52: borrar hora, notas y discrepancia robusta (V58) — sin commit
+
+- **Botón × para borrar** la hora de entrada y de salida en la bandeja (`/admin/asistencia-fotos`); la hora queda en blanco. (También se puede limpiar con la tecla Suprimir en el input nativo.) Al registrar, si se manda la hora vacía, se respeta el blanco (no se reintroduce la hora de la imagen).
+- **Notas por candidato**: migración `072` (`attendance_candidates.notes`), `PATCH /api/attendance/candidates/{id}` con `{ notes }`, columna "Notas" en la bandeja con guardado.
+- **Discrepancia más robusta**: se comparan los **conjuntos de horas** (imagen: `shift_in`/`shift_out`/`image_time` vs manual), de modo que también detecta cuando la foto trae hora pero no se sabe si es entrada o salida.
+- Verificado: nota guardada/leída/limpiada; aprobar con entrada vacía deja `check_in` en blanco; discrepancia detectada con `Imagen: 14:07 · Manual: 23:30`. `tsc` limpio.
+
+## Actividades que atienden un ticket asignan al técnico al ticket (V57) — sin commit
+
+> Al crear o editar una actividad ligada a un ticket y elegir técnicos, esos técnicos quedan también como **asignados al ticket** (tabla `assignments`), de modo que el ticket refleja que ya tiene una o más personas asignadas.
+
+- **Lib** `web/app/lib/assignments.ts`: `syncTicketAssignments(client, ticketId, technicianIds)` crea una asignación activa por técnico si no existe; **no quita** asignaciones previas (un técnico puede venir de otra actividad).
+- **API actividades**: `POST /api/activities` sincroniza al crear (si hay ticket); `PATCH /api/activities/{id}` sincroniza al actualizar técnicos (usa el `ticket_id` de la actividad).
+- El detalle del ticket ya lista las asignaciones activas, así que el técnico aparece de inmediato en el ticket.
+- Verificado: crear actividad con ticket + 2 técnicos agregó al no asignado y respetó al ya asignado; `PATCH` idem; datos de prueba revertidos. `tsc` limpio.
+
+## Perfiles de participantes de WhatsApp para RGB-Gantt (2026-10-14) — sin commit
+
+- **Migración `071_whatsapp_participant_identities.sql` aplicada**: agrega perfiles independientes de usuarios/técnicos y alias de teléfono, ID de WhatsApp y nombre. Cada alias conserva categoría, verificación y fechas de vigencia; números temporales, secundarios, actuales y anteriores no se sustituyen entre sí.
+- Se crean perfiles iniciales para los técnicos y directivos/coordinadores existentes. Los teléfonos copiados de sus fichas quedan como sugerencias no verificadas. Los contactos remitente→técnico ya verificados se importan como alias confirmados y el flujo actual de aprobación de asistencia sincroniza nuevos mapeos.
+- **Clasificación**: `current`, `former`, `external`, `unclassified`; un perfil puede quedar sin user_id/technician_id, para personas externas, exintegrantes o participantes aún no dados de alta.
+- **Resolución**: las coincidencias de alias se aplican a mensajes históricos y nuevos si están verificadas y no son ambiguas; se respeta la vigencia en la fecha del mensaje. Si hay más de una identidad válida, `participant_id` permanece NULL.
+- Estado al aplicar: 20 perfiles iniciales (17 técnicos y 3 usuarios de coordinación/administración), 44 mensajes asociados por mapeos previamente verificados y 29 combinaciones remitente/nombre pendientes de identificar.
+- **API agente**: `GET /api/agent/whatsapp/participants`; `/messages` ahora filtra por `participant_id`, `user_id` o `technician_id` y devuelve la identidad enlazada.
+- **API RGB-Gantt (admin/coordinator)**: `GET/POST /api/whatsapp/participants`, `GET/PATCH /{id}`, `GET/POST /{id}/aliases`, `PATCH /{id}/aliases/{aliasId}`. Retirar un número marca `valid_to`; el alias no se elimina.
+- Especificación y ejemplos agregados al README y a `GET /api/whatsapp`.
+
+## Importación semanal de respaldos de WhatsApp (2026-10-14) — sin commit
+
+- El texto del ZIP `RGB_Pendientes.zip` registra las fotos como `<image omitted>` junto con la fecha, hora y remitente: se contaron 2,826 fotos con marca explícita y 249 marcas de álbum. Este ZIP solo contiene `chat.txt` y `chat.md`; no incluye binarios.
+- **Migración `070_whatsapp_export_import.sql`**: lotes, huellas/ocurrencias para deduplicar respaldos solapados, correspondencia por renglón y auditoría de adjuntos/archivos.
+- **Importador** `web/scripts/import-whatsapp-export.mjs`: modo de análisis por defecto; `--apply` importa mensajes, placeholders `unavailable` y archivos con referencia inequívoca. ZIP idéntico no se repite; archivos sin referencia y coincidencias ambiguas se reportan.
+- **Búsqueda/API**: las referencias a medios ausentes aparecen en `/api/whatsapp/media` y en la galería con remitente y fecha/hora. El API de agente acepta `direction=inbound|outbound|all` (predeterminado `inbound`).
+- Ejecutada la migración 070 e importado el lote `e4a42ce3-8c8e-47b7-b565-aeb75a6df437` con estado `partial`: 5,097 mensajes insertados, 0 solapamientos y 0 coincidencias ambiguas. Los 3,428 adjuntos/referencias no tienen binarios en este ZIP y quedaron como faltantes; 3,075 son marcadores de imagen/álbum (el número de fotos dentro de cada álbum no se conoce).
+
 ## Captura manual de fecha/hora y discrepancia (V56) — sin commit
 
 > En la bandeja de asistencia (V52) el revisor puede **escribir la fecha y las horas** cuando la foto no las trae, y el sistema marca la **discrepancia** cuando lo capturado difiere de lo leído en la imagen.

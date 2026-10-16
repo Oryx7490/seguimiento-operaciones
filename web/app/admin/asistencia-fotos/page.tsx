@@ -23,6 +23,7 @@ interface Candidate {
   image_date: string | null;
   manual_override: boolean;
   override_note: string | null;
+  notes: string | null;
   worked_hours: number | null;
   location: string | null;
   app: string | null;
@@ -149,6 +150,7 @@ export default function AttendancePhotosPage() {
                   <th className="px-3 py-2 text-left">Hora / jornada</th>
                   <th className="px-3 py-2 text-left">Tipo</th>
                   <th className="px-3 py-2 text-left">Señales</th>
+                  <th className="px-3 py-2 text-left">Notas</th>
                   <th className="px-3 py-2 text-right">Acción</th>
                 </tr>
               </thead>
@@ -200,18 +202,45 @@ function Row({
   const imageEnd = candidate.shift_out ?? (candidate.event_type === "salida" ? candidate.image_time : null);
   const toInput = (t: string | null) => (t ? t.slice(0, 5) : "");
   const hms = (t: string | null) => (t ? (t.length === 5 ? `${t}:00` : t.slice(0, 8)) : null);
+  const imageTimes = [candidate.shift_in, candidate.shift_out, candidate.image_time]
+    .filter(Boolean)
+    .map((t) => hms(t as string))
+    .sort();
 
   const [date, setDate] = useState(candidate.event_date ?? candidate.image_date ?? "");
   const [entrada, setEntrada] = useState(toInput(imageStart ?? candidate.event_time));
   const [salida, setSalida] = useState(toInput(imageEnd));
+  const [notes, setNotes] = useState(candidate.notes ?? "");
+  const [notesSaved, setNotesSaved] = useState(candidate.notes ?? "");
+  const [savingNotes, setSavingNotes] = useState(false);
 
-  const imageHasTime = imageStart != null || imageEnd != null;
+  const manualTimes = [hms(entrada || null), hms(salida || null)].filter(Boolean).sort();
+  const imageHasTime = imageTimes.length > 0;
   const imageHasDate = candidate.image_date != null;
   const discrepancy =
-    (imageHasTime && (hms(entrada || null) !== hms(imageStart) || hms(salida || null) !== hms(imageEnd))) ||
+    (imageHasTime && imageTimes.join("|") !== manualTimes.join("|")) ||
     (imageHasDate && date !== candidate.image_date);
 
   const done = candidate.status !== "pending";
+
+  const notesDirty = notes.trim() !== notesSaved.trim();
+
+  async function saveNotes() {
+    setSavingNotes(true);
+    setErr(null);
+    try {
+      const r = await fetchJson<{ candidate: { notes: string | null } }>(`/api/attendance/candidates/${candidate.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ notes: notes.trim() || null }),
+      });
+      setNotesSaved(r.candidate.notes ?? "");
+      setNotes(r.candidate.notes ?? "");
+    } catch (e) {
+      setErr(String(e));
+    } finally {
+      setSavingNotes(false);
+    }
+  }
 
   async function act(action: "approve" | "reject") {
     setBusy(true);
@@ -309,6 +338,15 @@ function Row({
                 onChange={(e) => setEntrada(e.target.value)}
                 className="w-24 rounded-md border border-zinc-300 px-1.5 py-1 text-xs"
               />
+              <button
+                type="button"
+                onClick={() => setEntrada("")}
+                title="Borrar hora de entrada"
+                aria-label="Borrar hora de entrada"
+                className="rounded px-1 text-sm leading-none text-zinc-400 hover:bg-rose-50 hover:text-rose-600"
+              >
+                ×
+              </button>
             </label>
             <label className="flex items-center gap-1 text-[11px] text-zinc-500">
               <span className="w-12">Salida</span>
@@ -318,11 +356,18 @@ function Row({
                 onChange={(e) => setSalida(e.target.value)}
                 className="w-24 rounded-md border border-zinc-300 px-1.5 py-1 text-xs"
               />
+              <button
+                type="button"
+                onClick={() => setSalida("")}
+                title="Borrar hora de salida"
+                aria-label="Borrar hora de salida"
+                className="rounded px-1 text-sm leading-none text-zinc-400 hover:bg-rose-50 hover:text-rose-600"
+              >
+                ×
+              </button>
             </label>
-            {(imageStart || imageEnd || candidate.image_time) && (
-              <div className="text-[10px] text-zinc-400">
-                imagen: {imageStart ?? candidate.image_time ?? "—"} – {imageEnd ?? "—"}
-              </div>
+            {imageTimes.length > 0 && (
+              <div className="text-[10px] text-zinc-400">imagen: {imageTimes.join(" – ")}</div>
             )}
             {discrepancy && <div className="text-[10px] font-medium text-amber-600">discrepancia con la imagen</div>}
           </div>
@@ -353,6 +398,26 @@ function Row({
         </div>
         {candidate.location && <div className="mt-1 max-w-52 truncate text-[11px] text-zinc-400" title={candidate.location}>{candidate.location}</div>}
         {err && <div className="mt-1 text-[11px] text-red-600">{err}</div>}
+      </td>
+      <td className="px-3 py-2 align-top">
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          rows={2}
+          maxLength={2000}
+          placeholder="Notas…"
+          className="w-44 resize-y rounded-md border border-zinc-300 px-2 py-1 text-xs"
+        />
+        {notesDirty && (
+          <button
+            type="button"
+            onClick={() => void saveNotes()}
+            disabled={savingNotes}
+            className="mt-1 rounded-md bg-zinc-900 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-zinc-700 disabled:opacity-40"
+          >
+            {savingNotes ? "Guardando…" : "Guardar nota"}
+          </button>
+        )}
       </td>
       <td className="px-3 py-2 text-right">
         {done ? (

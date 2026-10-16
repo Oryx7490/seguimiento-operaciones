@@ -317,10 +317,13 @@ export interface Activity {
   status: "planned" | "in_progress" | "completed" | "cancelled";
   planned_hours: number;
   worked_hours: number;
-  kind: "project" | "ticket" | "internal";
+  kind: "project" | "ticket" | "policy" | "internal";
   ticket_id: string | null;
   ticket_code: string | null;
   ticket_title: string | null;
+  maintenance_policy_id: string | null;
+  policy_name: string | null;
+  policy_type: string | null;
   internal_activity_type_id: string | null;
   internal_activity_type_name: string | null;
   projects: ActivityProject[];

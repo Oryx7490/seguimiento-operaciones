@@ -99,11 +99,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const eventType = body.event_type ?? candidate.event_type;
     const eventTime = body.event_time !== undefined ? parseTime(body.event_time ?? null) : candidate.event_time;
+    // Si el revisor manda las horas de entrada/salida (aunque vengan vacías), se respetan tal cual.
+    const manualTimes = body.shift_in !== undefined || body.shift_out !== undefined;
     const shiftIn = body.shift_in !== undefined ? parseTime(body.shift_in ?? null) : candidate.shift_in;
     const shiftOut = body.shift_out !== undefined ? parseTime(body.shift_out ?? null) : candidate.shift_out;
 
-    const started = shiftIn || (eventType === "entrada" ? eventTime : null);
-    const ended = shiftOut || (eventType === "salida" ? eventTime : null);
+    const started = manualTimes ? shiftIn : shiftIn || (eventType === "entrada" ? eventTime : null);
+    const ended = manualTimes ? shiftOut : shiftOut || (eventType === "salida" ? eventTime : null);
     if (!started && !ended) {
       await client.query("ROLLBACK");
       return jsonError("El candidato no tiene hora de entrada ni de salida");
@@ -111,16 +113,23 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const hours = hoursBetween(started, ended);
 
     // Discrepancia: solo si la imagen traía hora/fecha y lo capturado difiere.
-    const imageStart = candidate.shift_in || (candidate.event_type === "entrada" ? candidate.image_time : null);
-    const imageEnd = candidate.shift_out || (candidate.event_type === "salida" ? candidate.image_time : null);
+    // Se comparan los conjuntos de horas (funciona aunque no se sepa entrada/salida).
     const norm = (t: string | null) => (t ? t.slice(0, 8) : null);
-    const imageHasTime = imageStart != null || imageEnd != null;
+    const imageTimes = [candidate.shift_in, candidate.shift_out, candidate.image_time]
+      .filter(Boolean)
+      .map((t) => norm(t as string))
+      .sort();
+    const manualTimeList = [started, ended]
+      .filter(Boolean)
+      .map((t) => norm(t as string))
+      .sort();
+    const imageHasTime = imageTimes.length > 0;
     const imageHasDate = candidate.image_date != null;
-    const timeDiffers = imageHasTime && (norm(started) !== norm(imageStart) || norm(ended) !== norm(imageEnd));
+    const timeDiffers = imageHasTime && imageTimes.join("|") !== manualTimeList.join("|");
     const dateDiffers = imageHasDate && eventDate !== candidate.image_date;
     const manualOverride = timeDiffers || dateDiffers;
     const overrideNote = manualOverride
-      ? `Imagen: ${imageStart ?? "—"}–${imageEnd ?? "—"}${candidate.image_date ? ` (${candidate.image_date})` : ""} · Manual: ${started ?? "—"}–${ended ?? "—"} (${eventDate})`
+      ? `Imagen: ${imageTimes.join("–") || "—"}${candidate.image_date ? ` (${candidate.image_date})` : ""} · Manual: ${manualTimeList.join("–") || "—"} (${eventDate})`
       : null;
 
     const techRes = await client.query(`SELECT display_name FROM technicians WHERE id = $1`, [technicianId]);
@@ -193,5 +202,34 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     return jsonError("No se pudo aplicar el candidato", 500, String(err));
   } finally {
     client.release();
+  }
+}
+
+/** Guarda las notas del revisor sobre el candidato. */
+export async function PATCH(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params;
+  if (!parseId(id)) return jsonError("id inválido");
+
+  let body: { notes?: unknown };
+  try {
+    body = await request.json();
+  } catch {
+    return jsonError("Cuerpo inválido");
+  }
+  if (body.notes !== undefined && body.notes !== null && typeof body.notes !== "string") {
+    return jsonError("notes inválido");
+  }
+  const notes = typeof body.notes === "string" ? body.notes.trim() : null;
+  if (notes && notes.length > 2000) return jsonError("notes demasiado largas (máx 2000)");
+
+  try {
+    const { rows } = await pool.query(
+      `UPDATE attendance_candidates SET notes = $2 WHERE id = $1 RETURNING id, notes`,
+      [id, notes && notes.length > 0 ? notes : null]
+    );
+    if (rows.length === 0) return jsonError("Candidato no encontrado", 404);
+    return jsonOk({ candidate: rows[0] });
+  } catch (err) {
+    return jsonError("No se pudieron guardar las notas", 500, String(err));
   }
 }

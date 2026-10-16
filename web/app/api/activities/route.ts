@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
 import { getCurrentUserId, jsonError, jsonOk, parseId } from "@/app/lib/api";
 import { logActivity } from "@/app/lib/audit";
+import { syncTicketAssignments } from "@/app/lib/assignments";
 
 const ACTIVITY_STATUS = ["planned", "in_progress", "completed", "cancelled"];
 
@@ -57,20 +58,29 @@ export async function GET(req: NextRequest) {
              a.ticket_id,
              t.code AS ticket_code,
              t.title AS ticket_title,
+             c.name AS ticket_client_name,
+             a.maintenance_policy_id,
+             mp.name AS policy_name,
+             mp.policy_type AS policy_type,
+             mpc.name AS policy_client_name,
              it.id AS internal_activity_type_id,
              it.name AS internal_activity_type_name,
              CASE
                WHEN EXISTS (SELECT 1 FROM activity_projects ap WHERE ap.activity_id = a.id) THEN 'project'
                WHEN a.ticket_id IS NOT NULL THEN 'ticket'
+               WHEN a.maintenance_policy_id IS NOT NULL THEN 'policy'
                ELSE 'internal'
              END AS kind,
              COALESCE(SUM(te.duration_hours), 0) AS worked_hours
       FROM activities a
       LEFT JOIN tickets t ON t.id = a.ticket_id
+      LEFT JOIN clients c ON c.id = t.client_id
+      LEFT JOIN maintenance_policies mp ON mp.id = a.maintenance_policy_id
+      LEFT JOIN clients mpc ON mpc.id = mp.client_id
       LEFT JOIN internal_activity_types it ON it.id = a.internal_activity_type_id
       LEFT JOIN time_entries te ON te.activity_id = a.id
       WHERE ${where.join(" AND ")}
-      GROUP BY a.id, t.id, it.id
+      GROUP BY a.id, t.id, c.name, mp.id, mpc.id, it.id
       ORDER BY a.date, a.created_at`;
     const { rows } = await pool.query(sql, params);
 
@@ -118,11 +128,15 @@ export async function GET(req: NextRequest) {
       ticket_id: r.ticket_id,
       ticket_code: r.ticket_code,
       ticket_title: r.ticket_title,
+      maintenance_policy_id: r.maintenance_policy_id,
+      policy_name: r.policy_name,
+      policy_type: r.policy_type,
       internal_activity_type_id: r.internal_activity_type_id,
       internal_activity_type_name: r.internal_activity_type_name,
       projects: projectsByActivity.get(r.id) ?? [],
       technicians: techsByActivity.get(r.id) ?? [],
-      client_name: projectsByActivity.get(r.id)?.[0]?.client_name ?? null,
+      client_name:
+        projectsByActivity.get(r.id)?.[0]?.client_name ?? r.ticket_client_name ?? r.policy_client_name ?? null,
     }));
 
     return jsonOk({ activities });
@@ -140,6 +154,7 @@ export async function POST(req: NextRequest) {
     planned_hours?: number;
     project_ids?: string[];
     ticket_id?: string;
+    maintenance_policy_id?: string;
     internal_activity_type_id?: string;
     technician_ids?: string[];
     actor_id?: string;
@@ -161,9 +176,10 @@ export async function POST(req: NextRequest) {
   const projectIds = Array.isArray(body.project_ids) ? body.project_ids.filter((id) => id && parseId(id)) : [];
   const techIds = Array.isArray(body.technician_ids) ? body.technician_ids.filter((id) => id && parseId(id)) : [];
   const hasTicket = Boolean(body.ticket_id && parseId(body.ticket_id as string));
+  const hasPolicy = Boolean(body.maintenance_policy_id && parseId(body.maintenance_policy_id as string));
   const hasInternal = Boolean(body.internal_activity_type_id && parseId(body.internal_activity_type_id as string));
-  if (projectIds.length === 0 && !hasTicket && !hasInternal) {
-    return jsonError("La actividad debe ligarse a al menos un proyecto, un ticket o un tipo interno");
+  if (projectIds.length === 0 && !hasTicket && !hasPolicy && !hasInternal) {
+    return jsonError("La actividad debe ligarse a al menos un proyecto, un ticket, una póliza o un tipo interno");
   }
   if (techIds.length === 0) return jsonError("technician_ids debe tener al menos un técnico");
   const planned = Number(body.planned_hours) || 0;
@@ -178,6 +194,10 @@ export async function POST(req: NextRequest) {
       const ok = await client.query(`SELECT id FROM tickets WHERE id = $1`, [body.ticket_id]);
       if (ok.rows.length === 0) throw new Error("ticket no encontrado");
     }
+    if (hasPolicy) {
+      const ok = await client.query(`SELECT id FROM maintenance_policies WHERE id = $1`, [body.maintenance_policy_id]);
+      if (ok.rows.length === 0) throw new Error("póliza no encontrada");
+    }
     if (hasInternal) {
       const ok = await client.query(`SELECT id FROM internal_activity_types WHERE id = $1`, [body.internal_activity_type_id]);
       if (ok.rows.length === 0) throw new Error("tipo interno no encontrado");
@@ -188,10 +208,20 @@ export async function POST(req: NextRequest) {
     }
 
     const act = await client.query(
-      `INSERT INTO activities (date, end_date, description, status, planned_hours, ticket_id, internal_activity_type_id, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO activities (date, end_date, description, status, planned_hours, ticket_id, maintenance_policy_id, internal_activity_type_id, created_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING id`,
-      [date, endDate, description, status, planned, hasTicket ? body.ticket_id : null, hasInternal ? body.internal_activity_type_id : null, actorId]
+      [
+        date,
+        endDate,
+        description,
+        status,
+        planned,
+        hasTicket ? body.ticket_id : null,
+        hasPolicy ? body.maintenance_policy_id : null,
+        hasInternal ? body.internal_activity_type_id : null,
+        actorId,
+      ]
     );
     const activityId = act.rows[0].id;
 
@@ -206,6 +236,10 @@ export async function POST(req: NextRequest) {
         `INSERT INTO activity_technicians (activity_id, technician_id) VALUES ($1, $2)`,
         [activityId, tid]
       );
+    }
+    // La actividad atiende un ticket: refleja a los técnicos como asignados al ticket.
+    if (hasTicket) {
+      await syncTicketAssignments(client, body.ticket_id as string, techIds);
     }
     await logActivity(client, {
       entity_type: "activity",

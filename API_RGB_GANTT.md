@@ -96,6 +96,33 @@ Auth agente. Path UUID. Body `{status* in ["planned","in_progress","completed","
 ### `GET /api/agent/me` — `web/app/api/agent/me/route.ts:5`
 Auth agente. `200 {agent:{token_id,token_name,actor_id}}`.
 
+### WhatsApp para consultas e integración con RGB-Gantt
+
+Todos los endpoints `/api/agent/whatsapp/*` requieren token de agente.
+
+- `GET /api/agent/whatsapp/participants?q=&user_id=&technician_id=&include_unresolved=true&limit=50&offset=0`
+  devuelve `{participants,total,unresolved_senders,limit,offset}`. El listado del agente omite
+  los números/alias de contacto; `participants` contiene `id`, `display_name`, `company_status`,
+  `user_id`, `user_name`, `technician_id`, `technician_name` y `message_count`. Los remitentes
+  sin coincidencia segura se agregan como `unresolved_senders` con remitente, nombre, cantidad y
+  primera/última fecha.
+- `GET /api/agent/whatsapp/messages?q=&sender=&conversation_id=&participant_id=&user_id=&technician_id=&direction=inbound|outbound|all&after=&before=&limit=50&offset=0`
+  devuelve `{messages,total,direction,limit,offset}`. Cada mensaje incluye `participant` (objeto
+  con perfil y vínculos o `null`), texto/caption, remitente, conversación y adjuntos.
+- Un perfil se resuelve con alias verificados que estén vigentes en la fecha del mensaje. Si hay
+  más de una persona posible, queda sin `participant_id`; la integración debe presentar esa
+  identidad para revisión y no inferir el vínculo por similitud.
+
+Perfiles y alias se administran desde RGB-Gantt con sesión y rol `admin` o `coordinator`:
+
+- `GET/POST /api/whatsapp/participants` lista/crea perfiles; `GET/PATCH /api/whatsapp/participants/{id}`
+  consulta/edita el perfil.
+- `GET/POST /api/whatsapp/participants/{id}/aliases` lista/agrega alias; `PATCH
+  /api/whatsapp/participants/{id}/aliases/{aliasId}` verifica o cierra su vigencia (`valid_to`).
+- `company_status`: `current`, `former`, `external`, `unclassified`. Los vínculos a usuario/técnico
+  son opcionales. Los teléfonos guardan categoría `primary`, `permanent_secondary`, `temporary`
+  o `previous`; al reemplazar el principal, el anterior se conserva y se cierra su vigencia.
+
 ### `GET/POST /api/agent-tokens`, `DELETE /api/agent-tokens/[id]` — sin auth (ver §3)
 
 ### `GET /api/projects?q=&status=` — `web/app/api/projects/route.ts`

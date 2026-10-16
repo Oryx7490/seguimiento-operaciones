@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { fetchJson, useResource } from "@/app/lib/client";
+import ClientSelect from "@/app/components/client-select";
 import { formatDateTime, ticketStatusLabel } from "@/app/lib/format";
 import {
   Badge,
@@ -342,11 +343,7 @@ function EditTicket({ detail, onSaved }: { detail: TicketDetail; onSaved: () => 
               {t.ticket_type === "internal" ? (
                 <TextInput value="RGB" onChange={() => {}} disabled />
               ) : (
-                <Select
-                  value={clientId}
-                  onChange={setClientId}
-                  options={clients.map((c) => ({ value: c.id, label: c.name }))}
-                />
+                <ClientSelect value={clientId} onChange={setClientId} placeholder="Buscar cliente…" />
               )}
             </Field>
             <Field label="Sucursal / ubicación a atender" hint="Se filtra por el cliente del ticket. Puedes dejarla en «Sin sucursal».">

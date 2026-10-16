@@ -23,7 +23,7 @@ export async function GET(request: NextRequest) {
 
   if (kind && !ALLOWED_KINDS.has(kind)) return jsonError("kind inválido");
 
-  const where: string[] = ["mm.state = 'stored'", "mm.sha256 IS NOT NULL"];
+  const where: string[] = ["((mm.state = 'stored' AND mm.sha256 IS NOT NULL) OR mm.state = 'unavailable')"];
   const vals: unknown[] = [];
   const add = (clause: string, value: unknown) => {
     vals.push(value);
@@ -31,12 +31,12 @@ export async function GET(request: NextRequest) {
   };
 
   if (kind) add("mm.media_kind = $N::whatsapp_capture.media_kind", kind);
-  if (favorite) where.push("mo.is_favorite = true");
-  if (archived === "true") where.push("mo.is_archived = true");
-  else if (archived !== "all") where.push("mo.is_archived = false");
+  if (favorite) where.push("COALESCE(mo.is_favorite, false) = true");
+  if (archived === "true") where.push("COALESCE(mo.is_archived, false) = true");
+  else if (archived !== "all") where.push("COALESCE(mo.is_archived, false) = false");
   if (from) add("(COALESCE(m.sent_at, m.received_at) AT TIME ZONE 'America/Mexico_City')::date >= $N::date", from);
   if (to) add("(COALESCE(m.sent_at, m.received_at) AT TIME ZONE 'America/Mexico_City')::date <= $N::date", to);
-  if (sender) add("m.sender_id = $N", sender);
+  if (sender) add("COALESCE(m.sender_id, m.sender_display_name) = $N", sender);
   if (conversation) add("c.id = $N::uuid", conversation);
   if (tag) add("EXISTS (SELECT 1 FROM whatsapp_capture.media_tags t WHERE t.sha256 = mm.sha256 AND lower(t.tag) = lower($N))", tag);
   if (q) {
@@ -51,10 +51,11 @@ export async function GET(request: NextRequest) {
   try {
     const { rows } = await pool.query(
       `SELECT mm.id AS media_id, mm.sha256, mm.file_name, mm.media_kind, mm.content_type, mm.size_bytes,
+              mm.state, CASE WHEN mm.state = 'unavailable' THEN COALESCE(mm.last_error, 'media_unavailable') ELSE NULL END AS missing_reason,
               m.id AS message_id, m.sender_id, m.sender_display_name, m.direction, m.body_text AS caption,
               COALESCE(m.sent_at, m.received_at) AS at,
               c.id AS conversation_id, c.display_name AS conversation_name, c.is_group,
-              mo.note, mo.is_favorite, mo.is_archived,
+              mo.note, COALESCE(mo.is_favorite, false) AS is_favorite, COALESCE(mo.is_archived, false) AS is_archived,
               COALESCE((
                 SELECT json_agg(t.tag ORDER BY lower(t.tag))
                   FROM whatsapp_capture.media_tags t WHERE t.sha256 = mm.sha256

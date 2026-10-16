@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
 import { getCurrentUserId, jsonOk, jsonError, parseId } from "@/app/lib/api";
 import { logActivity } from "@/app/lib/audit";
+import { syncTicketAssignments } from "@/app/lib/assignments";
 
 const ACTIVITY_STATUS = ["planned", "in_progress", "completed", "cancelled"];
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -66,8 +67,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const previous = await client.query<{ status: string; date: string; end_date: string | null }>(
-      `SELECT status, date::text AS date, end_date::text AS end_date FROM activities WHERE id = $1 FOR UPDATE`,
+    const previous = await client.query<{ status: string; date: string; end_date: string | null; ticket_id: string | null }>(
+      `SELECT status, date::text AS date, end_date::text AS end_date, ticket_id FROM activities WHERE id = $1 FOR UPDATE`,
       [id]
     );
     if (previous.rows.length === 0) {
@@ -110,6 +111,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
           `INSERT INTO activity_technicians (activity_id, technician_id) VALUES ($1, $2)`,
           [id, tid]
         );
+      }
+      // La actividad atiende un ticket: refleja a los técnicos como asignados al ticket.
+      if (previous.rows[0].ticket_id) {
+        await syncTicketAssignments(client, previous.rows[0].ticket_id, techIds);
       }
     }
 

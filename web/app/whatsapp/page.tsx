@@ -46,9 +46,11 @@ interface OcrData {
 
 interface MediaItem {
   media_id: string;
-  sha256: string;
+  sha256: string | null;
   file_name: string | null;
   media_kind: string;
+  state: "stored" | "unavailable" | string;
+  missing_reason: string | null;
   content_type: string | null;
   size_bytes: number | null;
   message_id: string;
@@ -71,7 +73,7 @@ interface Filters {
   senders: { id: string; name: string | null; count: number }[];
   tags: { tag: string; key: string; count: number }[];
   conversations: { id: string; name: string | null; count: number }[];
-  stats: { total: number; earliest: string | null; latest: string | null };
+  stats: { total: number; stored: number; unavailable: number; earliest: string | null; latest: string | null };
 }
 
 const KIND_OPTIONS = [
@@ -99,6 +101,17 @@ function dayLabel(iso: string): string {
 
 function timeLabel(iso: string): string {
   return new Intl.DateTimeFormat("es-MX", { timeZone: CDMX, hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
+}
+
+function dateTimeLabel(iso: string): string {
+  return new Intl.DateTimeFormat("es-MX", {
+    timeZone: CDMX,
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(iso));
 }
 
 function mondayOf(dayStr: string): Date {
@@ -230,6 +243,7 @@ export default function WhatsappPhotosPage() {
   }
 
   async function toggleFavorite(it: MediaItem) {
+    if (!it.sha256) return;
     const value = !it.is_favorite;
     patchMedia(it.sha256, { is_favorite: value });
     try {
@@ -267,7 +281,8 @@ export default function WhatsappPhotosPage() {
         </div>
         {stats && (
           <div className="text-sm text-zinc-600">
-            <span className="font-semibold">{stats.total}</span> archivos
+          <span className="font-semibold">{stats.total}</span> archivos
+          {stats.unavailable > 0 && <span className="text-amber-700"> · {stats.unavailable} sin archivo</span>}
             {stats.earliest && stats.latest && (
               <span className="text-zinc-400"> · {dayKey(stats.earliest)} a {dayKey(stats.latest)}</span>
             )}
@@ -341,9 +356,28 @@ export default function WhatsappPhotosPage() {
                       key={it.media_id}
                       className="group relative overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm transition hover:border-zinc-300 hover:shadow"
                     >
-                      <button type="button" onClick={() => setSelected(it)} className="block w-full text-left">
+                      <button
+                        type="button"
+                        onClick={() => { if (it.sha256) setSelected(it); }}
+                        disabled={!it.sha256}
+                        aria-label={it.sha256 ? `Abrir ${it.file_name || "archivo"}` : `${it.missing_reason?.includes("<album message>") ? "Álbum sin fotos incluidas" : "Foto no incluida"}, ${it.sender_display_name || it.sender_id || "remitente desconocido"}, ${dateTimeLabel(it.at)}`}
+                        className="block w-full text-left disabled:cursor-default"
+                      >
                         <div className="relative aspect-square w-full overflow-hidden bg-zinc-100">
-                          {it.media_kind === "image" ? (
+                          {it.state === "unavailable" ? (
+                            <div className="flex h-full w-full flex-col items-center justify-center gap-2 bg-amber-50 px-3 text-center text-amber-800">
+                              <svg className="h-8 w-8 opacity-70" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+                                <rect x="3" y="4" width="18" height="16" rx="2" />
+                                <circle cx="8.5" cy="9" r="1.5" />
+                                <path d="m21 15-5-5L5 20" />
+                              </svg>
+                              <span className="text-xs font-semibold">
+                                {it.missing_reason?.includes("<album message>")
+                                  ? "Álbum sin fotos incluidas"
+                                  : it.media_kind === "image" ? "Foto no incluida" : `${it.media_kind} no incluido`}
+                              </span>
+                            </div>
+                          ) : it.media_kind === "image" && it.sha256 ? (
                             // eslint-disable-next-line @next/next/no-img-element
                             <img
                               src={`/api/whatsapp/media/${it.sha256}/thumb`}
@@ -360,30 +394,32 @@ export default function WhatsappPhotosPage() {
                         <div className="p-2">
                           <p className="truncate text-xs font-medium text-zinc-700">{it.sender_display_name || it.sender_id || "—"}</p>
                           <p className="truncate text-[11px] text-zinc-400">
-                            {timeLabel(it.at)}
-                            {it.note ? ` · ${it.note}` : it.caption ? ` · ${it.caption}` : ""}
+                            {dateTimeLabel(it.at)}
+                            {it.state === "unavailable" ? " · falta el archivo multimedia" : it.note ? ` · ${it.note}` : it.caption ? ` · ${it.caption}` : ""}
                           </p>
                         </div>
                       </button>
 
-                      <button
-                        type="button"
-                        onClick={() => void toggleFavorite(it)}
-                        title={it.is_favorite ? "Quitar de favoritos" : "Marcar favorito"}
-                        aria-label={it.is_favorite ? "Quitar de favoritos" : "Marcar favorito"}
-                        className={`absolute left-1 top-1 rounded-full bg-white/85 p-1 shadow-sm backdrop-blur transition ${
-                          it.is_favorite ? "text-amber-500" : "text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-amber-500"
-                        }`}
-                      >
-                        <StarIcon filled={it.is_favorite} />
-                      </button>
+                      {it.sha256 && (
+                        <button
+                          type="button"
+                          onClick={() => void toggleFavorite(it)}
+                          title={it.is_favorite ? "Quitar de favoritos" : "Marcar favorito"}
+                          aria-label={it.is_favorite ? "Quitar de favoritos" : "Marcar favorito"}
+                          className={`absolute left-1 top-1 rounded-full bg-white/85 p-1 shadow-sm backdrop-blur transition ${
+                            it.is_favorite ? "text-amber-500" : "text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-amber-500"
+                          }`}
+                        >
+                          <StarIcon filled={it.is_favorite} />
+                        </button>
+                      )}
 
-                      {it.tags.length > 0 && (
+                      {it.sha256 && it.tags.length > 0 && (
                         <span className="absolute right-1 top-1 rounded-full bg-black/60 px-1.5 py-0.5 text-[10px] font-medium text-white">
                           {it.tags.length}
                         </span>
                       )}
-                      {it.is_archived && (
+                      {it.sha256 && it.is_archived && (
                         <span className="absolute bottom-9 left-1 rounded bg-zinc-700/80 px-1.5 py-0.5 text-[10px] font-medium text-white">
                           Archivada
                         </span>
@@ -405,11 +441,11 @@ export default function WhatsappPhotosPage() {
         )}
       </div>
 
-      {selected && (
+      {selected?.sha256 && (
         <PhotoDetail
-          item={selected}
+          item={{ ...selected, sha256: selected.sha256 }}
           onClose={() => setSelected(null)}
-          onChanged={(patch) => patchMedia(selected.sha256, patch)}
+          onChanged={(patch) => { if (selected.sha256) patchMedia(selected.sha256, patch); }}
         />
       )}
     </div>

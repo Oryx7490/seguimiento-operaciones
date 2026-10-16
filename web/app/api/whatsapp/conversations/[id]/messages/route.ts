@@ -26,7 +26,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   };
   if (from) add("(COALESCE(m.sent_at, m.received_at) AT TIME ZONE 'America/Mexico_City')::date >= $N::date", from);
   if (to) add("(COALESCE(m.sent_at, m.received_at) AT TIME ZONE 'America/Mexico_City')::date <= $N::date", to);
-  if (sender) add("m.sender_id = $N", sender);
+  if (sender) add("(m.sender_id = $N OR m.sender_display_name ILIKE '%' || $N || '%')", sender);
   if (q) add("m.body_text ILIKE '%' || $N || '%'", q);
   vals.push(limit, offset);
 
@@ -38,7 +38,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
               COALESCE((
                 SELECT json_agg(json_build_object(
                   'media_id', mm.id, 'sha256', mm.sha256, 'media_kind', mm.media_kind,
-                  'file_name', mm.file_name, 'content_type', mm.content_type, 'state', mm.state
+                  'file_name', mm.file_name, 'content_type', mm.content_type, 'state', mm.state,
+                  'missing_reason', CASE WHEN mm.state = 'unavailable' THEN COALESCE(mm.last_error, 'media_unavailable') ELSE NULL END
                 ) ORDER BY mm.ordinal)
                   FROM whatsapp_capture.message_media mm WHERE mm.message_id = m.id
               ), '[]'::json) AS attachments,

@@ -59,6 +59,38 @@ independiente `whatsapp-media` en MinIO. Los archivos se nombran por SHA-256 y l
 incluye ambos buckets. El plugin de OpenClaw está en `openclaw-whatsapp-capture/`; la
 captura permanece desactivada hasta configurar chats permitidos y credenciales locales.
 
+### Importar respaldos semanales del grupo
+
+El importador conserva mensajes y adjuntos de un ZIP de WhatsApp, concilia archivos con
+las referencias del texto y evita duplicar mensajes entre respaldos solapados. Primero
+sube el ZIP al contenedor web y ejecuta el análisis (no escribe datos):
+
+```bash
+docker compose cp /ruta/RGB_Pendientes.zip web:/tmp/RGB_Pendientes.zip
+docker compose exec -T web node scripts/import-whatsapp-export.mjs \
+  /tmp/RGB_Pendientes.zip --conversation-id 0800a1fc-a7fa-4543-875c-ddc1a9ecf721
+```
+
+Revisa el informe —fechas, remitentes, mensajes nuevos/solapados, marcadores sin archivo,
+archivos huérfanos y posibles coincidencias ambiguas— y, cuando no haya ambigüedades,
+aplica el lote:
+
+```bash
+docker compose exec -T web node scripts/import-whatsapp-export.mjs \
+  /tmp/RGB_Pendientes.zip --conversation-id 0800a1fc-a7fa-4543-875c-ddc1a9ecf721 --apply
+```
+
+El modo predeterminado es de análisis. El mismo ZIP se reconoce por SHA-256; nuevos ZIP
+con semanas repetidas se concilian por huella de mensaje y número de repetición. Las
+coincidencias dudosas detienen `--apply` para revisión manual. Las horas del texto se
+interpretan en `America/Mexico_City` por defecto.
+
+Cuando el exportado pone `<image omitted>` o `<album message>`, el mensaje conserva su
+fecha, hora y remitente, y PostgreSQL registra un adjunto `unavailable`; la galería de
+WhatsApp muestra **Foto no incluida** en esa fecha/hora. Eso permite localizar la ausencia,
+pero el texto no contiene los bytes para reconstruir la foto. Si el ZIP incluye los medios,
+el importador enlaza nombres citados con archivos y guarda los binarios en MinIO.
+
 ## Decisiones de modelo incorporadas
 
 - **Actividad multi-proyecto** (excepcional): tabla puente `activity_projects`; el sistema
@@ -121,11 +153,14 @@ capturados. Crea un token en **Configuración → Agentes CLI** y envíalo como
 `Authorization: Bearer <token>`.
 
 - `GET /api/agent/whatsapp` — índice y parámetros disponibles.
-- `GET /api/agent/whatsapp/messages` — mensajes, texto/caption, remitente y adjuntos.
+- `GET /api/agent/whatsapp/messages` — mensajes, texto/caption, remitente, identidad vinculada y adjuntos.
+- `GET /api/agent/whatsapp/participants` — perfiles enlazados a RGB-Gantt y remitentes aún por identificar.
 - `GET /api/agent/whatsapp/photos` — fotografías guardadas y sus captions.
 - `GET /api/agent/whatsapp/photos/{sha256}` — descarga autenticada del archivo original.
 
-Los listados aceptan `q`, `sender`, `conversation_id`, `after`, `before`, `limit` y `offset`.
+Mensajes acepta `q`, `sender`, `conversation_id`, `participant_id`, `user_id`, `technician_id`,
+`direction`, `after`, `before`, `limit` y `offset`. Participantes acepta `q`, `user_id`,
+`technician_id`, `include_unresolved`, `limit` y `offset`.
 Las fechas `after`/`before` deben estar en ISO 8601 con zona horaria; `before` es exclusivo.
 `limit` va de 1 a 200 (predeterminado 50). Ejemplo:
 
@@ -134,14 +169,55 @@ curl -H "Authorization: Bearer ag_..." \
   "http://localhost:8080/api/agent/whatsapp/messages?limit=20"
 ```
 
-Estos endpoints solo leen mensajes entrantes y fotos. No envían mensajes de WhatsApp.
+Estos endpoints solo leen mensajes y fotos. No envían mensajes de WhatsApp.
+
+### Perfiles e identificación de remitentes
+
+Los agentes consultan perfiles con `GET /api/agent/whatsapp/participants`. Cada mensaje incluye
+`participant` cuando un alias verificado coincide de forma única. Si no, `participant` es `null`
+y el remitente aparece en `unresolved_senders` para revisión.
+
+La administración de perfiles requiere sesión de RGB-Gantt con rol `admin` o `coordinator`:
+
+- `GET /api/whatsapp/participants?q=...` — perfiles, alias y remitentes pendientes de identificar.
+- `POST /api/whatsapp/participants` — crea un perfil independiente o lo vincula con un usuario/técnico.
+- `GET/PATCH /api/whatsapp/participants/{id}` — consulta/actualiza el vínculo y la clasificación.
+- `GET/POST /api/whatsapp/participants/{id}/aliases` — consulta/agrega números, nombres o IDs de WhatsApp.
+- `PATCH /api/whatsapp/participants/{id}/aliases/{aliasId}` — verifica o cierra la vigencia de un alias.
+
+`company_status` acepta `current`, `former`, `external` y `unclassified`; user_id y technician_id
+son opcionales, por lo que se pueden registrar exintegrantes, directivos o colaboradores externos
+sin darles de alta como empleados. Los teléfonos aceptan las categorías `primary`,
+`permanent_secondary`, `temporary` y `previous`. Se agregan números nuevos y se cierra la vigencia
+de los anteriores; los alias antiguos no se borran. `valid_from` y `valid_to` admiten `YYYY-MM-DD`
+o timestamps ISO 8601 con zona horaria; `valid_to` es exclusivo. En caso de dos coincidencias
+vigentes, el sistema deja el mensaje sin asignar.
+
+Ejemplo de perfil externo con dos nombres/identificadores confirmados:
+
+```json
+{
+  "display_name": "Nombre conocido",
+  "company_status": "external",
+  "aliases": [
+    { "identifier_type": "display_name", "identifier_value": "Nombre en WhatsApp" },
+    { "identifier_type": "phone", "identifier_value": "+52 55 1234 5678", "category": "primary" }
+  ]
+}
+```
+
+Los mensajes históricos y los nuevos se asocian con el perfil solo al coincidir con alias
+verificados. Los teléfonos importados desde la ficha del técnico se muestran como sugerencias no
+verificadas; un remitente validado previamente en asistencia sí se conserva como alias verificado.
 
 ## Cambios de esquema recientes
 
-Aplicadas `001`–`011`. Las últimas agregan:
+Las migraciones viven en `db/migrations/`. Entre las principales:
 
 - `008` — `username` y correo opcional en usuarios (técnicos sin email).
 - `009` — perfiles/expediente de técnicos, `specialties`, `technician_specialties` y documentos.
 - `010` — calendario laboral (`non_working_days`) y umbral `half_day_hours`.
 - `011` — asistencia y conciliación de horas extra (`attendance_batches`, `attendance_entries`,
   `technician_aliases`, `overtime_allocations`) y umbrales `overtime_daily_hours`/`overtime_weekly_hours`.
+- `070` — importación de respaldos de WhatsApp, solapamientos, deduplicación y faltantes multimedia.
+- `071` — perfiles de participantes y alias telefónicos con vigencia, incluidos externos y exintegrantes.

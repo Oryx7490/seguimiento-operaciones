@@ -27,6 +27,7 @@ export const ADMIN_SUB: readonly NavItem[] = [
   { href: "/admin/roles", label: "Roles y permisos", section: "admin.roles", keywords: "permisos secciones perfiles" },
   { href: "/admin/tecnicos", label: "Técnicos", section: "admin.tecnicos", keywords: "personal cuadrillas" },
   { href: "/admin/clientes", label: "Clientes", section: "admin.clientes", keywords: "cuentas empresas" },
+  { href: "/admin/polizas", label: "Pólizas de mantenimiento", section: "admin.polizas", keywords: "polizas mantenimiento contratos servicio" },
   { href: "/admin/ubicaciones", label: "Ubicaciones", section: "admin.ubicaciones", keywords: "sitios direcciones" },
   {
     href: "/admin/catalogos",
