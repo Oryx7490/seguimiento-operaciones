@@ -1,5 +1,18 @@
 # Constraints & Decisions Log
 
+## V52: compilado semanal de entradas/salidas por persona (V70) — sin commit
+
+- Nueva pestaña **"Resumen semanal"** en `/admin/asistencia-fotos`: tabla de **lunes a domingo** con una fila por técnico; cada celda muestra la **entrada–salida** (y horas) del día, con columnas de **Horas** y **Extra** por persona y totales de la semana.
+- Navegación de semanas (anterior/actual/siguiente). Datos desde `attendance_entries` vía `GET /api/attendance?from&to`.
+- Verificado: 30 registros en la semana consultada; `tsc` limpio; bandeja 200.
+
+## V52: reorganización de columnas (V69) — sin commit
+
+- En la bandeja de asistencia, los campos de **Entrada/Salida** ahora van **debajo de la fecha** (columna "Fecha / horas") y el **tipo (entrada/salida)** va **debajo del técnico**. Se eliminaron las columnas separadas "Hora / jornada" y "Tipo".
+- La columna **Notas** se movió a la **última posición** (después de Acción).
+- La **miniatura crece con el alto del renglón** (`h-full`, `object-cover`).
+- Verificado: `tsc` limpio; bandeja 200.
+
 ## Fechas dd/mm/aaaa en todo el sistema (V68) — sin commit
 
 - `formatDate`/`formatDateTime` ahora devuelven **dd/mm/aaaa** (y `dd/mm/aaaa HH:MM`), parseando fechas de calendario a mediodía para no desfasar el día.

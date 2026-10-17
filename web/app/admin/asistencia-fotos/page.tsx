@@ -83,6 +83,7 @@ const TABS = [
 ];
 
 export default function AttendancePhotosPage() {
+  const [tab, setTab] = useState<"review" | "weekly">("review");
   const [status, setStatus] = useState("pending");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -130,8 +131,23 @@ export default function AttendancePhotosPage() {
         </span>
       </div>
 
+      <div className="mt-3 flex gap-1">
+        {([["review", "Revisión"], ["weekly", "Resumen semanal"]] as const).map(([v, label]) => (
+          <button
+            key={v}
+            type="button"
+            onClick={() => setTab(v)}
+            className={`rounded-md px-3 py-1.5 text-sm transition ${tab === v ? "bg-zinc-900 font-medium text-white" : "text-zinc-600 hover:bg-zinc-100"}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
       {error && <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
 
+      {tab === "review" && (
+        <>
       <div className="mt-4 flex flex-wrap items-end gap-3">
         <div className="flex gap-1">
           {TABS.map((t) => (
@@ -172,12 +188,10 @@ export default function AttendancePhotosPage() {
                   <th className="px-3 py-2 text-left">Foto</th>
                   <th className="px-3 py-2 text-left">Remitente</th>
                   <th className="px-3 py-2 text-left">Técnico</th>
-                  <th className="px-3 py-2 text-left">Fecha</th>
-                  <th className="px-3 py-2 text-left">Hora / jornada</th>
-                  <th className="px-3 py-2 text-left">Tipo</th>
+                  <th className="px-3 py-2 text-left">Fecha / horas</th>
                   <th className="px-3 py-2 text-left">Señales</th>
-                  <th className="px-3 py-2 text-left">Notas</th>
                   <th className="px-3 py-2 text-right">Acción</th>
+                  <th className="px-3 py-2 text-left">Notas</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-100">
@@ -189,6 +203,10 @@ export default function AttendancePhotosPage() {
           </div>
         )}
       </div>
+        </>
+      )}
+
+      {tab === "weekly" && <WeeklyAttendance />}
 
       {zoom && (
         <Modal open={true} onClose={() => setZoom(null)} title={zoom.sender_display_name || "Foto"} wide>
@@ -302,10 +320,15 @@ function Row({
 
   return (
     <tr className="align-top hover:bg-zinc-50">
-      <td className="px-3 py-2">
-        <button type="button" onClick={() => onZoom(candidate)} title="Ver foto" className="block">
+      <td className="w-20 p-2 align-middle">
+        <button type="button" onClick={() => onZoom(candidate)} title="Ver foto" className="block h-full w-16">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={`/api/whatsapp/media/${candidate.sha256}/thumb`} alt="" loading="lazy" className="h-14 w-14 rounded object-cover" />
+          <img
+            src={`/api/whatsapp/media/${candidate.sha256}/thumb`}
+            alt=""
+            loading="lazy"
+            className="h-full min-h-14 w-full rounded object-cover"
+          />
         </button>
       </td>
       <td className="px-3 py-2">
@@ -325,6 +348,22 @@ function Row({
             className="min-w-44"
           />
         )}
+        <div className="mt-1">
+          {done ? (
+            <span className="text-xs text-zinc-500">{candidate.event_type ?? "—"}</span>
+          ) : (
+            <Select
+              value={type}
+              onChange={setType}
+              placeholder="Tipo"
+              options={[
+                { value: "entrada", label: "Entrada" },
+                { value: "salida", label: "Salida" },
+              ]}
+              className="min-w-28"
+            />
+          )}
+        </div>
         {techId && (
           <Link href={`/admin/tecnicos/${techId}/horas`} className="mt-1 block text-[11px] text-sky-700 hover:underline">
             Ver horas →
@@ -333,7 +372,12 @@ function Row({
       </td>
       <td className="px-3 py-2 text-zinc-600">
         {done ? (
-          <span>{dmy(candidate.event_date)}</span>
+          <>
+            <div>{dmy(candidate.event_date)}</div>
+            <div className="text-xs text-zinc-500">{timeCell}</div>
+            {candidate.worked_hours != null && <div className="text-[11px] text-zinc-400">{candidate.worked_hours} h</div>}
+            {candidate.manual_override && <div className="mt-0.5 text-[10px] font-medium text-amber-600">ajuste manual</div>}
+          </>
         ) : (
           <>
             <input
@@ -351,75 +395,49 @@ function Row({
             {candidate.image_date && date !== candidate.image_date && (
               <div className="mt-0.5 text-[10px] text-amber-600">imagen: {dmy(candidate.image_date)}</div>
             )}
-          </>
-        )}
-      </td>
-      <td className="px-3 py-2 text-zinc-600">
-        {done ? (
-          <>
-            {timeCell}
-            {candidate.worked_hours != null && <div className="text-[11px] text-zinc-400">{candidate.worked_hours} h</div>}
-            {candidate.manual_override && <div className="mt-0.5 text-[10px] font-medium text-amber-600">ajuste manual</div>}
-          </>
-        ) : (
-          <div className="space-y-1">
-            <label className="flex items-center gap-1 text-[11px] text-zinc-500">
-              <span className="w-12">Entrada</span>
-              <input
-                type="time"
-                value={entrada}
-                onChange={(e) => setEntrada(e.target.value)}
-                className="w-24 rounded-md border border-zinc-300 px-1.5 py-1 text-xs"
-              />
-              <button
-                type="button"
-                onClick={() => setEntrada("")}
-                title="Borrar hora de entrada"
-                aria-label="Borrar hora de entrada"
-                className="rounded px-1 text-sm leading-none text-zinc-400 hover:bg-rose-50 hover:text-rose-600"
-              >
-                ×
-              </button>
-            </label>
-            <label className="flex items-center gap-1 text-[11px] text-zinc-500">
-              <span className="w-12">Salida</span>
-              <input
-                type="time"
-                value={salida}
-                onChange={(e) => setSalida(e.target.value)}
-                className="w-24 rounded-md border border-zinc-300 px-1.5 py-1 text-xs"
-              />
-              <button
-                type="button"
-                onClick={() => setSalida("")}
-                title="Borrar hora de salida"
-                aria-label="Borrar hora de salida"
-                className="rounded px-1 text-sm leading-none text-zinc-400 hover:bg-rose-50 hover:text-rose-600"
-              >
-                ×
-              </button>
-            </label>
+            <div className="mt-1 space-y-1">
+              <label className="flex items-center gap-1 text-[11px] text-zinc-500">
+                <span className="w-12">Entrada</span>
+                <input
+                  type="time"
+                  value={entrada}
+                  onChange={(e) => setEntrada(e.target.value)}
+                  className="w-24 rounded-md border border-zinc-300 px-1.5 py-1 text-xs"
+                />
+                <button
+                  type="button"
+                  onClick={() => setEntrada("")}
+                  title="Borrar hora de entrada"
+                  aria-label="Borrar hora de entrada"
+                  className="rounded px-1 text-sm leading-none text-zinc-400 hover:bg-rose-50 hover:text-rose-600"
+                >
+                  ×
+                </button>
+              </label>
+              <label className="flex items-center gap-1 text-[11px] text-zinc-500">
+                <span className="w-12">Salida</span>
+                <input
+                  type="time"
+                  value={salida}
+                  onChange={(e) => setSalida(e.target.value)}
+                  className="w-24 rounded-md border border-zinc-300 px-1.5 py-1 text-xs"
+                />
+                <button
+                  type="button"
+                  onClick={() => setSalida("")}
+                  title="Borrar hora de salida"
+                  aria-label="Borrar hora de salida"
+                  className="rounded px-1 text-sm leading-none text-zinc-400 hover:bg-rose-50 hover:text-rose-600"
+                >
+                  ×
+                </button>
+              </label>
+            </div>
             {imageTimes.length > 0 && (
               <div className="text-[10px] text-zinc-400">imagen: {imageTimes.join(" – ")}</div>
             )}
             {discrepancy && <div className="text-[10px] font-medium text-amber-600">discrepancia con la imagen</div>}
-          </div>
-        )}
-      </td>
-      <td className="px-3 py-2">
-        {done ? (
-          <span className="text-zinc-600">{candidate.event_type ?? "—"}</span>
-        ) : (
-          <Select
-            value={type}
-            onChange={setType}
-            placeholder="—"
-            options={[
-              { value: "entrada", label: "Entrada" },
-              { value: "salida", label: "Salida" },
-            ]}
-            className="min-w-28"
-          />
+          </>
         )}
       </td>
       <td className="px-3 py-2">
@@ -431,6 +449,25 @@ function Row({
         </div>
         {candidate.location && <div className="mt-1 max-w-52 truncate text-[11px] text-zinc-400" title={candidate.location}>{candidate.location}</div>}
         {err && <div className="mt-1 text-[11px] text-red-600">{err}</div>}
+      </td>
+      <td className="px-3 py-2 text-right">
+        {done ? (
+          <span className="text-xs text-zinc-400">{candidate.status}</span>
+        ) : (
+          <div className="flex w-24 flex-col items-stretch gap-1">
+            <button
+              type="button"
+              disabled={busy || !techId}
+              onClick={() => void act("approve")}
+              className="rounded-md bg-zinc-900 px-2.5 py-1 text-xs font-medium text-white hover:bg-zinc-700 disabled:opacity-40"
+            >
+              Registrar
+            </button>
+            <SecondaryButton className="px-2 py-1 text-xs" disabled={busy} onClick={() => void act("reject")}>
+              Rechazar
+            </SecondaryButton>
+          </div>
+        )}
       </td>
       <td className="px-3 py-2 align-top">
         <textarea
@@ -452,25 +489,143 @@ function Row({
           </button>
         )}
       </td>
-      <td className="px-3 py-2 text-right">
-        {done ? (
-          <span className="text-xs text-zinc-400">{candidate.status}</span>
+    </tr>
+  );
+}
+
+interface AttendanceEntry {
+  technician_id: string | null;
+  display_name: string | null;
+  person_name: string;
+  date: string;
+  check_in: string | null;
+  check_out: string | null;
+  hours: string | number | null;
+  overtime: string | number | null;
+}
+
+function cdmxToday(): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Mexico_City", year: "numeric", month: "2-digit", day: "2-digit" }).format(
+    new Date()
+  );
+}
+function mondayOf(iso: string): string {
+  const d = new Date(`${iso}T12:00:00Z`);
+  const dow = (d.getUTCDay() + 6) % 7;
+  d.setUTCDate(d.getUTCDate() - dow);
+  return d.toISOString().slice(0, 10);
+}
+function addDays(iso: string, n: number): string {
+  const d = new Date(`${iso}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+function weekdayShort(iso: string): string {
+  return new Intl.DateTimeFormat("es-MX", { timeZone: "UTC", weekday: "short" }).format(new Date(`${iso}T12:00:00Z`));
+}
+function ddmm(iso: string): string {
+  const [, m, d] = iso.split("-");
+  return `${d}/${m}`;
+}
+function num(v: string | number | null): number {
+  return v == null ? 0 : Number(v);
+}
+
+/** Compilado semanal de entradas/salidas por persona. */
+function WeeklyAttendance() {
+  const [weekStart, setWeekStart] = useState(() => mondayOf(cdmxToday()));
+  const currentMonday = mondayOf(cdmxToday());
+  const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
+  const sunday = days[6];
+
+  const { data, error } = useResource<{ entries: AttendanceEntry[] }>(`/api/attendance?from=${weekStart}&to=${sunday}`);
+  const entries = data?.entries ?? [];
+  const loading = !data && !error;
+
+  const rows = useMemo(() => {
+    const map = new Map<string, { name: string; byDate: Map<string, AttendanceEntry>; hours: number; overtime: number }>();
+    for (const e of entries) {
+      const key = e.technician_id ?? `name:${e.person_name}`;
+      const row = map.get(key) ?? { name: e.display_name ?? e.person_name ?? "—", byDate: new Map(), hours: 0, overtime: 0 };
+      row.byDate.set(e.date, e);
+      row.hours += num(e.hours);
+      row.overtime += num(e.overtime);
+      map.set(key, row);
+    }
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, "es-MX", { sensitivity: "base" }));
+  }, [entries]);
+
+  const totals = rows.reduce((acc, r) => ({ hours: acc.hours + r.hours, overtime: acc.overtime + r.overtime }), { hours: 0, overtime: 0 });
+
+  return (
+    <div className="mt-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <SecondaryButton className="px-2 py-1 text-xs" onClick={() => setWeekStart((w) => addDays(w, -7))}>
+          ← Semana anterior
+        </SecondaryButton>
+        <button type="button" onClick={() => setWeekStart(currentMonday)} className="rounded-md px-2 py-1 text-xs text-zinc-600 hover:bg-zinc-100">
+          Semana actual
+        </button>
+        <SecondaryButton className="px-2 py-1 text-xs" onClick={() => setWeekStart((w) => addDays(w, 7))}>
+          Semana siguiente →
+        </SecondaryButton>
+        <span className="text-sm text-zinc-500">
+          {ddmm(days[0])} – {ddmm(sunday)} · {totals.hours.toLocaleString("es-MX", { maximumFractionDigits: 2 })} h · extra {totals.overtime.toLocaleString("es-MX", { maximumFractionDigits: 2 })} h
+        </span>
+      </div>
+
+      {error && <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+
+      <div className="mt-3 overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
+        {loading ? (
+          <div className="p-4"><Spinner /></div>
+        ) : rows.length === 0 ? (
+          <div className="p-4"><EmptyState title="Sin asistencia registrada esta semana" /></div>
         ) : (
-          <div className="flex w-24 flex-col items-stretch gap-1">
-            <button
-              type="button"
-              disabled={busy || !techId}
-              onClick={() => void act("approve")}
-              className="rounded-md bg-zinc-900 px-2.5 py-1 text-xs font-medium text-white hover:bg-zinc-700 disabled:opacity-40"
-            >
-              Registrar
-            </button>
-            <SecondaryButton className="px-2 py-1 text-xs" disabled={busy} onClick={() => void act("reject")}>
-              Rechazar
-            </SecondaryButton>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="bg-zinc-50 text-xs uppercase tracking-wide text-zinc-500">
+                <tr>
+                  <th className="px-3 py-2 text-left">Técnico</th>
+                  {days.map((d) => (
+                    <th key={d} className="px-2 py-2 text-center">
+                      {weekdayShort(d)} <span className="font-normal normal-case text-zinc-400">{ddmm(d)}</span>
+                    </th>
+                  ))}
+                  <th className="px-3 py-2 text-right">Horas</th>
+                  <th className="px-3 py-2 text-right">Extra</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-100">
+                {rows.map((r) => (
+                  <tr key={r.name} className="hover:bg-zinc-50">
+                    <td className="px-3 py-2 font-medium text-zinc-800">{r.name}</td>
+                    {days.map((d) => {
+                      const e = r.byDate.get(d);
+                      return (
+                        <td key={d} className="px-2 py-2 text-center text-zinc-600">
+                          {e ? (
+                            <>
+                              <div className="whitespace-nowrap text-xs">
+                                {e.check_in ?? "—"}–{e.check_out ?? "—"}
+                              </div>
+                              {num(e.hours) > 0 && <div className="text-[10px] text-zinc-400">{num(e.hours)} h</div>}
+                            </>
+                          ) : (
+                            <span className="text-zinc-300">·</span>
+                          )}
+                        </td>
+                      );
+                    })}
+                    <td className="px-3 py-2 text-right text-zinc-700">{r.hours.toLocaleString("es-MX", { maximumFractionDigits: 2 })}</td>
+                    <td className="px-3 py-2 text-right text-amber-700">{r.overtime > 0 ? r.overtime.toLocaleString("es-MX", { maximumFractionDigits: 2 }) : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
-      </td>
-    </tr>
+      </div>
+    </div>
   );
 }
