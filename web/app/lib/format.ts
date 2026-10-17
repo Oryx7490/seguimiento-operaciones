@@ -1,9 +1,18 @@
+/** Convierte un ISO (fecha u fecha-hora) a Date sin desfasar los días calendario. */
+function toDate(iso: string | null | undefined): Date | null {
+  if (!iso) return null;
+  const s = String(iso);
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(s);
+  const d = new Date(dateOnly ? `${s}T12:00:00` : s);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 export function formatDateTime(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  return d.toLocaleDateString("es-MX", {
-    day: "numeric",
-    month: "short",
+  const d = toDate(iso);
+  if (!d) return "—";
+  return d.toLocaleString("es-MX", {
+    day: "2-digit",
+    month: "2-digit",
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
@@ -11,11 +20,11 @@ export function formatDateTime(iso: string | null | undefined): string {
 }
 
 export function formatDate(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
+  const d = toDate(iso);
+  if (!d) return "—";
   return d.toLocaleDateString("es-MX", {
-    day: "numeric",
-    month: "short",
+    day: "2-digit",
+    month: "2-digit",
     year: "numeric",
   });
 }

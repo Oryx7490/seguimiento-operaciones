@@ -58,6 +58,7 @@ independiente `whatsapp-media` en MinIO. Los archivos se nombran por SHA-256 y l
 `media_objects`/`message_media` reutilizan el mismo objeto cuando se reenvía. El respaldo
 incluye ambos buckets. El plugin de OpenClaw está en `openclaw-whatsapp-capture/`; la
 captura permanece desactivada hasta configurar chats permitidos y credenciales locales.
+El bucket `whatsapp-backups` es temporal y no forma parte de los mirrors durables de `db/backup/backup.sh`.
 
 ### Importar respaldos semanales del grupo
 
@@ -90,6 +91,47 @@ fecha, hora y remitente, y PostgreSQL registra un adjunto `unavailable`; la gale
 WhatsApp muestra **Foto no incluida** en esa fecha/hora. Eso permite localizar la ausencia,
 pero el texto no contiene los bytes para reconstruir la foto. Si el ZIP incluye los medios,
 el importador enlaza nombres citados con archivos y guarda los binarios en MinIO.
+
+Los administradores y coordinadores también pueden cargar el respaldo desde **WhatsApp →
+Respaldos del grupo**. La pantalla importa el ZIP y conserva en `whatsapp-backups` una copia
+temporal por SHA-256; nuevas cargas del mismo archivo quedan auditadas por colaborador y
+grupo, pero no duplican el objeto ni los mensajes. La retención sugerida es de siete días
+desde la última carga. Se puede borrar el ZIP antes desde esa pantalla para liberar espacio;
+los mensajes y archivos multimedia ya importados permanecen en PostgreSQL y MinIO.
+El límite de subida es 1 GiB. `WHATSAPP_BACKUP_BUCKET` permite cambiar el nombre del bucket.
+
+### Documentos desde fotos
+
+La bandeja **Administración → Documentos desde fotos** usa Qwen (Ollama) para clasificar
+comprobantes, hojas de servicio y hojas de entrega; extrae texto, proveedor, fecha, folio,
+importes y conceptos, y propone un proyecto activo con una explicación. La revisión guarda
+la propuesta original, los datos corregidos, quién revisó y las notas de discusión; al
+confirmar una revisión crea el vínculo humano del documento con el proyecto, ticket o póliza
+elegidos en la galería de WhatsApp. Esto conserva evidencia revisada, no crea por sí solo un
+asiento contable. En hojas de servicio, el destino puede ser cualquiera de esos tres tipos.
+
+El selector busca por tipo y muestra hasta cinco coincidencias; escribe al menos dos
+caracteres para buscar por código, título/nombre o cliente.
+
+La bandeja solo incluye imágenes con análisis facial completado y cero rostros detectados.
+También omite hashes con más de una aparición de imagen almacenada en WhatsApp; los archivos
+originales y sus relaciones se conservan en la galería. El worker espera a que termine el
+análisis facial antes de procesar cada documento con Qwen y procesa hasta 100 documentos
+elegibles por lote nocturno.
+
+El entorno local `ocr` tiene `paddlex[ocr]==3.7.2`, `paddlepaddle==3.2.2` y NumPy 2.3.5.
+PP-StructureV3 analiza maquetación y tablas; se probó con una hoja de servicio piloto. Se fijó
+PaddlePaddle en 3.2.2 porque la versión 3.3.1 presenta un fallo de CPU/oneDNN al inferir.
+La pantalla existente usa OCR guardado como respaldo mientras Qwen no esté disponible.
+
+La configuración local `.env` usa `OLLAMA_BASE_URL=http://host.docker.internal:11434` y
+`OLLAMA_MODEL=frob/qwen3.5-instruct:9b`. El servicio `ollama-docker-bridge.service` escucha
+solo en `172.17.0.1:11434` (puente Docker), para que `web` llegue a Ollama sin publicar su API
+en la red local física. El worker procesa automáticamente hasta 100 documentos elegibles,
+uno por uno, a la 01:00 (hora de `DEFAULT_TIMEZONE`, por defecto Ciudad de México). Puedes cambiar
+la hora con `EXPENSE_PHOTO_SCAN_HOUR` o desactivar la programación con
+`EXPENSE_PHOTO_SCAN_ENABLED=false`. El botón de lote de la pantalla también permite iniciarlo
+a mano.
 
 ## Decisiones de modelo incorporadas
 
@@ -221,3 +263,8 @@ Las migraciones viven en `db/migrations/`. Entre las principales:
   `technician_aliases`, `overtime_allocations`) y umbrales `overtime_daily_hours`/`overtime_weekly_hours`.
 - `070` — importación de respaldos de WhatsApp, solapamientos, deduplicación y faltantes multimedia.
 - `071` — perfiles de participantes y alias telefónicos con vigencia, incluidos externos y exintegrantes.
+- `075` — ZIP temporales de respaldos en MinIO, auditoría de cargas y estados de importación.
+- `076` — revisión de documentos fotografiados, extracción y asociación de gastos a proyectos.
+- `077` — vínculos de documentos y revisiones a tickets y pólizas de mantenimiento.
+- `078` — embeddings y candidatos experimentales OpenCV SFace, aislados de `buffalo_l` y de las asignaciones usadas por asistencia.
+- `079` — instantánea de las fotos humanas usadas por cada versión de los modelos faciales.

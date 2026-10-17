@@ -1,5 +1,61 @@
 # Constraints & Decisions Log
 
+## Fechas dd/mm/aaaa en todo el sistema (V68) — sin commit
+
+- `formatDate`/`formatDateTime` ahora devuelven **dd/mm/aaaa** (y `dd/mm/aaaa HH:MM`), parseando fechas de calendario a mediodía para no desfasar el día.
+- Se formatean las fechas que se mostraban en ISO: actividades (agenda y vista del técnico), Gantt de tickets (tooltip), horas extra, proyección/pantallas (entrega), pólizas (vigencia) y la fecha del OCR en el visor de WhatsApp.
+- La **nota de discrepancia** de V52 ahora muestra las fechas como dd/mm/aaaa.
+- En **V52** el campo de fecha es de texto con formato **dd/mm/aaaa** (antes `type="date"` mostraba el formato del navegador, p. ej. mm/dd); se convierte a ISO al guardar.
+- Verificado: `es-MX` produce `16/10/2026`; `tsc` limpio; páginas 200.
+
+## Fechas en formato México (día/mes/año) (V67) — sin commit
+
+- **Parser OCR**: el formato numérico se interpreta como **día/mes/año** (acepta `/`, `.` o `-`), validando día 1–31 y mes 1–12; si el mes resultara inválido pero el primer número sí puede ser mes, se intercambian (respaldo). Año de 2 dígitos se completa a 20xx.
+- **V52**: las fechas se muestran como **dd/mm/aaaa** (detalle, fecha de la imagen y modal de foto).
+- Verificado: `16/10/2026` → 2026-10-16, `05/10/2026` → 2026-10-05; `tsc` limpio; bandeja 200.
+
+## V52: fecha del mensaje cuando la imagen no la trae (V66) — sin commit
+
+- Si el OCR no detecta la fecha en la foto, el candidato toma la **fecha en que se envió la foto al grupo** (mensaje, zona `America/Mexico_City`) como `event_date`; se marca con la señal `fecha_del_mensaje` y `image_date` queda nulo (no genera discrepancia falsa).
+- **Migración `080`**: backfill de candidatos sin fecha usando la fecha del mensaje. **Migración `081`**: quita la señal redundante `sin_fecha` cuando ya se resolvió con la del mensaje.
+- **UI V52**: nueva etiqueta "Fecha del mensaje" en las señales.
+- Verificado: 133 candidatos backfillados, 0 sin fecha; `tsc` limpio; bandeja 200.
+
+## Asistencia por fotos: ingesta más rápida y orden por recientes (V65) — sin commit
+
+- El worker procesaba rostros/OCR/candidatos en lotes de 25 **cada 6 h**, por lo que las fotos del día tardaban en aparecer. Ahora escanea **cada 15 min** (`FACE_SCAN_INTERVAL_MS`, configurable) y **repite hasta ponerse al día** (hasta 40 rondas por ciclo), dejando 0 pendientes.
+- **V52** (`/admin/asistencia-fotos`) ordena por **más reciente primero** (`created_at DESC`), para ver las fotos del día arriba.
+- Verificado: backlog procesado (5 fotos → 5 candidatos) y 0 imágenes sin OCR; las nuevas aparecen al inicio de la bandeja.
+
+## Prueba adicional OpenCV SFace para rostros de WhatsApp
+
+- Se añadió OpenCV SFace (`2021dec`, embedding de 128 dimensiones) en paralelo a InsightFace `buffalo_l` (512 dimensiones). El modelo se descarga al construir `face-service` y se valida por SHA-256.
+- Un escaneo separado vuelve a detectar/alinear las caras con los mismos landmarks y guarda los vectores SFace en tablas propias. Los candidatos se calculan solo con rostros asignados manualmente; no se escriben en `face_assignments` y no afectan asistencia ni el modelo actual.
+- La ficha de la foto muestra el candidato SFace y su similitud coseno como resultado experimental. Umbral inicial `0.363`, margen `0.05`, ajustables con `FACE_SFACE_THRESHOLD` y `FACE_SFACE_MARGIN`; la similitud de centroides requiere calibración con más etiquetas humanas.
+- Configuración: `FACE_SFACE_ENABLED=true`, `FACE_SFACE_BATCH_SIZE=250`. Migración `078_whatsapp_opencv_sface_experiment.sql`.
+- Alcance de licencia: se usa la variante del modelo distribuida en OpenCV Zoo bajo Apache 2.0 para esta evaluación; mantener SFace como prueba hasta revisar la procedencia y condiciones completas de uso del modelo/datos.
+- Primera verificación del 2026-10-16: servicio saludable con SFace listo; 203 fotos históricas analizadas y 108 embeddings guardados; ningún rostro quedó pendiente. En ese momento solo había una identidad confirmada, por lo que todavía no había comparación entre personas.
+- **Auditoría**: migración `079_whatsapp_face_model_examples.sql` guarda las fotos confirmadas exactas usadas en cada versión de centroides/clasificador. El botón **Entrenamiento facial** en Fotos WhatsApp muestra esas imágenes, versiones, etiquetas, presencia del embedding SFace y un diagnóstico de InsightFace, OpenCV, ONNX Runtime y la integridad SHA-256 del modelo instalado; separa fallos de carga de avisos como uso de CPU.
+- La vista calcula calidad de reconocimiento con validación leave-one-out para cada ejemplo confirmado: excluye la foto evaluada del centroide, informa aciertos, confusiones aceptadas, abstenciones y casos no evaluables para buffalo_l y SFace, y marca el resultado por foto. La exactitud del clasificador sobre sus propios datos se etiqueta como tal; no se presenta como prueba independiente.
+- Revalidación del 2026-10-16: versiones activas de centroides `v8` y clasificador `v2`, ambas con 20 fotos confirmadas y 9 identidades. En validación leave-one-out buffalo_l aceptó 13 reconocimientos, los 13 coincidieron, y se abstuvo en 6 fotos; SFace aceptó 10, los 10 coincidieron, y se abstuvo en 9; una foto no se pudo evaluar por falta de otro ejemplo comparable. No hubo fallos de instalación/carga ni errores de análisis de fotos; ONNX Runtime trabaja en CPU porque no ofrece CUDA. Son resultados de consistencia sobre una muestra pequeña, no una prueba independiente de precisión.
+
+## Gastos de proyecto desde fotos (V65) — sin commit
+
+- **Migración 076 aplicada**: propone y conserva clasificación, extracción de datos, proyecto sugerido, correcciones humanas, estado de revisión y notas; confirma también el vínculo de foto a proyecto en la galería.
+- **Migración 077 aplicada**: agrega asociaciones de documentos con tickets y pólizas de mantenimiento, las muestra en la galería y valida que cada revisión tenga como máximo un destino.
+- **Bandeja `/admin/gastos-fotos`** (nombre visible: **Documentos desde fotos**): clasifica comprobantes, hojas de servicio y hojas de entrega; incluye lectura de OCR, proveedor, fecha, importes, impuestos, conceptos, texto y destino asociado. La búsqueda de proyectos, tickets o pólizas muestra máximo cinco resultados por consulta. Omite imágenes con rostros detectados, sin análisis facial completo o cuyo SHA-256 tiene más de una aparición almacenada. Incluye totales revisados por proyecto y moneda. Qwen puede analizar un documento o procesar la bandeja pendiente una por una.
+- **Retroalimentación**: guarda la explicación del modelo, las correcciones, la persona que revisó y notas de discusión; la clasificación manual queda como etiqueta de la foto.
+- **Modelo**: Ollama usa `frob/qwen3.5-instruct:9b`, propone un proyecto entre proyectos activos y explica sus señales. `OLLAMA_BASE_URL` debe habilitarse para que el contenedor web alcance Ollama.
+- **OCR documental**: se instaló `paddlex[ocr]==3.7.2` y se fijó `paddlepaddle==3.2.2` (con `numpy==2.3.5`) en el entorno local `ocr`. PP-StructureV3 ejecutó la foto piloto y detectó estructura tabular y bloques de texto; PaddlePaddle 3.3.1 fallaba en CPU por un error upstream de oneDNN/PIR.
+- **Ollama**: servicio de usuario activo y limitado al puente Docker (`172.17.0.1:11434`); el contenedor `web` resuelve `host.docker.internal` y ve el modelo Qwen instalado.
+- **Procesamiento nocturno**: worker activado a la 01:00 de `DEFAULT_TIMEZONE`, máximo 100 documentos elegibles por lote, secuencialmente; espera un análisis facial completo sin rostros y no repite hashes; solo crea sugerencias y extracción, los totales del proyecto requieren confirmación humana.
+
+## Agenda (V35): el día actual en la segunda columna (V64) — sin commit
+
+- La vista semanal de `/agenda` arranca un día antes de hoy (`agendaAnchor`), de modo que el **día actual queda en la segunda columna** y se ven los días siguientes; se recalcula al cargar, así que se actualiza solo cada día.
+- El botón **Hoy** usa el mismo anclaje. La navegación (semana anterior/siguiente) sigue moviéndose en bloques de 7 días.
+- Verificado (jue 2026-10-15): columnas mié 14 · **jue 15** · vie 16 · sáb 17 · dom 18 · lun 19 · mar 20. `tsc` limpio; `/agenda` 200.
+
 ## 0.4.8 — RC (2026-10-15)
 
 Release candidate con reconocimiento facial y OCR de las fotos de WhatsApp, asistencia derivada de fotos, pólizas de mantenimiento, metas/equipo y mejoras de UX.
@@ -158,13 +214,13 @@ Release candidate con el mayor salto de la app: permisos por perfil, KPIs semana
 
 ## Reconocimiento facial sobre fotos de WhatsApp (V49) — sin commit
 
-> Enrolamiento incremental: se detectan rostros y se guardan embeddings ArcFace (512d) en PostgreSQL con pgvector; el humano asigna cada rostro a un técnico/usuario y, de noche, el worker recalcula centroides por identidad y sugiere asignaciones. El "entrenamiento diario" es agregar embeddings + actualizar centroides (no reentrenar la red).
+> Enrolamiento incremental: se detectan rostros y se guardan embeddings ArcFace (512d) en PostgreSQL con pgvector; el humano asigna o confirma cada rostro para incorporar ejemplos revisados. Al iniciar, el worker escanea las fotos pendientes y actualiza sugerencias; después escanea cada seis horas y vuelve a entrenar cada 24 horas por defecto. El "entrenamiento diario" actualiza centroides y la cabeza clasificadora sobre ejemplos confirmados (no reentrena la red ArcFace).
 
 - **Infra**: Postgres cambiado a `pgvector/pgvector:pg17` (mismo data dir PG17; conserva datos) con extensión `vector` 0.8.7. Nuevo servicio `face-service` (Python/FastAPI + insightface `buffalo_l`, ONNX CPU) con modelos **horneados en la imagen** (sin descargas en runtime).
 - **Migración `065_whatsapp_faces.sql`**: `faces` (sha256, bbox, det_score, `embedding vector(512)`, índice HNSW coseno), `face_identities` (enlazadas a `technicians`/`users`, `centroid vector(512)`), `face_assignments` (source manual/model, revisable) y `face_models` (versiones de centroides/clasificador).
-- **Worker** (`worker/src/faces.js`): `runFaceScan` busca fotos nuevas, pide embeddings a `face-service`, guarda `faces` (idempotente por `(sha256, model, bbox)`) y registra `media_analyses` (`face_detect`). `runFaceTraining` recalcula centroides, versiona el modelo y **sugiere** asignaciones por distancia coseno (< 0.35). Escaneo cada `FACE_SCAN_INTERVAL_MS` (6h) y entrenamiento cada 24h.
+- **Worker** (`worker/src/faces.js`): `runFaceScan` busca fotos nuevas, pide embeddings a `face-service`, guarda `faces` (idempotente por `(sha256, model, bbox)`) y registra `media_analyses` (`face_detect`). `runFaceTraining` recalcula centroides usando solo asignaciones humanas, elimina y vuelve a generar las sugerencias del modelo y evita sugerencias ambiguas entre dos identidades cercanas. Así las predicciones no se reciclan como verdad de entrenamiento; las dos fotos diarias desde ángulos distintos aportan ejemplos distintos cuando se confirman.
 - **API web**: `GET /api/whatsapp/media/{sha256}/faces` (bbox + score + identidad y dimensiones para el overlay), `POST/DELETE /api/whatsapp/faces/{id}/assign` (crea/reutiliza identidad por técnico/usuario), `GET /api/whatsapp/face-identities`; índice `/api/whatsapp` actualizado.
-- **UI `/whatsapp`**: en el lightbox se dibujan las **cajas de rostros** sobre la foto y una lista para asignar cada rostro a un técnico o usuario (o quitarlo), con indicador de sugerencia del modelo.
+- **UI `/whatsapp`**: en el lightbox se dibujan las **cajas de rostros** sobre la foto y una lista para asignar cada rostro a un técnico o usuario (o quitarlo), con indicador de confianza y botón **Confirmar identidad** para convertir una sugerencia en ejemplo humano revisado.
 - **Fix colateral**: `notifications.claimPending` usaba `FOR UPDATE` sobre el lado nullable de un `LEFT JOIN` (rompía `/api/internal/scan`); ahora `FOR UPDATE OF n`.
 - Verificado: imagen face-service construida con modelos; `/health` OK; detección real (12 rostros en 19 fotos); asignación/desasignación por API; centroides calculados y limpiados según asignaciones; versiones de modelo incrementando.
 
@@ -202,11 +258,14 @@ Release candidate con el mayor salto de la app: permisos por perfil, KPIs semana
 - Migración `063_whatsapp_media_tags.sql`: tabla `whatsapp_capture.media_tags` (etiquetas por `sha256`, `source` `manual`/`ai`, `created_by`), índice único `(sha256, lower(tag))`; y alta de la sección RBAC `whatsapp` (ve todos; crear/editar admin+coordinator; borrar admin).
 - `web/app/lib/storage.ts`: `whatsappBucket()` y `storageDownloadUrlInBucket(bucket, key)` para servir objetos del bucket `whatsapp-media`.
 - APIs:
-  - `GET /api/whatsapp/media`: lista filtrable (`from`,`to`,`sender`,`conversation`,`tag`,`q`,`kind`,`limit`,`offset`) con etiquetas agregadas y vínculos a proyecto/ticket (`message_entity_links`); paginación con `total`.
+  - `GET /api/whatsapp/media`: lista filtrable (`from`,`to`,`sender`,`conversation`,`tag`,`q`,`kind`,`duplicates`,`limit`,`offset`) con etiquetas agregadas y vínculos a proyecto/ticket (`message_entity_links`); paginación con `total`.
   - `GET /api/whatsapp/media/[sha256]`: sirve el binario (presign + fetch, `Content-Type` real, cache privado).
   - `POST/DELETE /api/whatsapp/media/[sha256]/tags`: agrega/quita etiquetas (normaliza espacios, dedupe case-insensitive).
   - `GET /api/whatsapp/filters`: remitentes, etiquetas, conversaciones y estadísticas (total y rango).
 - UI `web/app/whatsapp/page.tsx` (nav «Fotos WhatsApp», mark `V48`): rejilla agrupada por día (zona `America/Mexico_City`), filtros, "Cargar más", y lightbox con detalle, vínculos y editor de etiquetas. Estado por objeto (sha256), por lo que aplica a reenvíos del mismo archivo.
+- La galería muestra una sola tarjeta por SHA-256, marca cuántas apariciones tiene y agrega el filtro «Solo fotos repetidas». El conteo identifica archivos idénticos, no versiones re comprimidas o visualmente parecidas.
+- Revisión inicial de datos (2026-10-16): 113 fotos con SHA-256 repetido, 127 apariciones adicionales y hasta 4 mensajes por archivo; el conteo de la galería se calcula dinámicamente.
+- La bandeja de documentos omite hashes con más de una aparición almacenada; las apariciones y archivos originales permanecen intactos en la galería de WhatsApp.
 - Preparado para IA: las etiquetas admiten `source='ai'` y ya existe `whatsapp_capture.media_analyses` para resultados de OCR/reconocimiento.
 - Verificado: migración aplicada, `tsc` limpio, restart de `web`; `filters`/`media` con datos reales (5 imágenes), servido de imagen (JPEG 184 KB) y CRUD de etiquetas (alta, dedupe, filtro, baja) y validaciones.
 
@@ -776,3 +835,12 @@ Bloquea en BD cualquier INSERT/UPDATE incoherente.
 
 ## Fix: asignación de técnico a ticket
 - `POST /api/assignments`: corregido `SELECT name FROM technicians` → `display_name`. Causaba error 500 al asignar técnico a un ticket.
+
+## Respaldos de conversaciones de WhatsApp
+- En la galería de WhatsApp, administradores y coordinadores tienen **Respaldos del grupo** para subir un ZIP, elegir grupo/formato de fecha e importar mensajes y multimedia.
+- Se guarda una sola copia física por SHA-256 en `whatsapp-backups`; cada colaborador/carga conserva auditoría en PostgreSQL y una segunda carga evita duplicar mensajes.
+- El ZIP se marca como elegible para borrado temprano, con retención sugerida de siete días desde la carga más reciente. Se puede borrar para liberar espacio sin eliminar mensajes o multimedia importados.
+- Límite de carga: 1 GiB. Migración `075_whatsapp_export_archives.sql`; Compose crea el bucket y espera a `minio-init` antes de iniciar la web.
+- El importador también reconoce encabezados sin corchetes (`M/D/YY, h:mm AM - ...`) usados por exportaciones de WhatsApp en iOS, además del formato entre corchetes.
+- El formato de fecha ahora se detecta automáticamente por defecto para evitar interpretar como D/M/A exportaciones M/D/A; se puede indicar manualmente si el respaldo es ambiguo.
+- Corrección aplicada al respaldo de RGB Pendientes: importados 529 mensajes y 208 archivos multimedia; dos PDF del ZIP no tuvieron mensaje asociado.

@@ -183,7 +183,14 @@ function extractMarkers(body) {
 
 function parseExport(text, requestedDateFormat) {
   const sourceLines = text.replace(/^\uFEFF/u, "").split(/\r?\n/u);
-  const headerRegex = /^\[(\d{1,2})\/(\d{1,2})\/(\d{2,4}),\s*(\d{1,2}:\d{2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?)\]\s?(.*)$/iu;
+  // WhatsApp exports differ by platform and locale. Android commonly wraps
+  // timestamps in brackets; iOS exports often use `M/D/YY, h:mm AM - ...`.
+  // Keep the same capture groups for both formats so multiline messages are
+  // handled identically after the header is recognized.
+  const headerRegexes = [
+    /^\u200e?\[(\d{1,2})\/(\d{1,2})\/(\d{2,4}),\s*(\d{1,2}:\d{2}(?::\d{2})?\s*(?:a\.?\s*m\.?|p\.?\s*m\.?)?)\]\s?(.*)$/iu,
+    /^\u200e?(\d{1,2})\/(\d{1,2})\/(\d{2,4}),\s*(\d{1,2}:\d{2}(?::\d{2})?\s*(?:a\.?\s*m\.?|p\.?\s*m\.?)?)\s+-\s+(.*)$/iu,
+  ];
   const headers = [];
   const parsedHeaders = [];
   let current = null;
@@ -192,7 +199,7 @@ function parseExport(text, requestedDateFormat) {
 
   for (let i = 0; i < sourceLines.length; i += 1) {
     const line = sourceLines[i];
-    const match = headerRegex.exec(line);
+    const match = headerRegexes.map((regex) => regex.exec(line)).find(Boolean);
     if (!match) {
       if (current) {
         current.bodyLines.push(line);

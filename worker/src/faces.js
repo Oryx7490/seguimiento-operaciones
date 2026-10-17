@@ -97,13 +97,15 @@ export async function runFaceScan({ pool, webUrl, faceUrl, batchSize = 25, log =
   return { processed, faces, failed, pending: rows.length };
 }
 
-export async function runFaceTraining({ pool, scanThreshold = 0.35, log = console }) {
-  // 1) Centroide y conteo por identidad.
+export async function runFaceTraining({ pool, scanThreshold = 0.35, scanMargin = 0.08, log = console }) {
+  // Solo las identidades confirmadas por una persona forman el conjunto de entrenamiento.
+  // Las sugerencias del modelo se regeneran en cada ciclo y nunca se retroalimentan.
   await pool.query(
     `WITH c AS (
        SELECT fa.identity_id, count(*)::int AS cnt, avg(f.embedding) AS cent
          FROM whatsapp_capture.face_assignments fa
          JOIN whatsapp_capture.faces f ON f.id = fa.face_id
+        WHERE fa.source = 'manual'
         GROUP BY fa.identity_id
      )
      UPDATE whatsapp_capture.face_identities fi
@@ -113,14 +115,21 @@ export async function runFaceTraining({ pool, scanThreshold = 0.35, log = consol
   await pool.query(
     `UPDATE whatsapp_capture.face_identities fi
         SET face_count = 0, centroid = NULL, updated_at = now()
-      WHERE NOT EXISTS (SELECT 1 FROM whatsapp_capture.face_assignments fa WHERE fa.identity_id = fi.id)`
+      WHERE NOT EXISTS (
+        SELECT 1 FROM whatsapp_capture.face_assignments fa
+         WHERE fa.identity_id = fi.id AND fa.source = 'manual'
+      )`
   );
+
+  // Descarta predicciones anteriores para que una corrección o un modelo nuevo
+  // pueda quitar o cambiar sugerencias; las revisiones humanas quedan intactas.
+  await pool.query(`DELETE FROM whatsapp_capture.face_assignments WHERE source = 'model'`);
 
   const counts = await pool.query(
     `SELECT
        (SELECT count(*)::int FROM whatsapp_capture.face_identities WHERE centroid IS NOT NULL) AS identities,
        (SELECT count(*)::int FROM whatsapp_capture.faces) AS faces,
-       (SELECT count(*)::int FROM whatsapp_capture.face_assignments) AS assignments`
+       (SELECT count(*)::int FROM whatsapp_capture.face_assignments WHERE source = 'manual') AS assignments`
   );
 
   // 2) Nueva versión del modelo (centroides).
@@ -129,28 +138,45 @@ export async function runFaceTraining({ pool, scanThreshold = 0.35, log = consol
   );
   const version = versionRes.rows[0].v;
   await pool.query(`UPDATE whatsapp_capture.face_models SET active = false WHERE kind = 'centroids'`);
-  await pool.query(
+  const modelRes = await pool.query(
     `INSERT INTO whatsapp_capture.face_models (kind, version, params, metrics, active)
-     VALUES ('centroids', $1, $2::jsonb, $3::jsonb, true)`,
+     VALUES ('centroids', $1, $2::jsonb, $3::jsonb, true)
+     RETURNING id`,
     [version, JSON.stringify({ model: MODEL, threshold: scanThreshold }), JSON.stringify(counts.rows[0])]
   );
+  const modelId = modelRes.rows[0].id;
+  await pool.query(
+    `INSERT INTO whatsapp_capture.face_model_examples (model_id, face_id, identity_id)
+     SELECT $1, fa.face_id, fa.identity_id
+       FROM whatsapp_capture.face_assignments fa
+      WHERE fa.source = 'manual'
+     ON CONFLICT (model_id, face_id) DO NOTHING`,
+    [modelId]
+  );
 
-  // 3) Sugerencias por centroide: cara sin asignar -> identidad más cercana (coseno).
+  // 3) Sugerencias por centroide: solo asigna la identidad más cercana cuando
+  // está dentro del umbral y se separa suficientemente de la segunda opción.
   const ins = await pool.query(
-    `INSERT INTO whatsapp_capture.face_assignments (face_id, identity_id, source, confidence)
-     SELECT f.id, best.id, 'model', 1 - (f.embedding <=> best.centroid)
-       FROM whatsapp_capture.faces f
-       JOIN LATERAL (
-         SELECT fi.id, fi.centroid
-           FROM whatsapp_capture.face_identities fi
-          WHERE fi.centroid IS NOT NULL
-          ORDER BY f.embedding <=> fi.centroid ASC
-          LIMIT 1
-       ) best ON true
-      WHERE (f.embedding <=> best.centroid) <= $1
-        AND NOT EXISTS (SELECT 1 FROM whatsapp_capture.face_assignments fa WHERE fa.face_id = f.id)
+    `WITH distances AS (
+       SELECT f.id AS face_id, fi.id AS identity_id, f.embedding <=> fi.centroid AS distance
+         FROM whatsapp_capture.faces f
+         CROSS JOIN whatsapp_capture.face_identities fi
+        WHERE fi.centroid IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM whatsapp_capture.face_assignments fa WHERE fa.face_id = f.id)
+     ), ranked AS (
+       SELECT face_id, identity_id, distance,
+              row_number() OVER (PARTITION BY face_id ORDER BY distance, identity_id) AS rank,
+              lead(distance) OVER (PARTITION BY face_id ORDER BY distance, identity_id) AS second_distance
+         FROM distances
+     )
+     INSERT INTO whatsapp_capture.face_assignments (face_id, identity_id, source, confidence)
+     SELECT face_id, identity_id, 'model', 1 - distance
+       FROM ranked
+      WHERE rank = 1
+        AND distance <= $1
+        AND (second_distance IS NULL OR second_distance - distance >= $2)
      ON CONFLICT (face_id) DO NOTHING`,
-    [scanThreshold]
+    [scanThreshold, scanMargin]
   );
 
   // 4) Cabeza clasificadora (regresión logística softmax) sobre embeddings etiquetados.
@@ -161,6 +187,7 @@ export async function runFaceTraining({ pool, scanThreshold = 0.35, log = consol
 
   return {
     version,
+    modelId,
     ...counts.rows[0],
     suggestions: ins.rowCount,
     classifier,
@@ -237,23 +264,35 @@ function trainSoftmax(X, y, classes, { epochs = 400, lr = 0.5, reg = 1e-4 } = {}
  */
 export async function runClassifierTraining({ pool, log = console }) {
   const { rows } = await pool.query(
-    `SELECT f.embedding::text AS emb, fa.identity_id
-       FROM whatsapp_capture.faces f
-       JOIN whatsapp_capture.face_assignments fa ON fa.face_id = f.id
-      WHERE fa.source = 'manual'`
+    `WITH labeled AS (
+       SELECT f.embedding::text AS emb, fa.identity_id, f.id,
+              row_number() OVER (
+                PARTITION BY fa.identity_id
+                ORDER BY fa.updated_at DESC, f.created_at DESC, f.id
+              ) AS class_rank
+         FROM whatsapp_capture.faces f
+         JOIN whatsapp_capture.face_assignments fa ON fa.face_id = f.id
+        WHERE fa.source = 'manual'
+     )
+     SELECT emb, identity_id, id AS face_id
+       FROM labeled
+      ORDER BY class_rank, identity_id, id
+      LIMIT $1`,
+    [CLASSIFIER_MAX_SAMPLES]
   );
 
   const labels = [...new Set(rows.map((r) => r.identity_id))];
   if (rows.length < CLASSIFIER_SAMPLES_MIN || labels.length < CLASSIFIER_LABELS_MIN) {
+    await pool.query(`UPDATE whatsapp_capture.face_models SET active = false WHERE kind = 'classifier'`);
     return { skipped: true, samples: rows.length, classes: labels.length };
   }
 
-  const sample = rows.length > CLASSIFIER_MAX_SAMPLES ? rows.slice(0, CLASSIFIER_MAX_SAMPLES) : rows;
-  const labelIndex = new Map(labels.map((l, i) => [l, i]));
-  const X = sample.map((r) => parseEmbedding(r.emb));
-  const y = sample.map((r) => labelIndex.get(r.identity_id));
+  const sampleLabels = [...new Set(rows.map((r) => r.identity_id))];
+  const labelIndex = new Map(sampleLabels.map((l, i) => [l, i]));
+  const X = rows.map((r) => parseEmbedding(r.emb));
+  const y = rows.map((r) => labelIndex.get(r.identity_id));
 
-  const { weights, biases } = trainSoftmax(X, y, labels.length);
+  const { weights, biases } = trainSoftmax(X, y, sampleLabels.length);
 
   let correct = 0;
   for (let i = 0; i < X.length; i++) {
@@ -269,17 +308,25 @@ export async function runClassifierTraining({ pool, log = console }) {
   );
   const version = versionRes.rows[0].v;
   await pool.query(`UPDATE whatsapp_capture.face_models SET active = false WHERE kind = 'classifier'`);
-  await pool.query(
+  const modelRes = await pool.query(
     `INSERT INTO whatsapp_capture.face_models (kind, version, params, metrics, active)
-     VALUES ('classifier', $1, $2::jsonb, $3::jsonb, true)`,
+     VALUES ('classifier', $1, $2::jsonb, $3::jsonb, true)
+     RETURNING id`,
     [
       version,
-      JSON.stringify({ labels, weights, biases, dim: X[0].length, model: MODEL }),
-      JSON.stringify({ accuracy, samples: X.length, classes: labels.length }),
+      JSON.stringify({ labels: sampleLabels, weights, biases, dim: X[0].length, model: MODEL }),
+      JSON.stringify({ training_accuracy: accuracy, samples: X.length, classes: sampleLabels.length }),
     ]
   );
-  log.log?.(`[faces] clasificador v${version} accuracy=${accuracy.toFixed(3)} clases=${labels.length} muestras=${X.length}`);
-  return { version, accuracy, samples: X.length, classes: labels.length };
+  await pool.query(
+    `INSERT INTO whatsapp_capture.face_model_examples (model_id, face_id, identity_id)
+     SELECT $1, sample.face_id, sample.identity_id
+       FROM unnest($2::uuid[], $3::uuid[]) AS sample(face_id, identity_id)
+     ON CONFLICT (model_id, face_id) DO NOTHING`,
+    [modelRes.rows[0].id, rows.map((r) => r.face_id), rows.map((r) => r.identity_id)]
+  );
+  log.log?.(`[faces] clasificador v${version} accuracy_entrenamiento=${accuracy.toFixed(3)} clases=${sampleLabels.length} muestras=${X.length}`);
+  return { version, accuracy, samples: X.length, classes: sampleLabels.length };
 }
 
 /** Usa el clasificador activo para sugerir asignaciones a caras sin asignar. */

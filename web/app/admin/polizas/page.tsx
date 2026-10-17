@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { fetchJson, useResource } from "@/app/lib/client";
+import { formatDate } from "@/app/lib/format";
 import { Badge, EmptyState, Field, Modal, PrimaryButton, SecondaryButton, Select, Spinner, TextInput } from "@/app/components/ui";
 import ClientSelect from "@/app/components/client-select";
 
@@ -105,7 +106,7 @@ export default function MaintenancePoliciesPage() {
                       {p.location_name && <div className="text-[11px] text-zinc-400">{p.location_name}</div>}
                     </td>
                     <td className="px-4 py-2 text-zinc-600">{TYPE_LABEL[p.policy_type] ?? p.policy_type}</td>
-                    <td className="px-4 py-2 text-zinc-500">{p.start_date ?? "—"} {p.end_date ? `→ ${p.end_date}` : ""}</td>
+                    <td className="px-4 py-2 text-zinc-500">{p.start_date ? formatDate(p.start_date) : "—"} {p.end_date ? `→ ${formatDate(p.end_date)}` : ""}</td>
                     <td className="px-4 py-2 text-center">
                       <Badge className={STATUS_STYLE[p.status] ?? ""}>{STATUS_LABEL[p.status] ?? p.status}</Badge>
                     </td>

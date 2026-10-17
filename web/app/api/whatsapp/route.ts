@@ -51,6 +51,8 @@ export async function GET() {
       { method: "GET", path: "/api/whatsapp/face-identities", description: "Identidades faciales enroladas con conteo de caras." },
       { method: "GET", path: "/api/whatsapp/conversations", description: "Conversaciones (grupos/chats) con conteos." },
       { method: "GET", path: "/api/whatsapp/conversations/{id}/messages", description: "Mensajes de una conversación (texto + adjuntos)." },
+      { method: "GET/POST", path: "/api/whatsapp/backups", description: "Lista ZIP temporales (solo administradores/coordinadores) o carga y procesa un respaldo de grupo; deduplica el objeto en MinIO por SHA-256 y audita a cada colaborador." },
+      { method: "DELETE", path: "/api/whatsapp/backups/{sha256}", description: "Elimina el ZIP temporal de MinIO para liberar espacio; conserva mensajes y multimedia importados." },
       { method: "GET", path: "/api/whatsapp/participants", description: "Perfiles, alias históricos y remitentes aún no identificados (admin/coordinator)." },
       { method: "POST", path: "/api/whatsapp/participants", description: "Crea un perfil independiente y opcionalmente lo vincula con usuarios/técnicos y alias (admin/coordinator)." },
       { method: "GET/PATCH", path: "/api/whatsapp/participants/{id}", description: "Consulta o edita el perfil y sus vínculos (admin/coordinator)." },

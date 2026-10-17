@@ -47,7 +47,33 @@ const AMB: Record<string, string> = {
   tipo_desconocido: "Sin tipo",
   hora_vs_jornada: "Hora ≠ jornada",
   discrepancia_hora: "Discrepancia hora",
+  fecha_del_mensaje: "Fecha del mensaje",
 };
+
+/** Fecha en formato México: día/mes/año. */
+function dmy(iso: string | null): string {
+  if (!iso) return "—";
+  const [y, m, d] = iso.slice(0, 10).split("-");
+  if (!y || !m || !d) return iso;
+  return `${d}/${m}/${y}`;
+}
+
+/** ISO (YYYY-MM-DD) -> texto dd/mm/aaaa para el campo editable. */
+function isoToDmyInput(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const [y, m, d] = iso.slice(0, 10).split("-");
+  return y && m && d ? `${d}/${m}/${y}` : "";
+}
+
+/** Texto dd/mm/aaaa -> ISO (YYYY-MM-DD); null si no es válido. */
+function parseDmyInput(text: string): string | null {
+  const m = text.trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (!m) return null;
+  const d = Number(m[1]);
+  const mo = Number(m[2]);
+  if (d < 1 || d > 31 || mo < 1 || mo > 12) return null;
+  return `${m[3]}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
 
 const TABS = [
   { value: "pending", label: "Pendientes" },
@@ -171,7 +197,7 @@ export default function AttendancePhotosPage() {
             <img src={`/api/whatsapp/media/${zoom.sha256}`} alt="" className="max-h-[70vh] w-auto" />
           </div>
           <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-3">
-            <div><p className="text-[11px] uppercase text-zinc-400">Fecha</p><p className="text-zinc-700">{zoom.event_date ?? "—"}</p></div>
+            <div><p className="text-[11px] uppercase text-zinc-400">Fecha</p><p className="text-zinc-700">{dmy(zoom.event_date)}</p></div>
             <div><p className="text-[11px] uppercase text-zinc-400">Hora</p><p className="text-zinc-700">{zoom.event_time ?? (zoom.shift_in ? `${zoom.shift_in}–${zoom.shift_out ?? "?"}` : "—")}</p></div>
             <div><p className="text-[11px] uppercase text-zinc-400">Tipo</p><p className="text-zinc-700">{zoom.event_type ?? "—"}</p></div>
             {zoom.location && <div className="col-span-2 sm:col-span-3"><p className="text-[11px] uppercase text-zinc-400">Ubicación</p><p className="text-zinc-700">{zoom.location}</p></div>}
@@ -208,6 +234,7 @@ function Row({
     .sort();
 
   const [date, setDate] = useState(candidate.event_date ?? candidate.image_date ?? "");
+  const [dateText, setDateText] = useState(() => isoToDmyInput(candidate.event_date ?? candidate.image_date));
   const [entrada, setEntrada] = useState(toInput(imageStart ?? candidate.event_time));
   const [salida, setSalida] = useState(toInput(imageEnd));
   const [notes, setNotes] = useState(candidate.notes ?? "");
@@ -306,17 +333,23 @@ function Row({
       </td>
       <td className="px-3 py-2 text-zinc-600">
         {done ? (
-          <span>{candidate.event_date ?? "—"}</span>
+          <span>{dmy(candidate.event_date)}</span>
         ) : (
           <>
             <input
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              className="w-36 rounded-md border border-zinc-300 px-1.5 py-1 text-xs"
+              type="text"
+              inputMode="numeric"
+              value={dateText}
+              placeholder="dd/mm/aaaa"
+              onChange={(e) => {
+                const v = e.target.value;
+                setDateText(v);
+                setDate(parseDmyInput(v) ?? "");
+              }}
+              className="w-28 rounded-md border border-zinc-300 px-1.5 py-1 text-xs"
             />
             {candidate.image_date && date !== candidate.image_date && (
-              <div className="mt-0.5 text-[10px] text-amber-600">imagen: {candidate.image_date}</div>
+              <div className="mt-0.5 text-[10px] text-amber-600">imagen: {dmy(candidate.image_date)}</div>
             )}
           </>
         )}
@@ -423,10 +456,7 @@ function Row({
         {done ? (
           <span className="text-xs text-zinc-400">{candidate.status}</span>
         ) : (
-          <div className="flex justify-end gap-2">
-            <SecondaryButton className="px-2 py-1 text-xs" disabled={busy} onClick={() => void act("reject")}>
-              Rechazar
-            </SecondaryButton>
+          <div className="flex w-24 flex-col items-stretch gap-1">
             <button
               type="button"
               disabled={busy || !techId}
@@ -435,6 +465,9 @@ function Row({
             >
               Registrar
             </button>
+            <SecondaryButton className="px-2 py-1 text-xs" disabled={busy} onClick={() => void act("reject")}>
+              Rechazar
+            </SecondaryButton>
           </div>
         )}
       </td>

@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { fetchJson, useResource } from "@/app/lib/client";
-import { EmptyState, Field, Modal, PrimaryButton, SecondaryButton, Select, Spinner, TextInput } from "@/app/components/ui";
+import { formatDate } from "@/app/lib/format";
+import { DangerButton, EmptyState, Field, Modal, PrimaryButton, SecondaryButton, Select, Spinner, TextInput } from "@/app/components/ui";
 
 interface LinkItem {
   id: string;
@@ -22,6 +23,89 @@ interface FaceItem {
   display_name: string | null;
   technician_id: string | null;
   user_id: string | null;
+  sface_identity_id: string | null;
+  sface_similarity: number | null;
+  sface_accepted: boolean | null;
+  sface_display_name: string | null;
+}
+
+interface FaceTrainingExample {
+  face_id: string;
+  identity_id: string;
+  display_name: string;
+  sha256: string;
+  bbox: { x: number; y: number; w: number; h: number };
+  det_score: number | null;
+  face_created_at: string;
+  media_state: string;
+  sface_included: boolean;
+  used_by_centroids: boolean;
+  used_by_classifier: boolean;
+  recognition: { buffalo: FaceRecognitionResult; sface: FaceRecognitionResult };
+}
+
+interface FaceRecognitionResult {
+  status: "correct" | "incorrect" | "abstained" | "unavailable";
+  predicted_name: string | null;
+  similarity: number | null;
+  margin: number | null;
+  reason: string | null;
+}
+
+interface FaceValidationSummary {
+  threshold: number;
+  margin_threshold: number;
+  tested: number;
+  accepted: number;
+  correct: number;
+  incorrect: number;
+  abstained: number;
+  unavailable: number;
+}
+
+interface FaceToolCheck {
+  ok: boolean;
+  enabled?: boolean;
+  loaded?: boolean;
+  version?: string;
+  model?: string;
+  embedding_dim?: number;
+  sface_api?: boolean;
+  available_providers?: string[];
+  active_provider?: string;
+  model_file?: string;
+  sha256?: string | null;
+  expected_sha256?: string;
+}
+
+interface FaceToolDiagnostics {
+  status: "ok" | "error";
+  errors: string[];
+  warnings: string[];
+  tools: Record<string, FaceToolCheck>;
+}
+
+interface FaceTrainingAuditData {
+  model: {
+    id: string;
+    version: number;
+    created_at: string;
+    active: boolean;
+    metrics: { identities?: number; faces?: number; assignments?: number };
+    example_count: number;
+  } | null;
+  classifier: { version: number; metrics: { samples?: number; classes?: number; training_accuracy?: number }; created_at: string; example_count: number } | null;
+  examples: FaceTrainingExample[];
+  examples_truncated: boolean;
+  recognition_quality: { buffalo: FaceValidationSummary; sface: FaceValidationSummary } | null;
+  tool_health: {
+    ready: boolean;
+    sface_ready: boolean;
+    diagnostics?: FaceToolDiagnostics;
+  } | null;
+  tool_error: string | null;
+  photo_errors: { analysis_type: string; model: string; sha256: string; error_message: string | null; created_at: string }[];
+  totals: { faces: number; confirmed_examples: number; confirmed_identities: number; sface_embeddings: number };
 }
 
 interface OcrParsed {
@@ -67,6 +151,7 @@ interface MediaItem {
   note: string | null;
   is_favorite: boolean;
   is_archived: boolean;
+  duplicate_count: number;
 }
 
 interface Filters {
@@ -152,12 +237,14 @@ function StarIcon({ filled }: { filled: boolean }) {
 
 export default function WhatsappPhotosPage() {
   const filters = useResource<Filters>("/api/whatsapp/filters");
+  const session = useResource<{ user: { id: string; name: string; role: string } | null }>("/api/session");
 
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [sender, setSender] = useState("");
   const [tag, setTag] = useState("");
   const [kind, setKind] = useState("image");
+  const [duplicatesOnly, setDuplicatesOnly] = useState(false);
   const [favoriteOnly, setFavoriteOnly] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
   const [q, setQ] = useState("");
@@ -169,6 +256,8 @@ export default function WhatsappPhotosPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<MediaItem | null>(null);
+  const [showBackupManager, setShowBackupManager] = useState(false);
+  const [showFaceTrainingAudit, setShowFaceTrainingAudit] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedQ(q), 300);
@@ -182,11 +271,12 @@ export default function WhatsappPhotosPage() {
     if (sender) p.set("sender", sender);
     if (tag) p.set("tag", tag);
     if (kind) p.set("kind", kind);
+    if (duplicatesOnly) p.set("duplicates", "true");
     if (favoriteOnly) p.set("favorite", "true");
     if (showArchived) p.set("archived", "all");
     if (debouncedQ.trim()) p.set("q", debouncedQ.trim());
     return p.toString();
-  }, [from, to, sender, tag, kind, favoriteOnly, showArchived, debouncedQ]);
+  }, [from, to, sender, tag, kind, duplicatesOnly, favoriteOnly, showArchived, debouncedQ]);
 
   const fetchPage = useCallback(
     async (offset: number) => {
@@ -279,15 +369,23 @@ export default function WhatsappPhotosPage() {
           <h1 className="text-xl font-semibold text-zinc-900">Fotos de WhatsApp</h1>
           <p className="mt-1 text-sm text-zinc-500">Galería de archivos recibidos en el grupo, con etiquetas, vínculos y búsqueda.</p>
         </div>
-        {stats && (
-          <div className="text-sm text-zinc-600">
-          <span className="font-semibold">{stats.total}</span> archivos
-          {stats.unavailable > 0 && <span className="text-amber-700"> · {stats.unavailable} sin archivo</span>}
-            {stats.earliest && stats.latest && (
-              <span className="text-zinc-400"> · {dayKey(stats.earliest)} a {dayKey(stats.latest)}</span>
-            )}
-          </div>
-        )}
+        <div className="flex flex-wrap items-center gap-3">
+          {(session.data?.user?.role === "admin" || session.data?.user?.role === "coordinator") && (
+            <>
+              <SecondaryButton onClick={() => setShowFaceTrainingAudit(true)}>Entrenamiento facial</SecondaryButton>
+              <SecondaryButton onClick={() => setShowBackupManager(true)}>Respaldos del grupo</SecondaryButton>
+            </>
+          )}
+          {stats && (
+            <div className="text-sm text-zinc-600">
+              <span className="font-semibold">{stats.total}</span> archivos
+              {stats.unavailable > 0 && <span className="text-amber-700"> · {stats.unavailable} sin archivo</span>}
+              {stats.earliest && stats.latest && (
+                <span className="text-zinc-400"> · {dayKey(stats.earliest)} a {dayKey(stats.latest)}</span>
+              )}
+            </div>
+          )}
+        </div>
       </div>
 
       {error && <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
@@ -306,8 +404,14 @@ export default function WhatsappPhotosPage() {
           <Select value={tag} onChange={setTag} placeholder="Todas" options={tagOptions} className="min-w-40" />
         </Field>
         <Field label="Tipo">
-          <Select value={kind} onChange={setKind} options={KIND_OPTIONS} className="min-w-36" />
+          <Select value={kind} onChange={(value) => { setKind(value); if (value !== "image") setDuplicatesOnly(false); }} options={KIND_OPTIONS} className="min-w-36" />
         </Field>
+        {kind === "image" && (
+          <label className="flex items-center gap-1.5 pb-1.5 text-sm text-zinc-600">
+            <input type="checkbox" checked={duplicatesOnly} onChange={(e) => setDuplicatesOnly(e.target.checked)} className="h-4 w-4 rounded border-zinc-300" />
+            Solo fotos repetidas
+          </label>
+        )}
         <Field label="Buscar">
           <TextInput value={q} onChange={setQ} placeholder="Texto, archivo o remitente…" className="w-64" />
         </Field>
@@ -326,6 +430,7 @@ export default function WhatsappPhotosPage() {
             setSender("");
             setTag("");
             setKind("image");
+            setDuplicatesOnly(false);
             setFavoriteOnly(false);
             setShowArchived(false);
             setQ("");
@@ -424,6 +529,14 @@ export default function WhatsappPhotosPage() {
                           Archivada
                         </span>
                       )}
+                      {it.media_kind === "image" && it.duplicate_count > 1 && (
+                        <span
+                          title={`Mismo archivo (SHA-256 idéntico): aparece en ${it.duplicate_count} mensajes`}
+                          className="absolute bottom-9 right-1 rounded bg-amber-600/90 px-1.5 py-0.5 text-[10px] font-medium text-white"
+                        >
+                          Repetida ×{it.duplicate_count}
+                        </span>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -448,7 +561,427 @@ export default function WhatsappPhotosPage() {
           onChanged={(patch) => { if (selected.sha256) patchMedia(selected.sha256, patch); }}
         />
       )}
+      {showBackupManager && <WhatsappBackupsManager onClose={() => setShowBackupManager(false)} />}
+      {showFaceTrainingAudit && <FaceTrainingAudit onClose={() => setShowFaceTrainingAudit(false)} />}
     </div>
+  );
+}
+
+function FaceTrainingAudit({ onClose }: { onClose: () => void }) {
+  const audit = useResource<FaceTrainingAuditData>("/api/whatsapp/face-training");
+  const diagnostics = audit.data?.tool_health?.diagnostics;
+  const toolLabels: Record<string, string> = {
+    insightface: "InsightFace / buffalo_l",
+    opencv: "OpenCV",
+    onnxruntime: "ONNX Runtime",
+    sface: "SFace",
+  };
+  const toolDetails: Record<string, string> = {
+    insightface: `${diagnostics?.tools.insightface?.version ?? "—"} · ${diagnostics?.tools.insightface?.model ?? "buffalo_l"} · 512 dimensiones`,
+    opencv: `${diagnostics?.tools.opencv?.version ?? "—"} · API FaceRecognizerSF ${diagnostics?.tools.opencv?.sface_api ? "disponible" : "no disponible"}`,
+    onnxruntime: `${diagnostics?.tools.onnxruntime?.version ?? "—"} · activo: ${diagnostics?.tools.onnxruntime?.active_provider ?? "—"} · disponibles: ${diagnostics?.tools.onnxruntime?.available_providers?.join(", ") ?? "—"}`,
+    sface: diagnostics?.tools.sface?.enabled
+      ? `${diagnostics.tools.sface.model_file ?? "modelo"} · ${diagnostics.tools.sface.loaded ? "cargado y validado" : "no cargado"} · SHA-256 ${diagnostics.tools.sface.sha256 === diagnostics.tools.sface.expected_sha256 ? "correcto" : "no coincide"}`
+      : "Desactivado en configuración",
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Auditoría del entrenamiento facial"
+      wide
+      footer={<SecondaryButton onClick={onClose}>Cerrar</SecondaryButton>}
+    >
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="max-w-3xl text-sm text-zinc-600">
+          Revisa la versión del modelo, las fotos confirmadas que entraron en sus centroides y el estado de las herramientas.
+          Revisa las fotos exactas del entrenamiento, la carga de las herramientas y la calidad de reconocimiento mediante validación cruzada que excluye la foto evaluada.
+        </p>
+        <SecondaryButton onClick={audit.reload}>Actualizar</SecondaryButton>
+      </div>
+
+      {audit.error && <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">No se pudo cargar la auditoría: {audit.error}</div>}
+      {!audit.data && !audit.error && <div className="py-8"><Spinner /></div>}
+
+      {audit.data && (
+        <div className="mt-4 space-y-5">
+          <section className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-md border border-zinc-200 p-3">
+              <h3 className="text-sm font-semibold text-zinc-800">Modelo activo · centroides buffalo_l</h3>
+              {audit.data.model ? (
+                <p className="mt-1 text-sm text-zinc-600">
+                  Versión {audit.data.model.version} · {audit.data.model.example_count} fotos confirmadas · {audit.data.model.metrics.identities ?? 0} identidades · actualizado {dateTimeLabel(audit.data.model.created_at)}
+                </p>
+              ) : <p className="mt-1 text-sm text-zinc-500">Aún no hay una versión de centroides registrada.</p>}
+              <p className="mt-1 text-xs text-zinc-500">El modelo usa embeddings de 512 dimensiones. El proceso diario actualiza centroides y no reentrena ArcFace.</p>
+            </div>
+            <div className="rounded-md border border-zinc-200 p-3">
+              <h3 className="text-sm font-semibold text-zinc-800">Clasificador</h3>
+              {audit.data.classifier ? (
+                <p className="mt-1 text-sm text-zinc-600">
+                  Versión {audit.data.classifier.version} · {audit.data.classifier.example_count} fotos de entrenamiento · {audit.data.classifier.metrics.classes ?? 0} identidades · acierto en entrenamiento {Math.round((audit.data.classifier.metrics.training_accuracy ?? 0) * 100)}% · actualizado {dateTimeLabel(audit.data.classifier.created_at)}
+                </p>
+              ) : (
+                <p className="mt-1 text-sm text-zinc-500">Todavía no está activo; requiere al menos 2 identidades y 4 fotos confirmadas.</p>
+              )}
+            </div>
+          </section>
+
+          <section>
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-sm font-semibold text-zinc-800">Estado de herramientas</h3>
+              {audit.data.tool_error ? (
+                <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800">No se pudo consultar face-service</span>
+              ) : diagnostics?.status === "ok" ? (
+                <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">Sin fallos de instalación o carga detectados</span>
+              ) : diagnostics ? (
+                <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-800">Revisión necesaria</span>
+              ) : (
+                <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-xs text-zinc-600">Sin diagnóstico disponible</span>
+              )}
+            </div>
+            {audit.data.tool_error && <p className="mt-1 text-xs text-red-700">{audit.data.tool_error}</p>}
+            <div className="mt-2 grid gap-2 sm:grid-cols-2">
+              {Object.entries(toolLabels).map(([key, label]) => {
+                const check = diagnostics?.tools[key];
+                const disabled = key === "sface" && check?.enabled === false;
+                return (
+                  <div key={key} className="rounded-md border border-zinc-200 px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-zinc-800">{label}</span>
+                      <span className={`text-[11px] font-medium ${disabled ? "text-zinc-500" : check?.ok ? "text-emerald-700" : "text-red-700"}`}>
+                        {disabled ? "desactivado" : check?.ok ? "correcto" : "revisar"}
+                      </span>
+                    </div>
+                    <p className="mt-1 break-words text-[11px] text-zinc-500">{toolDetails[key] ?? "No se recibió información."}</p>
+                  </div>
+                );
+              })}
+            </div>
+            {diagnostics?.errors && diagnostics.errors.length > 0 && (
+              <p className="mt-2 text-xs text-red-700">Errores: {diagnostics.errors.map((key) => toolLabels[key] ?? key).join(", ")}</p>
+            )}
+            {diagnostics?.warnings.map((warning) => <p key={warning} className="mt-2 text-xs text-amber-700">Aviso: {warning}</p>)}
+          </section>
+
+          <section>
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h3 className="text-sm font-semibold text-zinc-800">Calidad de reconocimiento en fotos confirmadas</h3>
+              <span className="text-xs text-zinc-500">Validación leave-one-out: cada foto se compara sin incluirse en su propio centroide.</span>
+            </div>
+            {audit.data.recognition_quality ? (
+              <div className="mt-2 grid gap-3 sm:grid-cols-2">
+                {([
+                  ["buffalo", "OpenCV / buffalo_l · centroides"],
+                  ["sface", "OpenCV SFace · centroides"],
+                ] as const).map(([key, label]) => {
+                  const quality = audit.data!.recognition_quality![key];
+                  return (
+                    <div key={key} className="rounded-md border border-zinc-200 p-3">
+                      <h4 className="text-xs font-semibold text-zinc-800">{label}</h4>
+                      <p className="mt-1 text-xs text-zinc-600">
+                        {quality.correct} aciertos de {quality.accepted} reconocimientos aceptados · {quality.incorrect} confusiones aceptadas · {quality.abstained} abstenciones · {quality.unavailable} no evaluables.
+                      </p>
+                      <p className="mt-1 text-[11px] text-zinc-500">
+                        {quality.tested} fotos comparables · umbral de similitud {Math.round((1 - quality.threshold) * 100)}% · separación mínima {Math.round(quality.margin_threshold * 100)} puntos.
+                        {key === "sface" && ` ${audit.data!.totals.sface_embeddings} rostros tienen embedding SFace.`}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : <p className="mt-2 text-xs text-zinc-500">No hay datos suficientes para calcular la validación cruzada.</p>}
+            <p className="mt-2 text-[11px] text-amber-700">La exactitud del clasificador usa las mismas fotos con las que se entrenó. La validación cruzada mide consistencia entre fotos confirmadas; con pocas fotos por persona, ninguna sustituye una evaluación independiente con imágenes nuevas.</p>
+          </section>
+
+          <section>
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h3 className="text-sm font-semibold text-zinc-800">Fotos usadas en la última versión</h3>
+              <span className="text-xs text-zinc-500">Se indica si cada rostro entró en centroides, clasificador o ambos.</span>
+            </div>
+            {audit.data.examples.length === 0 ? (
+              <p className="mt-2 rounded-md bg-zinc-50 px-3 py-4 text-sm text-zinc-500">No hay fotos guardadas para estas versiones. Las asignaciones manuales se incorporan en el próximo entrenamiento diario.</p>
+            ) : (
+              <div className="mt-3 grid max-h-[28rem] grid-cols-2 gap-3 overflow-y-auto pr-1 sm:grid-cols-3 lg:grid-cols-4">
+                {audit.data.examples.map((example) => (
+                  <article key={example.face_id} className="overflow-hidden rounded-md border border-zinc-200 bg-white">
+                    <div className="flex h-36 items-center justify-center bg-zinc-100">
+                      {example.media_state === "stored" ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={`/api/whatsapp/media/${example.sha256}/thumb`} alt={`Ejemplo de ${example.display_name}`} loading="lazy" className="h-full w-full object-contain" />
+                      ) : <span className="px-2 text-center text-xs text-zinc-500">Archivo no disponible</span>}
+                    </div>
+                    <div className="p-2">
+                      <p className="truncate text-xs font-semibold text-zinc-800" title={example.display_name}>{example.display_name}</p>
+                      <p className="mt-0.5 text-[10px] text-zinc-500">Confirmada · {dateTimeLabel(example.face_created_at)}</p>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {example.used_by_centroids && <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[9px] text-blue-700">Centroides</span>}
+                        {example.used_by_classifier && <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[9px] text-indigo-700">Clasificador</span>}
+                      </div>
+                      <p className={`mt-0.5 text-[10px] ${example.sface_included ? "text-violet-700" : "text-zinc-400"}`}>
+                        {example.sface_included ? "Incluida en la prueba SFace" : "SFace aún no procesó esta foto"}
+                      </p>
+                      <FaceValidationLabel result={example.recognition.buffalo} model="buffalo_l" />
+                      {example.sface_included && <FaceValidationLabel result={example.recognition.sface} model="SFace" />}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+            {audit.data.examples_truncated && <p className="mt-2 text-xs text-zinc-500">Se muestran las 160 fotos más recientes; los conteos y la validación incluyen todas las fotos del modelo.</p>}
+          </section>
+
+          <section className="rounded-md border border-zinc-200 p-3">
+            <h3 className="text-sm font-semibold text-zinc-800">Errores de análisis de fotos</h3>
+            {audit.data.photo_errors.length === 0 ? (
+              <p className="mt-1 text-xs text-zinc-500">No hay errores de procesamiento facial registrados.</p>
+            ) : (
+              <ul className="mt-2 space-y-1.5">
+                {audit.data.photo_errors.map((failure) => (
+                  <li key={`${failure.sha256}-${failure.analysis_type}`} className="break-words text-xs text-red-700">
+                    {failure.model} · {failure.sha256.slice(0, 12)} · {failure.error_message || "Error sin detalle"} · {dateTimeLabel(failure.created_at)}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
+      )}
+    </Modal>
+  );
+}
+
+function FaceValidationLabel({ result, model }: { result: FaceRecognitionResult; model: string }) {
+  const color = result.status === "correct" ? "text-emerald-700" : result.status === "incorrect" ? "text-red-700" : result.status === "abstained" ? "text-amber-700" : "text-zinc-400";
+  const text = result.status === "correct"
+    ? `Validación ${model}: coincide (${Math.round((result.similarity ?? 0) * 100)}%)`
+    : result.status === "incorrect"
+      ? `Posible confusión ${model}: ${result.predicted_name} (${Math.round((result.similarity ?? 0) * 100)}%)`
+      : result.status === "abstained"
+        ? `Sin decisión ${model}: candidato ${result.predicted_name} (${Math.round((result.similarity ?? 0) * 100)}%)`
+        : `No evaluable ${model}: ${result.reason ?? "faltan fotos comparables"}`;
+  return <p className={`mt-1 text-[10px] ${color}`}>{text}</p>;
+}
+
+interface BackupArchive {
+  archive_sha256: string;
+  source_filename: string;
+  size_bytes: number;
+  state: "stored" | "deleted";
+  deletion_eligible: boolean;
+  retention_until: string;
+  upload_count: number;
+  group_names: string[];
+  uploader_names: string[];
+  latest_upload_status: string | null;
+  latest_error: string | null;
+  latest_uploaded_at: string | null;
+  latest_group_name: string | null;
+  latest_uploader_name: string | null;
+}
+
+interface BackupList {
+  archives: BackupArchive[];
+  storage: { count: number; size_bytes: number };
+  retention_days: number;
+  max_archive_bytes: number;
+}
+
+interface WhatsappConversation {
+  id: string;
+  display_name: string | null;
+  is_group: boolean;
+  message_count: number;
+}
+
+function formatBytes(value: number): string {
+  if (value < 1024) return `${value} B`;
+  const units = ["KiB", "MiB", "GiB", "TiB"];
+  let n = value / 1024;
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i += 1; }
+  return `${n.toFixed(1)} ${units[i]}`;
+}
+
+function backupStatusLabel(status: string | null): string {
+  if (status === "imported") return "Importado";
+  if (status === "partial") return "Importación parcial";
+  if (status === "already_imported") return "Ya importado; duplicado evitado";
+  if (status === "importing") return "Procesando…";
+  if (status === "failed") return "Error al importar";
+  return "Pendiente";
+}
+
+function WhatsappBackupsManager({ onClose }: { onClose: () => void }) {
+  const backups = useResource<BackupList>("/api/whatsapp/backups");
+  const conversations = useResource<{ conversations: WhatsappConversation[] }>("/api/whatsapp/conversations");
+  const [conversationId, setConversationId] = useState("");
+  const [dateFormat, setDateFormat] = useState("auto");
+  const [file, setFile] = useState<File | null>(null);
+  const [fileInputVersion, setFileInputVersion] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const groups = useMemo(() => (conversations.data?.conversations ?? []).filter((c) => c.is_group), [conversations.data]);
+  const groupOptions = useMemo(
+    () => groups.map((group) => ({ value: group.id, label: `${group.display_name || "Grupo sin nombre"} · ${group.message_count} mensajes` })),
+    [groups]
+  );
+
+  useEffect(() => {
+    if (!conversationId && groups.length > 0) setConversationId(groups[0].id);
+  }, [conversationId, groups]);
+
+  async function upload(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!file || !conversationId || busy) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      form.append("conversation_id", conversationId);
+      form.append("date_format", dateFormat);
+      form.append("timezone", "America/Mexico_City");
+      const response = await fetch("/api/whatsapp/backups", { method: "POST", body: form });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "No se pudo subir el respaldo");
+      setNotice(result.message || "Respaldo guardado.");
+      setFile(null);
+      setFileInputVersion((value) => value + 1);
+      backups.reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeArchive(archive: BackupArchive) {
+    if (busy || archive.state !== "stored") return;
+    const ok = window.confirm(
+      `¿Eliminar ${archive.source_filename} de MinIO? Los mensajes y multimedia ya importados permanecerán en la base de datos.`
+    );
+    if (!ok) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await fetch(`/api/whatsapp/backups/${archive.archive_sha256}`, { method: "DELETE" });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "No se pudo eliminar el ZIP");
+      setNotice(`ZIP eliminado. Se liberaron ${formatBytes(result.freed_bytes || 0)}; los mensajes y multimedia importados siguen disponibles.`);
+      backups.reload();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Respaldos de conversaciones de WhatsApp"
+      wide
+      footer={<SecondaryButton onClick={onClose}>Cerrar</SecondaryButton>}
+    >
+      <p className="text-sm text-zinc-600">
+        Sube la exportación ZIP del grupo. El sistema la guarda en MinIO e importa mensajes y archivos; el mismo ZIP se almacena una sola vez aunque lo suban varios colaboradores.
+      </p>
+      <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+        Los ZIP son temporales y se pueden borrar antes si falta espacio. La retención sugerida es de {backups.data?.retention_days ?? 7} días desde la carga más reciente; borrar el ZIP no elimina mensajes ni archivos multimedia ya importados.
+      </div>
+
+      <form onSubmit={(event) => void upload(event)} className="mt-4 grid gap-3 rounded-md border border-zinc-200 p-3 sm:grid-cols-2">
+        <Field label="Grupo de WhatsApp">
+          <Select value={conversationId} onChange={setConversationId} placeholder="Selecciona un grupo" options={groupOptions} />
+        </Field>
+        <Field label="Formato de fecha del respaldo">
+          <Select
+            value={dateFormat}
+            onChange={setDateFormat}
+            options={[
+              { value: "auto", label: "Detectar automáticamente (recomendado)" },
+              { value: "dmy", label: "Día / mes / año" },
+              { value: "mdy", label: "Mes / día / año" },
+            ]}
+          />
+        </Field>
+        <Field label="Archivo ZIP" hint={`Máximo ${formatBytes(backups.data?.max_archive_bytes ?? 1024 * 1024 * 1024)}. Incluye el chat exportado y, si se necesitan, sus archivos multimedia.`}>
+          <input
+            key={fileInputVersion}
+            type="file"
+            accept=".zip,application/zip"
+            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+            className="block w-full text-sm text-zinc-700 file:mr-3 file:rounded-md file:border-0 file:bg-zinc-100 file:px-3 file:py-1.5 file:text-sm file:font-medium"
+          />
+        </Field>
+        <div className="flex items-end">
+          <button
+            type="submit"
+            disabled={busy || !file || !conversationId}
+            className="rounded-md bg-zinc-900 px-3 py-2 text-sm font-medium text-white shadow-sm hover:bg-zinc-700 disabled:opacity-50"
+          >
+            {busy ? "Subiendo y procesando…" : "Subir y procesar respaldo"}
+          </button>
+        </div>
+      </form>
+
+      {error && <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
+      {notice && <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{notice}</div>}
+      {conversations.error && <div className="mt-3 text-sm text-red-700">No se pudieron cargar los grupos: {conversations.error}</div>}
+      {groups.length === 0 && !conversations.error && <p className="mt-3 text-sm text-zinc-500">No hay grupos registrados todavía. Primero debe llegar un mensaje o crearse el grupo desde WhatsApp Capture.</p>}
+
+      <div className="mt-5 flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h3 className="text-sm font-semibold text-zinc-800">ZIP guardados</h3>
+          {backups.data && (
+            <p className="mt-0.5 text-xs text-zinc-500">
+              {backups.data.storage.count} archivos · {formatBytes(Number(backups.data.storage.size_bytes))} en MinIO
+            </p>
+          )}
+        </div>
+        <SecondaryButton onClick={backups.reload} disabled={busy}>Actualizar</SecondaryButton>
+      </div>
+      {backups.error && <div className="mt-2 text-sm text-red-700">No se pudieron cargar los respaldos: {backups.error}</div>}
+      {!backups.data ? <div className="py-4"><Spinner /></div> : backups.data.archives.length === 0 ? (
+        <p className="mt-3 rounded-md bg-zinc-50 px-3 py-4 text-sm text-zinc-500">Todavía no hay respaldos cargados.</p>
+      ) : (
+        <div className="mt-3 max-h-72 space-y-2 overflow-y-auto">
+          {backups.data.archives.map((archive) => (
+            <div key={archive.archive_sha256} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-zinc-200 p-3">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-zinc-800" title={archive.source_filename}>{archive.source_filename}</p>
+                <p className="mt-0.5 text-xs text-zinc-500">
+                  {formatBytes(Number(archive.size_bytes))} · {archive.upload_count} carga{archive.upload_count === 1 ? "" : "s"}
+                  {archive.group_names?.length ? ` · ${archive.group_names.join(", ")}` : ""}
+                  {archive.uploader_names?.length ? ` · colaborador${archive.uploader_names.length === 1 ? "" : "es"}: ${archive.uploader_names.join(", ")}` : ""}
+                </p>
+                <p className="mt-0.5 text-xs text-zinc-500">
+                  {archive.state === "stored" ? `Retención sugerida hasta ${dateTimeLabel(archive.retention_until)} · ` : "ZIP eliminado · "}
+                  {backupStatusLabel(archive.latest_upload_status)}
+                  {archive.latest_uploaded_at ? ` · ${dateTimeLabel(archive.latest_uploaded_at)}` : ""}
+                </p>
+                {archive.latest_error && <p className="mt-1 break-words text-xs text-red-700">{archive.latest_error}</p>}
+              </div>
+              {archive.state === "stored" && (
+                <DangerButton
+                  disabled={busy || archive.latest_upload_status === "importing"}
+                  onClick={() => void removeArchive(archive)}
+                >
+                  Borrar ZIP
+                </DangerButton>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </Modal>
   );
 }
 
@@ -742,6 +1275,26 @@ function PhotoDetail({
                   {f.source === "model" && f.confidence != null && (
                     <span className="text-[10px] text-amber-600">sugerido {Math.round(f.confidence * 100)}%</span>
                   )}
+                  {f.sface_identity_id && f.sface_similarity != null && (
+                    <span
+                      className={`text-[10px] ${f.sface_accepted ? "text-violet-700" : "text-zinc-500"}`}
+                      title="Prueba independiente OpenCV SFace; no cambia la identidad guardada ni interviene en asistencia."
+                    >
+                      SFace prueba · {f.sface_display_name ?? "identidad"} · coseno {f.sface_similarity.toFixed(2)}
+                      {f.sface_accepted ? " · candidato" : " · no concluyente"}
+                    </span>
+                  )}
+                  {f.source === "model" && faceValue(f) && (
+                    <button
+                      type="button"
+                      onClick={() => void assignFace(f.id, faceValue(f))}
+                      disabled={busy}
+                      title="Confirma este rostro y úsalo como ejemplo revisado para futuras sugerencias."
+                      className="rounded border border-emerald-200 px-2 py-1 text-[11px] font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                    >
+                      Confirmar identidad
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
@@ -755,6 +1308,7 @@ function PhotoDetail({
           <Info label="Dirección" value={item.direction === "inbound" ? "Recibido" : "Enviado"} />
           {item.caption && <Info label="Leyenda" value={item.caption} full />}
           {item.size_bytes != null && <Info label="Tamaño" value={`${(item.size_bytes / 1024).toLocaleString("es-MX", { maximumFractionDigits: 0 })} KB`} />}
+          {item.duplicate_count > 1 && <Info label="Apariciones del mismo archivo" value={`${item.duplicate_count} mensajes`} />}
         </div>
 
         {ocr && (op || ocr.text.trim()) && (
@@ -772,7 +1326,7 @@ function PhotoDetail({
             </p>
             {op && (
               <div className="mb-2 grid grid-cols-2 gap-x-4 gap-y-1 rounded-md border border-zinc-200 bg-zinc-50 p-2 sm:grid-cols-3">
-                {op.date && <Info label="Fecha" value={op.date} />}
+                {op.date && <Info label="Fecha" value={formatDate(op.date)} />}
                 {op.time && <Info label="Hora" value={op.time} />}
                 {op.type && <Info label="Tipo" value={op.type} />}
                 {op.shift_in && <Info label="Entrada" value={op.shift_in} />}
@@ -819,7 +1373,7 @@ function PhotoDetail({
             {links.length === 0 && <span className="text-xs text-zinc-400">Sin vínculos</span>}
             {links.map((l) => (
               <span key={l.id} className="inline-flex items-center gap-1 rounded-full bg-sky-50 py-0.5 pl-2 pr-1 text-xs text-sky-800">
-                <span className="font-medium uppercase text-sky-500">{l.type === "project" ? "Proyecto" : l.type === "ticket" ? "Ticket" : l.type === "activity" ? "Actividad" : "Técnico"}</span>
+                <span className="font-medium uppercase text-sky-500">{l.type === "project" ? "Proyecto" : l.type === "ticket" ? "Ticket" : l.type === "maintenance_policy" ? "Póliza" : l.type === "activity" ? "Actividad" : "Técnico"}</span>
                 {l.label}
                 <button
                   type="button"

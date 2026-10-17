@@ -303,7 +303,7 @@ function NewTicketModal({ onClose, onSaved }: { onClose: () => void; onSaved: ()
             {ticketType === "internal" ? (
               <TextInput value="RGB" onChange={() => {}} disabled />
             ) : (
-              <ClientSelect value={clientId} onChange={setClientId} placeholder="Buscar cliente…" />
+              <ClientSelect value={clientId} onChange={setClientId} placeholder="Buscar cliente…" inlineCreate />
             )}
           </Field>
           <Field label="Prioridad">

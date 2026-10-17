@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import Link from "next/link";
 import { useResource } from "@/app/lib/client";
+import { formatDate } from "@/app/lib/format";
 import { Spinner } from "@/app/components/ui";
 
 /* ── Tipos ───────────────────────────────────────── */
@@ -276,7 +277,7 @@ export default function PantallasPage() {
                                       <span className="ml-1 text-zinc-800 font-medium">{p.name}</span>
                                     </Link>
                                     <p className="text-xs text-zinc-400 mt-0.5">
-                                      Entrega: {p.planned_end_date}
+                                      Entrega: {formatDate(p.planned_end_date)}
                                     </p>
                                   </td>
                                 ) : null}

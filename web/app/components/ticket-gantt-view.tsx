@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import Link from "next/link";
 import { fetchJson, useResource } from "@/app/lib/client";
-import { ticketStatusLabel } from "@/app/lib/format";
+import { ticketStatusLabel, formatDate } from "@/app/lib/format";
 import { dateAtNoon, todayIso } from "@/app/lib/time";
 import { Field, Modal, PrimaryButton, SecondaryButton, Select, Spinner, TextInput, UiMark } from "@/app/components/ui";
 
@@ -463,7 +463,7 @@ function TicketBar({
         item.kind === "activity" ? (dragging ? "cursor-grabbing" : "cursor-grab") : "cursor-default"
       }`}
       style={{ left: left * scale.px + 2, top, width, touchAction: item.kind === "activity" ? "none" : "auto" }}
-      title={`${item.kind === "next_action" ? "Próxima acción" : "Actividad"}: ${item.label}\n${item.start_date} → ${item.end_date ?? item.start_date}${extra}`}
+      title={`${item.kind === "next_action" ? "Próxima acción" : "Actividad"}: ${item.label}\n${formatDate(item.start_date)} → ${formatDate(item.end_date ?? item.start_date)}${extra}`}
     >
       <span className="truncate">{width > 60 ? item.label : ""}</span>
     </div>

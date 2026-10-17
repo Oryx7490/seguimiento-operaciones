@@ -37,6 +37,20 @@ export function whatsappBucket(): string {
   return process.env.WHATSAPP_MEDIA_BUCKET ?? "whatsapp-media";
 }
 
+/** Bucket dedicado a los ZIP de respaldo, separados del multimedia consultable. */
+export function whatsappBackupBucket(): string {
+  return process.env.WHATSAPP_BACKUP_BUCKET ?? "whatsapp-backups";
+}
+
+export async function putStorageFileInBucket(
+  bucket: string,
+  key: string,
+  filePath: string,
+  metadata: Record<string, string>
+) {
+  await minio().fPutObject(bucket, key, filePath, metadata);
+}
+
 export async function storageDownloadUrlInBucket(bucket: string, key: string, expirySeconds = 5 * 60): Promise<string> {
   return minio().presignedGetObject(bucket, key, expirySeconds);
 }
@@ -45,10 +59,23 @@ export async function deleteStorageObject(key: string) {
   await minio().removeObject(storageBucket(), key);
 }
 
+export async function deleteStorageObjectInBucket(bucket: string, key: string) {
+  await minio().removeObject(bucket, key);
+}
+
 /** ¿Existe ya el objeto en el bucket principal? (para caché de miniaturas). */
 export async function storageObjectExists(key: string): Promise<boolean> {
   try {
     await minio().statObject(storageBucket(), key);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function storageObjectExistsInBucket(bucket: string, key: string): Promise<boolean> {
+  try {
+    await minio().statObject(bucket, key);
     return true;
   } catch {
     return false;

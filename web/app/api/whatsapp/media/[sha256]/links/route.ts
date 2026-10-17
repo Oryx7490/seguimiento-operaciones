@@ -10,6 +10,7 @@ const TARGET_COLUMNS: Record<string, string> = {
   ticket: "ticket_id",
   activity: "activity_id",
   technician: "technician_id",
+  maintenance_policy: "maintenance_policy_id",
 };
 
 async function listLinks(sha256: string) {
@@ -18,14 +19,17 @@ async function listLinks(sha256: string) {
             CASE
               WHEN l.project_id IS NOT NULL THEN 'project'
               WHEN l.ticket_id IS NOT NULL THEN 'ticket'
+              WHEN l.maintenance_policy_id IS NOT NULL THEN 'maintenance_policy'
               WHEN l.activity_id IS NOT NULL THEN 'activity'
               WHEN l.technician_id IS NOT NULL THEN 'technician'
             END AS type,
-            COALESCE(l.project_id, l.ticket_id, l.activity_id, l.technician_id) AS target_id,
-            COALESCE(pr.code || ' · ' || pr.name, tk.code || ' · ' || tk.title, ac.description, te.display_name) AS label
+            COALESCE(l.project_id, l.ticket_id, l.maintenance_policy_id, l.activity_id, l.technician_id) AS target_id,
+            COALESCE(pr.code || ' · ' || pr.name, tk.code || ' · ' || tk.title,
+                     'Póliza · ' || mp.name, ac.description, te.display_name) AS label
        FROM whatsapp_capture.message_entity_links l
        LEFT JOIN projects pr ON pr.id = l.project_id
        LEFT JOIN tickets tk ON tk.id = l.ticket_id
+       LEFT JOIN maintenance_policies mp ON mp.id = l.maintenance_policy_id
        LEFT JOIN activities ac ON ac.id = l.activity_id
        LEFT JOIN technicians te ON te.id = l.technician_id
       WHERE l.message_id IN (SELECT message_id FROM whatsapp_capture.message_media WHERE sha256 = $1)
@@ -58,7 +62,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   const type = typeof body.type === "string" ? body.type : "";
   const column = TARGET_COLUMNS[type];
-  if (!column) return jsonError("type inválido (project, ticket, activity o technician)");
+  if (!column) return jsonError("type inválido (project, ticket, maintenance_policy, activity o technician)");
   const targetId = typeof body.id === "string" ? parseId(body.id) : null;
   if (!targetId) return jsonError("id inválido");
 

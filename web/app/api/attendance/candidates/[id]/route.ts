@@ -128,8 +128,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const timeDiffers = imageHasTime && imageTimes.join("|") !== manualTimeList.join("|");
     const dateDiffers = imageHasDate && eventDate !== candidate.image_date;
     const manualOverride = timeDiffers || dateDiffers;
+    const dmy = (s: string | null | undefined) => (s ? s.slice(0, 10).split("-").reverse().join("/") : "");
     const overrideNote = manualOverride
-      ? `Imagen: ${imageTimes.join("–") || "—"}${candidate.image_date ? ` (${candidate.image_date})` : ""} · Manual: ${manualTimeList.join("–") || "—"} (${eventDate})`
+      ? `Imagen: ${imageTimes.join("–") || "—"}${candidate.image_date ? ` (${dmy(candidate.image_date)})` : ""} · Manual: ${manualTimeList.join("–") || "—"} (${dmy(eventDate)})`
       : null;
 
     const techRes = await client.query(`SELECT display_name FROM technicians WHERE id = $1`, [technicianId]);

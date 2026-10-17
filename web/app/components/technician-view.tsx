@@ -11,6 +11,7 @@ import {
   WEEKDAY_SHORT,
 } from "@/app/lib/prototype-data";
 import { dateAtNoon, todayIso } from "@/app/lib/time";
+import { formatDate } from "@/app/lib/format";
 import {
   Field,
   Modal,
@@ -548,7 +549,7 @@ function ActivitySheet({
           <span className="flex items-center gap-1.5 text-xs text-zinc-500">
             <span className={`h-2 w-2 rounded-full ${statusMeta.dot}`} /> {statusMeta.label}
           </span>
-          <span className="text-xs text-zinc-400">{activity.date}</span>
+          <span className="text-xs text-zinc-400">{formatDate(activity.date)}</span>
         </div>
 
         <dl className="grid grid-cols-2 gap-x-4 gap-y-3 text-sm">

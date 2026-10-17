@@ -29,14 +29,26 @@ export async function GET() {
           ORDER BY count DESC`
       ),
       pool.query(
-        `SELECT count(*)::int AS total,
-                count(*) FILTER (WHERE mm.state = 'unavailable')::int AS unavailable,
-                count(*) FILTER (WHERE mm.state = 'stored' AND mm.sha256 IS NOT NULL)::int AS stored,
-                min(COALESCE(m.sent_at, m.received_at)) AS earliest,
-                max(COALESCE(m.sent_at, m.received_at)) AS latest
-           FROM whatsapp_capture.message_media mm
-           JOIN whatsapp_capture.messages m ON m.id = mm.message_id
-          WHERE ((mm.state = 'stored' AND mm.sha256 IS NOT NULL) OR mm.state = 'unavailable')`
+        `WITH ranked AS (
+           SELECT mm.state, mm.sha256, mm.media_kind, COALESCE(m.sent_at, m.received_at) AS at,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY CASE
+                      WHEN mm.media_kind = 'image' AND mm.sha256 IS NOT NULL THEN 'image:' || mm.sha256::text
+                      ELSE 'appearance:' || mm.id::text
+                    END
+                    ORDER BY COALESCE(m.sent_at, m.received_at) DESC, mm.ordinal DESC, mm.id DESC
+                  ) AS appearance_rank
+             FROM whatsapp_capture.message_media mm
+             JOIN whatsapp_capture.messages m ON m.id = mm.message_id
+            WHERE ((mm.state = 'stored' AND mm.sha256 IS NOT NULL) OR mm.state = 'unavailable')
+         )
+         SELECT count(*)::int AS total,
+                count(*) FILTER (WHERE state = 'unavailable')::int AS unavailable,
+                count(*) FILTER (WHERE state = 'stored' AND sha256 IS NOT NULL)::int AS stored,
+                min(at) AS earliest,
+                max(at) AS latest
+           FROM ranked
+          WHERE appearance_rank = 1`
       ),
     ]);
 

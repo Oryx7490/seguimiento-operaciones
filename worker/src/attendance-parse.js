@@ -46,8 +46,23 @@ export function parseAttendance(lines, caption) {
     if (m) date = buildDate(m[1], m[2], m[3]);
   }
   if (!date) {
-    m = flat.match(/\b(\d{1,2})[/-](\d{1,2})[/-](\d{4})\b/); // dd/mm/aaaa
-    if (m) date = `${m[3]}-${pad(Number(m[2]))}-${pad(Number(m[1]))}`;
+    // Formato México: día/mes/año (también acepta . o -). Se intercambia solo si el mes
+    // no es válido pero el día sí puede serlo (por si algún OCR leyera mes/día).
+    m = flat.match(/\b(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})\b/);
+    if (m) {
+      let day = Number(m[1]);
+      let month = Number(m[2]);
+      let year = Number(m[3]);
+      if (year < 100) year += 2000;
+      if (month > 12 && day <= 12) {
+        const tmp = day;
+        day = month;
+        month = tmp;
+      }
+      if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
+        date = `${year}-${pad(month)}-${pad(day)}`;
+      }
+    }
   }
 
   // Jornada completa (Timemark: "Trabajo 09:42 - 19:55"): da entrada y salida.

@@ -23,6 +23,7 @@ export default function ClientSelect({
   mark,
   onlyActive = true,
   onCreated,
+  inlineCreate = false,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -31,6 +32,8 @@ export default function ClientSelect({
   mark?: string;
   onlyActive?: boolean;
   onCreated?: (client: ClientRow) => void;
+  /** Muestra el alta rápida dentro del formulario padre en vez de abrir otro modal. */
+  inlineCreate?: boolean;
 }) {
   const { data, reload } = useResource<{ clients: ClientRow[] }>("/api/clients");
   const [draft, setDraft] = useState<string | null>(null);
@@ -51,18 +54,73 @@ export default function ClientSelect({
         onCreate={(query) => setDraft(query)}
       />
       {draft !== null && (
-        <NewClientModal
-          initialName={draft}
-          onClose={() => setDraft(null)}
-          onCreated={(client) => {
-            setDraft(null);
-            reload();
-            onChange(client.id);
-            onCreated?.(client);
-          }}
-        />
+        inlineCreate ? (
+          <NewClientInlineForm
+            initialName={draft}
+            onClose={() => setDraft(null)}
+            onCreated={(client) => {
+              setDraft(null);
+              reload();
+              onChange(client.id);
+              onCreated?.(client);
+            }}
+          />
+        ) : (
+          <NewClientModal
+            initialName={draft}
+            onClose={() => setDraft(null)}
+            onCreated={(client) => {
+              setDraft(null);
+              reload();
+              onChange(client.id);
+              onCreated?.(client);
+            }}
+          />
+        )
       )}
     </>
+  );
+}
+
+function NewClientInlineForm({
+  initialName,
+  onClose,
+  onCreated,
+}: {
+  initialName: string;
+  onClose: () => void;
+  onCreated: (client: ClientRow) => void;
+}) {
+  const [name, setName] = useState(initialName);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function submit() {
+    if (!name.trim()) return setErr("El nombre es obligatorio");
+    setSaving(true);
+    setErr(null);
+    try {
+      const { client } = await fetchJson<{ client: ClientRow }>("/api/clients", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      });
+      onCreated(client);
+    } catch (e) {
+      setErr(String(e));
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="mt-2 space-y-2 rounded-md border border-sky-200 bg-sky-50/70 p-3" aria-label="Crear cliente">
+      <p className="text-xs font-semibold text-zinc-700">Nuevo cliente</p>
+      <TextInput value={name} onChange={setName} placeholder="Nombre o razón social" />
+      {err && <p className="text-xs text-red-600">{err}</p>}
+      <div className="flex justify-end gap-2">
+        <SecondaryButton onClick={onClose} disabled={saving}>Cancelar</SecondaryButton>
+        <PrimaryButton onClick={submit} disabled={saving}>{saving ? "Creando…" : "Crear y seleccionar"}</PrimaryButton>
+      </div>
+    </div>
   );
 }
 

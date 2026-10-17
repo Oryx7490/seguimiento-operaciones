@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { fetchJson, useResource } from "@/app/lib/client";
+import { formatDate } from "@/app/lib/format";
 import {
   Badge,
   EmptyState,
@@ -411,7 +412,7 @@ function DayRow({ techId, day, onSaved }: { techId: string; day: OvertimeDay; on
   return (
     <div className="border-t border-zinc-100 py-3 first:border-t-0">
       <div className="flex flex-wrap items-center gap-3 text-sm">
-        <span className="font-medium text-zinc-700">{day.date}</span>
+        <span className="font-medium text-zinc-700">{formatDate(day.date)}</span>
         <span className="text-zinc-500">
           {day.check_in ?? "—"}–{day.check_out ?? "—"} ({day.hours} h)
         </span>

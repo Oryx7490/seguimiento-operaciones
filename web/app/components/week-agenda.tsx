@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useResource, fetchJson } from "@/app/lib/client";
 import { mondayOfWeek, weekDays, formatShortDate, isToday } from "@/app/lib/prototype-data";
 import { dateAtNoon, todayIso } from "@/app/lib/time";
+import { formatDate } from "@/app/lib/format";
 import { useNewQuery } from "@/app/lib/use-new-query";
 import {
   Field,
@@ -115,9 +116,19 @@ function deepLinkParams(): { activityId: string; date: string; monday: Date } | 
   return { activityId, date: isoDate(ref), monday: mondayOfWeek(ref) };
 }
 
+/**
+ * Ancla de la vista semanal: se arranca un día antes de hoy para que el día
+ * actual quede en la segunda columna y se vean los días siguientes.
+ */
+function agendaAnchor(ref: Date): Date {
+  const d = new Date(ref);
+  d.setDate(d.getDate() - 1);
+  return d;
+}
+
 export default function WeekAgenda() {
   const link = deepLinkParams();
-  const [monday, setMonday] = useState<Date>(() => link?.monday ?? mondayOfWeek(dateAtNoon(todayIso())));
+  const [monday, setMonday] = useState<Date>(() => link?.monday ?? agendaAnchor(dateAtNoon(todayIso())));
   const [view, setView] = useState<"week" | "day">(() => (link ? "day" : "week"));
   const [compact, setCompact] = useState(false);
   const [day, setDay] = useState<string>(() => link?.date ?? todayIso());
@@ -186,7 +197,7 @@ export default function WeekAgenda() {
   function goToday() {
     setView("day");
     setDay(todayIso());
-    setMonday(mondayOfWeek(dateAtNoon(todayIso())));
+    setMonday(agendaAnchor(dateAtNoon(todayIso())));
   }
 
   const overdueCount = activities.filter((a) => activityEnd(a) < todayIso() && (a.status === "planned" || a.status === "in_progress")).length;
@@ -875,7 +886,7 @@ function ActivityDetailModal({ activity, technicians, onClose, onSaved }: {
           <span className="flex items-center gap-1.5 text-xs text-zinc-500">
             <span className={`h-2 w-2 rounded-full ${statusMeta.dot}`} /> {statusMeta.label}
           </span>
-          <span className="text-xs text-zinc-400">{activity.date}{activity.end_date && activity.end_date > activity.date ? ` → ${activity.end_date}` : ""}</span>
+          <span className="text-xs text-zinc-400">{formatDate(activity.date)}{activity.end_date && activity.end_date > activity.date ? ` → ${formatDate(activity.end_date)}` : ""}</span>
         </div>
 
         <div className="space-y-3 border-t border-zinc-100 pt-4">

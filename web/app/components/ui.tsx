@@ -163,7 +163,7 @@ export function DangerButton({
 
 export function UiMark({ id }: { id: string }) {
   return (
-    <span className="pointer-events-none select-none text-[10px] font-medium leading-none tracking-wide text-zinc-400">
+    <span className="pointer-events-none select-none rounded border border-zinc-200 bg-white px-1 py-0.5 text-[10px] font-medium leading-none tracking-wide text-zinc-500 shadow-sm">
       {id}
     </span>
   );

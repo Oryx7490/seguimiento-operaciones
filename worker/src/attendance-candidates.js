@@ -56,7 +56,8 @@ async function buildCandidate(pool, sha256, result, maps) {
   const parsed = result.parsed ?? {};
 
   const appRes = await pool.query(
-    `SELECT mm.id AS message_media_id, m.id AS message_id, m.conversation_id, m.sender_id, m.sender_display_name
+    `SELECT mm.id AS message_media_id, m.id AS message_id, m.conversation_id, m.sender_id, m.sender_display_name,
+            to_char(COALESCE(m.sent_at, m.received_at) AT TIME ZONE 'America/Mexico_City', 'YYYY-MM-DD') AS message_date
        FROM whatsapp_capture.message_media mm
        JOIN whatsapp_capture.messages m ON m.id = mm.message_id
       WHERE mm.sha256 = $1
@@ -64,6 +65,11 @@ async function buildCandidate(pool, sha256, result, maps) {
     [sha256]
   );
   const app = appRes.rows[0] ?? {};
+
+  // Si la imagen no trae fecha legible, se usa la fecha en que se mandó la foto al grupo.
+  const messageDate = app.message_date ?? null;
+  const effectiveDate = parsed.date ?? messageDate;
+  const dateFromMessage = !parsed.date && Boolean(messageDate);
 
   const faceRes = await pool.query(
     `SELECT DISTINCT fi.technician_id
@@ -92,7 +98,8 @@ async function buildCandidate(pool, sha256, result, maps) {
   const ambiguity = [];
   if (technicianIds.length === 0) ambiguity.push("tecnico_desconocido");
   if (technicianIds.length > 1) ambiguity.push("varios_tecnicos");
-  if (!parsed.date) ambiguity.push("sin_fecha");
+  if (!effectiveDate) ambiguity.push("sin_fecha");
+  else if (dateFromMessage) ambiguity.push("fecha_del_mensaje");
   if (!parsed.time && !(parsed.shift_in && parsed.shift_out)) ambiguity.push("sin_hora");
   if (!parsed.type) ambiguity.push("tipo_desconocido");
   if (parsed.time && parsed.shift_in && normTime(parsed.time) !== normTime(parsed.shift_in)) {
@@ -123,7 +130,7 @@ async function buildCandidate(pool, sha256, result, maps) {
       matchStatus,
       matchSource,
       parsed.type ?? null,
-      parsed.date ?? null,
+      effectiveDate,
       normTime(parsed.time),
       normTime(parsed.shift_in),
       normTime(parsed.shift_out),

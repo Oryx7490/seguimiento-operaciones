@@ -3,6 +3,7 @@
 import { useState, useMemo } from "react";
 import Link from "next/link";
 import { useResource } from "@/app/lib/client";
+import { formatDate } from "@/app/lib/format";
 import { Spinner } from "@/app/components/ui";
 
 /* ── Tipos ───────────────────────────────────────── */
@@ -389,7 +390,7 @@ export default function ProyeccionPage() {
                                       <p className="font-medium text-zinc-800">{p.name}</p>
                                       <p className="font-mono text-xs text-sky-700">{p.code}</p>
                                     </Link>
-                                    <p className="mt-0.5 text-xs text-zinc-400">Entrega: {p.planned_end_date}</p>
+                                    <p className="mt-0.5 text-xs text-zinc-400">Entrega: {formatDate(p.planned_end_date)}</p>
                                   </td>
                                 ) : null}
                                 {si === 0 ? (

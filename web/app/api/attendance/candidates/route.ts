@@ -58,7 +58,7 @@ export async function GET(request: NextRequest) {
          FROM attendance_candidates c
          LEFT JOIN technicians t ON t.id = c.technician_id
          ${whereSql}
-        ORDER BY c.event_date DESC NULLS LAST, c.created_at DESC
+        ORDER BY c.created_at DESC
         LIMIT $${vals.length - 1} OFFSET $${vals.length}`,
       vals
     );

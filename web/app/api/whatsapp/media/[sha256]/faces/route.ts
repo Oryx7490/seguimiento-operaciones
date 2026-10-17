@@ -15,10 +15,16 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ sha
       pool.query(
         `SELECT f.id, f.bbox, f.det_score, f.model_name,
                 fa.identity_id, fa.source, fa.confidence,
-                fi.display_name, fi.technician_id, fi.user_id
+                fi.display_name, fi.technician_id, fi.user_id,
+                sfs.identity_id AS sface_identity_id,
+                sfs.best_similarity AS sface_similarity,
+                sfs.accepted AS sface_accepted,
+                sfi.display_name AS sface_display_name
            FROM whatsapp_capture.faces f
            LEFT JOIN whatsapp_capture.face_assignments fa ON fa.face_id = f.id
            LEFT JOIN whatsapp_capture.face_identities fi ON fi.id = fa.identity_id
+           LEFT JOIN whatsapp_capture.face_sface_suggestions sfs ON sfs.face_id = f.id
+           LEFT JOIN whatsapp_capture.face_identities sfi ON sfi.id = sfs.identity_id
           WHERE f.sha256 = $1
           ORDER BY f.det_score DESC`,
         [sha256]
