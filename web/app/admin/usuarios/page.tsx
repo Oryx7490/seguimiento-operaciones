@@ -101,6 +101,7 @@ export default function UsersPage() {
                   <th className="px-4 py-3 text-left">Correo</th>
                   <th className="px-4 py-3 text-left">Rol</th>
                   <th className="px-4 py-3 text-left">Estado</th>
+                  <th className="px-4 py-3 text-left">WhatsApp</th>
                   <th className="px-4 py-3 text-left">Creado</th>
                   <th className="px-4 py-3 text-right">Acciones</th>
                 </tr>
@@ -122,6 +123,20 @@ export default function UsersPage() {
                         <Badge className="bg-emerald-100 text-emerald-700">Activo</Badge>
                       ) : (
                         <Badge className="bg-zinc-100 text-zinc-500">Inactivo</Badge>
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      {(u.whatsapp_phones ?? []).length === 0 ? (
+                        <span className="text-zinc-400">—</span>
+                      ) : (
+                        <div className="flex flex-wrap gap-1">
+                          {(u.whatsapp_phones ?? []).map((p, i) => (
+                            <span key={`${p.phone}-${i}`} className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-800">
+                              {p.phone}
+                              {p.category === "primary" && <span className="text-[9px] text-emerald-600">principal</span>}
+                            </span>
+                          ))}
+                        </div>
                       )}
                     </td>
                     <td className="px-4 py-3 text-zinc-500">{formatDateTime(u.created_at)}</td>

@@ -80,7 +80,7 @@ export async function GET(req: NextRequest) {
     const { rows } = await pool.query(
       `SELECT a.id, a.technician_id, a.person_name, to_char(a.date, 'YYYY-MM-DD') AS date,
               to_char(a.check_in, 'HH24:MI') AS check_in, to_char(a.check_out, 'HH24:MI') AS check_out,
-              a.hours, a.overtime, a.notes, t.display_name
+              a.hours, a.overtime, a.notes, a.manual, a.overnight, a.exit_offset_days, t.display_name
          FROM attendance_entries a
          LEFT JOIN technicians t ON t.id = a.technician_id
         ${where.length ? `WHERE ${where.join(" AND ")}` : ""}

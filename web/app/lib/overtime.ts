@@ -85,6 +85,22 @@ export function hoursBetween(checkIn: string | null, checkOut: string | null): n
   return Math.round((diff / 60) * 100) / 100;
 }
 
+/**
+ * Horas entre entrada y salida considerando el desfase de días (jornadas que
+ * cruzan medianoche o duran varios días). offsetDays=1 → salida al día siguiente.
+ */
+export function hoursBetweenDays(checkIn: string | null, checkOut: string | null, offsetDays = 0): number | null {
+  if (!checkIn || !checkOut) return null;
+  const toMinutes = (t: string) => {
+    const [h, m] = t.split(":").map(Number);
+    return h * 60 + m;
+  };
+  let diff = toMinutes(checkOut) - toMinutes(checkIn);
+  if (offsetDays >= 1) diff += offsetDays * 24 * 60;
+  else if (diff < 0) diff += 24 * 60;
+  return Math.round((diff / 60) * 100) / 100;
+}
+
 /** Minutos desde medianoche de un "HH:MM[:SS]"; null si no es válido. */
 function minutesOf(t: string | null | undefined): number | null {
   if (!t) return null;

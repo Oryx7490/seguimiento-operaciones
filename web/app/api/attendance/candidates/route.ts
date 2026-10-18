@@ -54,16 +54,35 @@ export async function GET(request: NextRequest) {
               (SELECT m.body_text FROM whatsapp_capture.message_media mm
                  JOIN whatsapp_capture.messages m ON m.id = mm.message_id
                 WHERE mm.id = c.message_media_id) AS caption,
+              (SELECT COALESCE(m.sent_at, m.received_at) FROM whatsapp_capture.message_media mm
+                 JOIN whatsapp_capture.messages m ON m.id = mm.message_id
+                WHERE mm.id = c.message_media_id) AS message_at,
+              fs.technician_id AS face_technician_id,
+              fs.display_name AS face_display_name,
+              fs.similarity AS face_similarity,
               count(*) OVER() AS total
          FROM attendance_candidates c
          LEFT JOIN technicians t ON t.id = c.technician_id
+         LEFT JOIN LATERAL (
+           SELECT fi.technician_id, fi.display_name, (1 - (f.embedding <=> fi.centroid))::real AS similarity
+             FROM whatsapp_capture.faces f
+             JOIN whatsapp_capture.face_identities fi ON fi.centroid IS NOT NULL AND fi.technician_id IS NOT NULL
+            WHERE f.sha256 = c.sha256
+            ORDER BY f.embedding <=> fi.centroid ASC
+            LIMIT 1
+         ) fs ON true
          ${whereSql}
         ORDER BY c.created_at DESC
         LIMIT $${vals.length - 1} OFFSET $${vals.length}`,
       vals
     );
     const total = rows.length > 0 ? Number(rows[0].total) : 0;
-    const items = rows.map(({ total: _t, ...r }) => r);
+    const items = rows.map(({ total: _t, face_technician_id, face_display_name, face_similarity, ...r }) => ({
+      ...r,
+      face_suggestion: face_technician_id
+        ? { technician_id: face_technician_id, display_name: face_display_name, similarity: Number(face_similarity) }
+        : null,
+    }));
     return jsonOk({ items, total, limit, offset });
   } catch (err) {
     return jsonError("No se pudieron leer los candidatos de asistencia", 500, String(err));

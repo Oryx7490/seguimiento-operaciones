@@ -43,7 +43,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
               to_char(min(a.check_in), 'HH24:MI') AS check_in,
               to_char(max(a.check_out), 'HH24:MI') AS check_out,
               bool_or(a.check_in IS NULL) AS missing_in,
-              bool_or(a.check_out IS NULL) AS missing_out
+              bool_or(a.check_out IS NULL) AS missing_out,
+              bool_or(a.overnight) AS overnight,
+              COALESCE(max(a.exit_offset_days), 0) AS exit_offset_days
          FROM attendance_entries a
         WHERE ${where.join(" AND ")}
         GROUP BY 1
@@ -60,6 +62,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       check_out: r.check_out as string | null,
       missing_in: r.missing_in as boolean,
       missing_out: r.missing_out as boolean,
+      overnight: r.overnight as boolean,
+      exit_offset_days: Number(r.exit_offset_days ?? 0),
     }));
 
     const totals = periods.reduce(

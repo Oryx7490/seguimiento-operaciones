@@ -1,6 +1,6 @@
 import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
-import { jsonOk, jsonError } from "@/app/lib/api";
+import { jsonOk, jsonError, parseId } from "@/app/lib/api";
 
 const ALLOWED_KINDS = new Set(["image", "video", "audio", "document", "sticker", "other"]);
 
@@ -15,6 +15,10 @@ export async function GET(request: NextRequest) {
   const kind = sp.get("kind")?.trim() || null;
   const favorite = sp.get("favorite") === "true";
   const duplicatesOnly = sp.get("duplicates") === "true";
+  const includeUnavailable = sp.get("include_unavailable") === "true";
+  const linkedProject = sp.get("project_id")?.trim() || null;
+  const linkedTicket = sp.get("ticket_id")?.trim() || null;
+  const linkedActivity = sp.get("activity_id")?.trim() || null;
   const archived = sp.get("archived")?.trim() || null;
 
   const limitRaw = Number(sp.get("limit"));
@@ -24,7 +28,11 @@ export async function GET(request: NextRequest) {
 
   if (kind && !ALLOWED_KINDS.has(kind)) return jsonError("kind inválido");
 
-  const where: string[] = ["((mm.state = 'stored' AND mm.sha256 IS NOT NULL) OR mm.state = 'unavailable')"];
+  const where: string[] = [
+    includeUnavailable
+      ? "((mm.state = 'stored' AND mm.sha256 IS NOT NULL) OR mm.state = 'unavailable')"
+      : "(mm.state = 'stored' AND mm.sha256 IS NOT NULL)",
+  ];
   const vals: unknown[] = [];
   const add = (clause: string, value: unknown) => {
     vals.push(value);
@@ -41,6 +49,21 @@ export async function GET(request: NextRequest) {
   if (sender) add("COALESCE(m.sender_id, m.sender_display_name) = $N", sender);
   if (conversation) add("c.id = $N::uuid", conversation);
   if (tag) add("EXISTS (SELECT 1 FROM whatsapp_capture.media_tags t WHERE t.sha256 = mm.sha256 AND lower(t.tag) = lower($N))", tag);
+  if (linkedProject) {
+    const pid = parseId(linkedProject);
+    if (!pid) return jsonError("project_id inválido");
+    add("EXISTS (SELECT 1 FROM whatsapp_capture.message_entity_links l WHERE l.message_id = m.id AND l.project_id = $N::uuid AND l.status IN ('suggested','confirmed'))", pid);
+  }
+  if (linkedTicket) {
+    const tid = parseId(linkedTicket);
+    if (!tid) return jsonError("ticket_id inválido");
+    add("EXISTS (SELECT 1 FROM whatsapp_capture.message_entity_links l WHERE l.message_id = m.id AND l.ticket_id = $N::uuid AND l.status IN ('suggested','confirmed'))", tid);
+  }
+  if (linkedActivity) {
+    const aid = parseId(linkedActivity);
+    if (!aid) return jsonError("activity_id inválido");
+    add("EXISTS (SELECT 1 FROM whatsapp_capture.message_entity_links l WHERE l.message_id = m.id AND l.activity_id = $N::uuid AND l.status IN ('suggested','confirmed'))", aid);
+  }
   if (q) {
     add(
       "(m.body_text ILIKE '%' || $N || '%' OR mm.file_name ILIKE '%' || $N || '%' OR m.sender_display_name ILIKE '%' || $N || '%' OR EXISTS (SELECT 1 FROM whatsapp_capture.media_analyses a WHERE a.sha256 = mm.sha256 AND a.analysis_type = 'ocr' AND a.result->>'text' ILIKE '%' || $N || '%'))",

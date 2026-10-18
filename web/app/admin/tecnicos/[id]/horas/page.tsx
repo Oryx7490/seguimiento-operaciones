@@ -15,6 +15,8 @@ interface Period {
   check_out: string | null;
   missing_in: boolean;
   missing_out: boolean;
+  overnight: boolean;
+  exit_offset_days: number;
 }
 
 interface Segment {
@@ -166,7 +168,7 @@ export default function TechnicianHoursPage() {
                     <td className="px-4 py-2 text-center text-zinc-500">{p.entries}</td>
                     {granularity === "day" && (
                       <td className="px-4 py-2 text-zinc-600">
-                        {p.check_in ?? "—"} / {p.check_out ?? "—"}
+                        {p.check_in ?? "—"} / {p.check_out ?? "—"}{p.overnight ? (p.exit_offset_days > 1 ? `+${p.exit_offset_days}` : "+") : ""}
                         {(p.missing_in || p.missing_out) && (
                           <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">incompleto</span>
                         )}

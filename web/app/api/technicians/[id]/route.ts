@@ -21,7 +21,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     );
     if (rows.length === 0) return jsonError("técnico no encontrado", 404);
 
-    const [specialties, documents] = await Promise.all([
+    const [specialties, documents, whatsappPhones] = await Promise.all([
       pool.query(
         `SELECT s.id AS specialty_id, s.name, ts.status, ts.requested_at
            FROM technician_specialties ts
@@ -39,12 +39,21 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
           ORDER BY d.created_at DESC`,
         [id]
       ),
+      pool.query(
+        `SELECT a.identifier_value AS phone, a.category, a.label, a.is_verified
+           FROM whatsapp_capture.participants p
+           JOIN whatsapp_capture.participant_aliases a ON a.participant_id = p.id
+          WHERE p.technician_id = $1 AND a.identifier_type = 'phone' AND a.valid_to IS NULL
+          ORDER BY (a.category = 'primary') DESC, a.created_at`,
+        [id]
+      ),
     ]);
 
     return jsonOk({
       technician: rows[0],
       specialties: specialties.rows,
       documents: documents.rows,
+      whatsapp_phones: whatsappPhones.rows,
     });
   } catch (err) {
     return jsonError("No se pudo leer el expediente", 500, String(err));

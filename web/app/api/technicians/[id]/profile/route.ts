@@ -28,7 +28,15 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
         ORDER BY s.name`,
       [id]
     );
-    return jsonOk({ profile: rows[0], specialties: specialties.rows });
+    const whatsappPhones = await pool.query(
+      `SELECT a.identifier_value AS phone, a.category, a.label, a.is_verified
+         FROM whatsapp_capture.participants p
+         JOIN whatsapp_capture.participant_aliases a ON a.participant_id = p.id
+        WHERE p.technician_id = $1 AND a.identifier_type = 'phone' AND a.valid_to IS NULL
+        ORDER BY (a.category = 'primary') DESC, a.created_at`,
+      [id]
+    );
+    return jsonOk({ profile: rows[0], specialties: specialties.rows, whatsapp_phones: whatsappPhones.rows });
   } catch (err) {
     return jsonError("No se pudo leer el perfil", 500, String(err));
   }

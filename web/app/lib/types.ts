@@ -7,6 +7,7 @@ export interface User {
   active: boolean;
   created_at: string;
   updated_at: string;
+  whatsapp_phones?: { phone: string; category: string; label: string | null }[];
 }
 
 export interface Technician {
@@ -89,6 +90,7 @@ export interface TechnicianDetailResponse {
   technician: TechnicianDetail;
   specialties: TechnicianSpecialtyAssignment[];
   documents: TechnicianDocument[];
+  whatsapp_phones?: { phone: string; category: string; label: string | null; is_verified: boolean }[];
 }
 
 export interface Client {

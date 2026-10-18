@@ -247,6 +247,7 @@ export default function WhatsappPhotosPage() {
   const [duplicatesOnly, setDuplicatesOnly] = useState(false);
   const [favoriteOnly, setFavoriteOnly] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [showUnavailable, setShowUnavailable] = useState(false);
   const [q, setQ] = useState("");
   const [debouncedQ, setDebouncedQ] = useState("");
 
@@ -274,9 +275,10 @@ export default function WhatsappPhotosPage() {
     if (duplicatesOnly) p.set("duplicates", "true");
     if (favoriteOnly) p.set("favorite", "true");
     if (showArchived) p.set("archived", "all");
+    if (showUnavailable) p.set("include_unavailable", "true");
     if (debouncedQ.trim()) p.set("q", debouncedQ.trim());
     return p.toString();
-  }, [from, to, sender, tag, kind, duplicatesOnly, favoriteOnly, showArchived, debouncedQ]);
+  }, [from, to, sender, tag, kind, duplicatesOnly, favoriteOnly, showArchived, showUnavailable, debouncedQ]);
 
   const fetchPage = useCallback(
     async (offset: number) => {
@@ -423,6 +425,10 @@ export default function WhatsappPhotosPage() {
           <input type="checkbox" checked={showArchived} onChange={(e) => setShowArchived(e.target.checked)} className="h-4 w-4 rounded border-zinc-300" />
           Mostrar archivadas
         </label>
+        <label className="flex items-center gap-1.5 pb-1.5 text-sm text-zinc-600">
+          <input type="checkbox" checked={showUnavailable} onChange={(e) => setShowUnavailable(e.target.checked)} className="h-4 w-4 rounded border-zinc-300" />
+          Mostrar sin archivo
+        </label>
         <SecondaryButton
           onClick={() => {
             setFrom("");
@@ -433,6 +439,7 @@ export default function WhatsappPhotosPage() {
             setDuplicatesOnly(false);
             setFavoriteOnly(false);
             setShowArchived(false);
+            setShowUnavailable(false);
             setQ("");
           }}
         >
@@ -569,6 +576,47 @@ export default function WhatsappPhotosPage() {
 
 function FaceTrainingAudit({ onClose }: { onClose: () => void }) {
   const audit = useResource<FaceTrainingAuditData>("/api/whatsapp/face-training");
+  const identities = useResource<{ identities: { id: string; display_name: string; face_count: number }[] }>("/api/whatsapp/face-identities");
+  const [exFilter, setExFilter] = useState("");
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+  const [fixing, setFixing] = useState<string | null>(null);
+
+  async function correctLabel(faceId: string, identityId: string) {
+    if (!identityId) return;
+    setFixing(faceId);
+    try {
+      await fetchJson(`/api/whatsapp/faces/${faceId}/assign`, { method: "POST", body: JSON.stringify({ identity_id: identityId }) });
+      audit.reload();
+    } catch (e) {
+      window.alert(String(e));
+    } finally {
+      setFixing(null);
+    }
+  }
+
+  function toggleGroup(name: string) {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  }
+
+  const exampleGroups = useMemo(() => {
+    const all = audit.data?.examples ?? [];
+    const needle = exFilter.trim().toLowerCase();
+    const filtered = needle ? all.filter((e) => (e.display_name ?? "").toLowerCase().includes(needle)) : all;
+    const map = new Map<string, FaceTrainingExample[]>();
+    for (const e of filtered) {
+      const key = e.display_name || "Sin identidad";
+      const arr = map.get(key) ?? [];
+      arr.push(e);
+      map.set(key, arr);
+    }
+    return [...map.entries()].map(([name, items]) => ({ name, items })).sort((a, b) => a.name.localeCompare(b.name, "es-MX"));
+  }, [audit.data, exFilter]);
+
   const diagnostics = audit.data?.tool_health?.diagnostics;
   const toolLabels: Record<string, string> = {
     insightface: "InsightFace / buffalo_l",
@@ -590,6 +638,7 @@ function FaceTrainingAudit({ onClose }: { onClose: () => void }) {
       open
       onClose={onClose}
       title="Auditoría del entrenamiento facial"
+      mark="V76"
       wide
       footer={<SecondaryButton onClick={onClose}>Cerrar</SecondaryButton>}
     >
@@ -698,36 +747,56 @@ function FaceTrainingAudit({ onClose }: { onClose: () => void }) {
           <section>
             <div className="flex flex-wrap items-baseline justify-between gap-2">
               <h3 className="text-sm font-semibold text-zinc-800">Fotos usadas en la última versión</h3>
-              <span className="text-xs text-zinc-500">Se indica si cada rostro entró en centroides, clasificador o ambos.</span>
+              <span className="text-xs text-zinc-500">Se indica si cada rostro entró en centroides, clasificador o ambos. Si una foto está mal identificada, elige la etiqueta correcta y pulsa «Corregir».</span>
             </div>
             {audit.data.examples.length === 0 ? (
               <p className="mt-2 rounded-md bg-zinc-50 px-3 py-4 text-sm text-zinc-500">No hay fotos guardadas para estas versiones. Las asignaciones manuales se incorporan en el próximo entrenamiento diario.</p>
             ) : (
-              <div className="mt-3 grid max-h-[28rem] grid-cols-2 gap-3 overflow-y-auto pr-1 sm:grid-cols-3 lg:grid-cols-4">
-                {audit.data.examples.map((example) => (
-                  <article key={example.face_id} className="overflow-hidden rounded-md border border-zinc-200 bg-white">
-                    <div className="flex h-36 items-center justify-center bg-zinc-100">
-                      {example.media_state === "stored" ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img src={`/api/whatsapp/media/${example.sha256}/thumb`} alt={`Ejemplo de ${example.display_name}`} loading="lazy" className="h-full w-full object-contain" />
-                      ) : <span className="px-2 text-center text-xs text-zinc-500">Archivo no disponible</span>}
-                    </div>
-                    <div className="p-2">
-                      <p className="truncate text-xs font-semibold text-zinc-800" title={example.display_name}>{example.display_name}</p>
-                      <p className="mt-0.5 text-[10px] text-zinc-500">Confirmada · {dateTimeLabel(example.face_created_at)}</p>
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {example.used_by_centroids && <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[9px] text-blue-700">Centroides</span>}
-                        {example.used_by_classifier && <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[9px] text-indigo-700">Clasificador</span>}
+              <>
+                <div className="mt-2 flex flex-wrap items-center gap-2">
+                  <input
+                    value={exFilter}
+                    onChange={(e) => setExFilter(e.target.value)}
+                    placeholder="Filtrar por identidad…"
+                    className="w-64 rounded-md border border-zinc-300 px-2 py-1.5 text-sm"
+                  />
+                  <span className="text-xs text-zinc-500">
+                    {exampleGroups.reduce((s, g) => s + g.items.length, 0)} de {audit.data.examples.length} fotos · {exampleGroups.length} identidades
+                  </span>
+                </div>
+                <div className="mt-2 max-h-[30rem] space-y-2 overflow-y-auto pr-1">
+                  {exampleGroups.map((g) => {
+                    const collapsed = collapsedGroups.has(g.name);
+                    return (
+                      <div key={g.name} className="rounded-md border border-zinc-200">
+                        <button
+                          type="button"
+                          onClick={() => toggleGroup(g.name)}
+                          className="flex w-full items-center justify-between gap-2 bg-zinc-50 px-3 py-2 text-left"
+                        >
+                          <span className="text-sm font-semibold text-zinc-800">
+                            {g.name} <span className="text-xs font-normal text-zinc-400">({g.items.length})</span>
+                          </span>
+                          <span className="text-xs text-zinc-400">{collapsed ? "▸" : "▾"}</span>
+                        </button>
+                        {!collapsed && (
+                          <div className="grid grid-cols-2 gap-3 p-3 sm:grid-cols-3 lg:grid-cols-4">
+                            {g.items.map((example) => (
+                              <FaceExampleCard
+                                key={example.face_id}
+                                example={example}
+                                identities={identities.data?.identities ?? []}
+                                fixing={fixing}
+                                onCorrect={correctLabel}
+                              />
+                            ))}
+                          </div>
+                        )}
                       </div>
-                      <p className={`mt-0.5 text-[10px] ${example.sface_included ? "text-violet-700" : "text-zinc-400"}`}>
-                        {example.sface_included ? "Incluida en la prueba SFace" : "SFace aún no procesó esta foto"}
-                      </p>
-                      <FaceValidationLabel result={example.recognition.buffalo} model="buffalo_l" />
-                      {example.sface_included && <FaceValidationLabel result={example.recognition.sface} model="SFace" />}
-                    </div>
-                  </article>
-                ))}
-              </div>
+                    );
+                  })}
+                </div>
+              </>
             )}
             {audit.data.examples_truncated && <p className="mt-2 text-xs text-zinc-500">Se muestran las 160 fotos más recientes; los conteos y la validación incluyen todas las fotos del modelo.</p>}
           </section>
@@ -749,6 +818,71 @@ function FaceTrainingAudit({ onClose }: { onClose: () => void }) {
         </div>
       )}
     </Modal>
+  );
+}
+
+function FaceExampleCard({
+  example,
+  identities,
+  fixing,
+  onCorrect,
+}: {
+  example: FaceTrainingExample;
+  identities: { id: string; display_name: string }[];
+  fixing: string | null;
+  onCorrect: (faceId: string, identityId: string) => void;
+}) {
+  const [target, setTarget] = useState(example.identity_id);
+  useEffect(() => {
+    setTarget(example.identity_id);
+  }, [example.identity_id]);
+  const changed = Boolean(target) && target !== example.identity_id;
+
+  return (
+    <article className="overflow-hidden rounded-md border border-zinc-200 bg-white">
+      <div className="flex h-36 items-center justify-center bg-zinc-100">
+        {example.media_state === "stored" ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={`/api/whatsapp/media/${example.sha256}/thumb`} alt={`Ejemplo de ${example.display_name}`} loading="lazy" className="h-full w-full object-contain" />
+        ) : (
+          <span className="px-2 text-center text-xs text-zinc-500">Archivo no disponible</span>
+        )}
+      </div>
+      <div className="p-2">
+        <p className="truncate text-xs font-semibold text-zinc-800" title={example.display_name}>{example.display_name}</p>
+        <p className="mt-0.5 text-[10px] text-zinc-500">Confirmada · {dateTimeLabel(example.face_created_at)}</p>
+        <div className="mt-1 flex flex-wrap gap-1">
+          {example.used_by_centroids && <span className="rounded bg-blue-50 px-1.5 py-0.5 text-[9px] text-blue-700">Centroides</span>}
+          {example.used_by_classifier && <span className="rounded bg-indigo-50 px-1.5 py-0.5 text-[9px] text-indigo-700">Clasificador</span>}
+        </div>
+        <p className={`mt-0.5 text-[10px] ${example.sface_included ? "text-violet-700" : "text-zinc-400"}`}>
+          {example.sface_included ? "Incluida en la prueba SFace" : "SFace aún no procesó esta foto"}
+        </p>
+        <FaceValidationLabel result={example.recognition.buffalo} model="buffalo_l" />
+        {example.sface_included && <FaceValidationLabel result={example.recognition.sface} model="SFace" />}
+
+        <div className="mt-1.5 flex items-center gap-1 border-t border-zinc-100 pt-1.5">
+          <select
+            value={target}
+            onChange={(e) => setTarget(e.target.value)}
+            title="Etiqueta correcta"
+            className="min-w-0 flex-1 rounded border border-zinc-300 px-1 py-0.5 text-[10px]"
+          >
+            {identities.map((idn) => (
+              <option key={idn.id} value={idn.id}>{idn.display_name}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            disabled={!changed || fixing === example.face_id}
+            onClick={() => onCorrect(example.face_id, target)}
+            className="rounded bg-zinc-900 px-1.5 py-0.5 text-[10px] font-medium text-white hover:bg-zinc-700 disabled:opacity-40"
+          >
+            {fixing === example.face_id ? "…" : "Corregir"}
+          </button>
+        </div>
+      </div>
+    </article>
   );
 }
 

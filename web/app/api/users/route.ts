@@ -7,8 +7,15 @@ const ROLES = ["technician", "coordinator", "admin"];
 export async function GET() {
   try {
     const { rows } = await pool.query(
-      `SELECT id, name, email, role, timezone, active, created_at
-       FROM users ORDER BY name`
+      `SELECT u.id, u.name, u.email, u.role, u.timezone, u.active, u.created_at,
+              COALESCE((
+                SELECT json_agg(json_build_object('phone', a.identifier_value, 'category', a.category, 'label', a.label)
+                                ORDER BY (a.category = 'primary') DESC, a.created_at)
+                  FROM whatsapp_capture.participants p
+                  JOIN whatsapp_capture.participant_aliases a ON a.participant_id = p.id
+                 WHERE p.user_id = u.id AND a.identifier_type = 'phone' AND a.valid_to IS NULL
+              ), '[]'::json) AS whatsapp_phones
+         FROM users u ORDER BY u.name`
     );
     return jsonOk({ users: rows });
   } catch (err) {

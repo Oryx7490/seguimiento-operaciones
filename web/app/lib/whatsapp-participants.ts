@@ -91,6 +91,26 @@ export async function refreshMessagesForAlias(client: PoolClient, alias: {
   );
 }
 
+/**
+ * Refleja el teléfono del contacto en el perfil del técnico vinculado:
+ * lo coloca si el técnico no tiene teléfono, o si el alias es el principal.
+ */
+export async function syncTechnicianPhone(
+  client: PoolClient,
+  participantId: string,
+  alias: { identifier_type: string; identifier_value: string; category: string }
+) {
+  if (alias.identifier_type !== "phone") return;
+  await client.query(
+    `UPDATE technicians t
+        SET phone = $2
+       FROM whatsapp_capture.participants p
+      WHERE p.id = $1 AND p.technician_id = t.id
+        AND (t.phone IS NULL OR t.phone = '' OR $3 = 'primary')`,
+    [participantId, alias.identifier_value, alias.category]
+  );
+}
+
 export async function listParticipants(q: string | null, limit: number, offset: number) {
   const filter = q ? `WHERE p.display_name ILIKE '%' || $1 || '%'
                       OR u.name ILIKE '%' || $1 || '%'

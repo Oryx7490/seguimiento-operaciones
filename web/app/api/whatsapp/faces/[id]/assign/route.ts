@@ -21,19 +21,20 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const { id } = await params;
   if (!parseId(id)) return jsonError("id inválido");
 
-  let body: { technician_id?: unknown; user_id?: unknown; display_name?: unknown };
+  let body: { technician_id?: unknown; user_id?: unknown; display_name?: unknown; identity_id?: unknown };
   try {
     body = await request.json();
   } catch {
     return jsonError("Cuerpo inválido");
   }
 
+  const identityIdParam = typeof body.identity_id === "string" ? parseId(body.identity_id) : null;
   const technicianId = typeof body.technician_id === "string" ? parseId(body.technician_id) : null;
   const userId = typeof body.user_id === "string" ? parseId(body.user_id) : null;
   let displayName = typeof body.display_name === "string" ? body.display_name.trim() : "";
 
-  if (!technicianId && !userId && !displayName) {
-    return jsonError("Indica technician_id, user_id o display_name");
+  if (!identityIdParam && !technicianId && !userId && !displayName) {
+    return jsonError("Indica identity_id, technician_id, user_id o display_name");
   }
 
   const client = await pool.connect();
@@ -44,6 +45,26 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (face.rowCount === 0) {
       await client.query("ROLLBACK");
       return jsonError("Rostro no encontrado", 404);
+    }
+
+    // Corrección directa a una identidad existente (p. ej. desde la auditoría de entrenamiento).
+    if (identityIdParam) {
+      const idn = await client.query(`SELECT id FROM whatsapp_capture.face_identities WHERE id = $1`, [identityIdParam]);
+      if (idn.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return jsonError("Identidad no encontrada", 404);
+      }
+      const reviewer = await getCurrentUserId();
+      await client.query(
+        `INSERT INTO whatsapp_capture.face_assignments (face_id, identity_id, source, confidence, reviewed_by, updated_at)
+         VALUES ($1, $2, 'manual', NULL, $3, now())
+         ON CONFLICT (face_id) DO UPDATE
+           SET identity_id = EXCLUDED.identity_id, source = 'manual', confidence = NULL,
+               reviewed_by = EXCLUDED.reviewed_by, updated_at = now()`,
+        [id, identityIdParam, reviewer]
+      );
+      await client.query("COMMIT");
+      return jsonOk({ face: await loadFace(id) });
     }
 
     if (technicianId) {

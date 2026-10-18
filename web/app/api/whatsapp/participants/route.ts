@@ -8,6 +8,7 @@ import {
   listUnresolvedSenders,
   parseAlias,
   isTechnicianUserPair,
+  syncTechnicianPhone,
 } from "@/app/lib/whatsapp-participants";
 
 export const runtime = "nodejs";
@@ -102,7 +103,9 @@ export async function POST(request: NextRequest) {
     const participant = rows[0];
     const createdAliases = [];
     for (const alias of aliases) {
-      createdAliases.push(await addAlias(client, participant.id, alias!, auth.user?.id ?? null));
+      const createdAlias = await addAlias(client, participant.id, alias!, auth.user?.id ?? null);
+      createdAliases.push(createdAlias);
+      await syncTechnicianPhone(client, participant.id, createdAlias);
     }
     await client.query("COMMIT");
     return jsonOk({ participant: { ...participant, aliases: createdAliases } }, 201);

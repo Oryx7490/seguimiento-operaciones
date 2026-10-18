@@ -1,5 +1,128 @@
 # Constraints & Decisions Log
 
+## 0.4.9 (2026-10-17)
+
+Release con asistencia nocturna/multi-día, aprendizaje facial desde la revisión, clasificación de fotos con drag & drop, contactos de WhatsApp y varias mejoras de UX.
+
+- **Asistencia nocturna y multi-día (V80/V81/V82)**: emparejamiento de salidas que cruzan medianoche o varios días, sufijo **"+"**/**"+N"**, selector "del mismo día / +1 / +2 / +3" en cierre y edición manuales; `hoursBetweenDays`.
+- **Aprendizaje facial (V86)**: al aprobar, los rostros de la foto se etiquetan para el técnico (alimenta el entrenamiento diario); **preselección** del técnico por probabilidad facial (centroides) y **hora/fecha/día** del mensaje en V52.
+- **Clasificar fotos (V85)**: ventana con **drag & drop** foto→actividad/proyecto y **librería por proyecto** por fecha.
+- **Contactos de WhatsApp (V77/V78/V79)**: relacionar números con técnicos/usuarios; teléfonos reflejados en perfiles.
+- **Auditoría de entrenamiento facial (V76)**: identificador, corrección de etiquetas y organización por identidad.
+- **WhatsApp**: ocultar "sin archivo" y evitar duplicados de .zip (V75); distribuir horas (V74); editar registros confirmados (V73).
+- **Fechas dd/mm/aaaa** en todo el sistema (V67/V68); ingesta de asistencia más rápida (V65); fecha del mensaje como respaldo (V66).
+
+## V52: aprendizaje facial al aprobar, sugerencia por probabilidad y hora del mensaje (V86) — sin commit
+
+- **Aprendizaje**: al **aprobar** un candidato con técnico, los **rostros detectados** de la foto se etiquetan para ese técnico (`face_assignments` manual), alimentando el **entrenamiento diario**. Nueva lib `web/app/lib/faces.ts` (`learnFacesForSha`, `ensureIdentityForTechnician`, `assignFaceToIdentity`).
+- **Preselección por probabilidad**: la lista de candidatos ahora incluye `face_suggestion` (identidad de técnico más cercana por centroides + similitud); el campo **Técnico** se **preselecciona** y se muestra "Rostro sugerido: Nombre (NN%)". Al corregir, se aprende.
+- **Hora del mensaje**: se agregó `message_at`; en V52, debajo del nombre y del número de WhatsApp se muestra la **hora del mensaje** (probable entrada/salida).
+- Verificado: aprobar reasignó el rostro a la identidad del técnico (`source='manual'`); `face_suggestion` con similitud (0.49–0.78); reversión de la prueba limpia. `tsc` limpio; página 200.
+
+## Clasificar fotos con drag & drop + librería por proyecto (V85) — sin commit
+
+- Nueva ventana **`/admin/clasificar-fotos`** (nav «Clasificar fotos», mark `V84`):
+  - **Clasificar**: a la izquierda las **fotos del día** (arrastrables, con miniaturas y vínculos actuales); a la derecha las **actividades del día** como zonas para soltar (con conteo de fotos) y un destino **Proyecto** seleccionable. Al soltar una foto se crea el vínculo (`message_entity_links`) a la actividad/proyecto.
+  - **Librería por proyecto**: se elige un proyecto y se ven sus fotos **agrupadas por fecha** (avance del proyecto).
+- **API**: `GET /api/whatsapp/media` ahora acepta `project_id`, `ticket_id` y `activity_id` (filtra por vínculos). Se reutiliza `POST/DELETE /api/whatsapp/media/{sha}/links`.
+- **Migración `089`**: sección RBAC `admin.clasificar_fotos`.
+- Verificado: vincular foto→actividad y foto→proyecto; librería devuelve 1 foto; limpieza. `tsc` limpio; página 200.
+
+## V52: segunda validación diaria de asistencia con fotos (W84) — sin commit
+
+- En el **Resumen semanal**, cada registro de un técnico se puede abrir para revisar el día; muestra la entrada y la salida registradas junto a sus fotos, horas originales leídas, remitente y datos del mensaje. Si la misma foto prueba ambos extremos, aparece en ambas columnas.
+- Flechas **Día anterior / Día siguiente** recorren los días con asistencia registrada de ese técnico, incluso fuera de la semana visible.
+- **Corregir registro** edita entrada, salida y desfase de días desde esa ventana. La actualización sincroniza los segmentos de asistencia, marca el registro como manual y recalcula horas y horas extra; conserva las fotos y la lectura original como evidencia.
+- Si falta la foto de entrada o salida, W84 muestra fotos del técnico del día seleccionado y de los dos días anteriores y posteriores. Desde ahí se puede abrir una foto y vincularla como entrada/salida; el vínculo puede quitarse desde la misma ventana y no cambia el mensaje, OCR ni candidato original.
+- **Migración `088`**: `attendance_entry_photos` guarda los vínculos manuales de evidencia y quién los agregó.
+- `GET /api/attendance/verify?technician_id&date` devuelve el día, evidencia vinculada a cada segmento, fotos disponibles en el rango de cinco días y las fechas vecinas. Se corrige el vínculo de evidencia para incluir tanto el candidato inicial del segmento como los candidatos asociados después (por ejemplo, la foto de salida que cerró una jornada nocturna). `POST/DELETE /api/attendance/verify` agrega o quita un vínculo W84.
+
+## Asistencia de varios días y cierre manual con "+N" (V81/V82) — sin commit
+
+- **Migración `087`**: `attendance_segments.exit_offset_days` y `attendance_entries.exit_offset_days` (0 = mismo día, 1 = siguiente, N = varios).
+- **Aprobación**: al cerrar una salida se calcula el **desfase de días** respecto a la entrada (`daysBetween`), con ventana de emparejamiento ampliada a **5 días**; las horas usan `hoursBetweenDays` (p. ej. 08:00 (día 1) → 12:00 (día 3) = **52 h**).
+- **Cierre/edición manual**: la ventana **Cerrar registro** (ahora con identificador `W82`) y **Editar registro** (`W83`) permiten indicar que la salida es **del mismo día / +1 / +2 / +3**.
+- **UI**: el sufijo **"+"** indica salida al día siguiente y **"+N"** varios días (Resumen semanal, verificación, cierre, perfil de horas).
+- `hoursBetweenDays` corrige el cálculo (antes +2 daba 28 h; ahora 52 h).
+- Verificado: +1 → 8 h; +2 → 52 h; emparejamiento multi-día por aprobación. `tsc` limpio; páginas 200.
+
+## Jornadas que cruzan medianoche (salida al día siguiente) (V80) — sin commit
+
+- Antes el sistema asumía entrada y salida el **mismo día**: una salida registrada al día siguiente creaba un **segundo día incompleto** y descuadraba horas/extra.
+- Ahora, al aprobar una **salida**, si existe un **tramo abierto** (entrada sin salida) del técnico en el mismo día o los 2 días previos, se **cierra ese tramo** (no se crea otro); se marca **`overnight`** cuando la salida es de un día posterior. Migración `086` agrega `attendance_segments.overnight`, `attendance_entries.overnight` y `attendance_candidates.segment_id`.
+- **Horas**: `hoursBetween`/`computeSegmentsHours` ya suman 24 h cuando la salida es menor que la entrada; ahora se persiste `overnight` y la UI muestra un **"+"** en la salida (p. ej. `22:00–06:00+`).
+- Se centralizó el recálculo en `web/app/lib/attendance.ts` (`recomputeDay`/`recomputeOvertime`), usado por aprobar, editar, recompute y captura manual. La edición de un candidato usa `segment_id`.
+- El **"+"** aparece en: Resumen semanal (V52), verificación y cierre de registro (V52), y perfil de horas por técnico.
+- Verificado: entrada 22:00 (01/01) + salida 06:00 (02/01) → un solo registro `22:00–06:00+` con 8 h y `overnight=true`; sin día espurio. `tsc` limpio.
+
+## Números de WhatsApp en el perfil del usuario (V79) — sin commit
+
+- La lista de **Usuarios** (`/api/users`) ahora incluye `whatsapp_phones` (todos los números activos del contacto ligado al usuario).
+- En `/admin/usuarios` se agregó la columna **"WhatsApp"** con los números (marca el **principal**); soporta **varios números** por usuario.
+- Los números se gestionan en **Contactos de WhatsApp** (V77): al vincular un `phone` a un contacto ligado al usuario, aparece en su fila.
+- Verificado: agregar un número a un contacto de usuario lo mostró en `/api/users`; reversión limpia. `tsc` limpio.
+
+## Teléfonos de WhatsApp reflejados en el perfil del técnico (V78) — sin commit
+
+- Al vincular un **número** a un contacto ligado a un **técnico**, se refleja en su perfil:
+  - El **teléfono** del técnico se actualiza si estaba vacío o si el alias es **principal** (`syncTechnicianPhone`).
+  - El **expediente** (`/admin/tecnicos/{id}`) y el **perfil propio** (`/tecnico/perfil`) muestran una lista **"Números de WhatsApp"** (marcando el principal).
+- **API**: `GET /api/technicians/{id}` y `GET /api/technicians/{id}/profile` devuelven `whatsapp_phones`.
+- Verificado: agregar un número principal actualizó `technicians.phone` y apareció en `whatsapp_phones`; reversión limpia. `tsc` limpio.
+
+## Contactos de WhatsApp ↔ técnicos/usuarios (V77) — sin commit
+
+- Nueva ventana **`/admin/whatsapp-participantes`** (nav «Contactos WhatsApp», mark `V77`): relaciona los **números/nombres del grupo** con **técnicos y usuarios**. Un técnico puede tener **varios números** (principal, secundario, temporal, anterior).
+- Secciones: **Remitentes sin identificar** (números vistos en mensajes sin contacto) con acción **Asignar** (vincular a un contacto existente o crear uno nuevo con ese número) y **Contactos** con búsqueda, técnico/usuario, estado, alias y conteo de mensajes.
+- Alta/edición de contacto: nombre, estado (actual/ex/externo), técnico, usuario, notas y **múltiples números**; quitar un número lo **expira** (conserva historial).
+- Usa el API existente `participants`/`participant_aliases` (migración 071): al agregar un teléfono, se **resuelven los mensajes** de ese remitente. Migración `085` agrega la sección RBAC.
+- Verificado: crear contacto con un número resolvió **52 mensajes** a ese participante; limpieza posterior. `tsc` limpio; página 200.
+- Contexto: este mapeo mejora la **etiqueta de rostros** (técnico/usuario) y la **asistencia** (cuando un compañero comparte la foto de otro o ambos salen en la misma, la evidencia sirve para ambos).
+
+## Auditoría de entrenamiento facial: identificador, corrección y organización (V76) — sin commit
+
+- El modal **Auditoría del entrenamiento facial** (en V48) ahora tiene identificador **`V76`**.
+- En **"Fotos usadas en la última versión"** cada foto permite **corregir la etiqueta**: se elige la identidad correcta y se pulsa **Corregir**; se reasigna el rostro (`face_assignments`, `source='manual'`) y se recargan los datos. La corrección entra al modelo en el **siguiente entrenamiento** (centroides/clasificador).
+- La sección se **reorganiza por identidad**: grupos **colapsables** con conteo, **filtro** por identidad y rejilla compacta (antes era una sola rejilla que crecía sin control).
+- **API**: `POST /api/whatsapp/faces/{id}/assign` acepta `identity_id` para asignar directamente a una identidad existente.
+- Verificado: corrección a otra identidad y reversión (Alejandro Clemente ↔ Irving Fernando); `tsc` limpio; página 200.
+
+## WhatsApp: ocultar "sin archivo" y evitar duplicados del .zip (V75) — sin commit
+
+- **Visor de fotos (V48)**: por defecto se ocultan las entradas **"sin archivo"** (`state=unavailable`, sin sha, de exportaciones .zip que no incluían el binario). Nuevo interruptor **"Mostrar sin archivo"** y parámetro `include_unavailable`. Antes: 3,323 imágenes (con ~3,075 placeholders); ahora **248** fotos reales (deduplicadas por sha).
+- **Import de .zip** (`web/scripts/import-whatsapp-export.mjs`): antes de insertar un mensaje, `findExistingMessage` busca uno equivalente por **misma hora exacta + dirección + remitente normalizado + cuerpo normalizado**; si existe, se reutiliza y **no se duplica**. Evita repetidos al reimportar exportaciones solapadas con distinto formato de fecha o adjuntos.
+- Aclaración: **V52 no tenía duplicados** (0 candidatos con sha repetido); los repetidos estaban en los mensajes/media crudos del import.
+- Verificado: galería default 248 vs 3323 con el interruptor; `tsc` limpio; página 200.
+
+## Distribuir horas reales de jornadas completas por actividad (V74) — sin commit
+
+- Nueva ventana **`/admin/distribuir-horas`** (nav «Distribuir horas», mark `V74`) con dos pestañas:
+  - **Asignar**: elige técnico y fecha; solo permite distribuir una jornada que tenga **entrada, salida y horas positivas**. Muestra las actividades asignadas al técnico que estén en curso o completadas ese día. Se capturan directamente las **horas reales por actividad** y la suma debe coincidir exactamente con las horas registradas en asistencia.
+  - **Horas hombre**: horas trabajadas distribuidas por **proyecto, ticket, póliza y cliente** (semana/mes/año).
+- **Migraciones `083` y `084`**: `activity_time_allocations` (técnico, fecha, actividad, horas reales); la migración `084` convierte distribuciones previas por porcentaje a horas y las jornadas incompletas quedan en cero/no reportables. Se agrega la sección RBAC `admin.distribuir_horas`.
+- **API**: `GET/PUT /api/attendance/allocations` devuelve el estado de cierre de jornada, impide guardar una jornada incompleta, valida que las actividades pertenezcan al técnico y fecha, y exige distribuir el total exacto. `GET /api/attendance/allocations/effort` solo cuenta asignaciones vinculadas a jornadas cerradas.
+- Verificación anterior: 100% de 10 h → 10 h en la póliza "Servicio Mtto" y en el cliente "Grupo Frisa". La nueva validación de jornada completa y el registro directo de horas se encuentran en esta actualización V74.
+
+## V52: editar registros ya confirmados (V73) — sin commit
+
+- En la pestaña **Registrados** (y demás estados finales) cada candidato con técnico muestra un botón **Editar** que abre un modal para corregir **técnico, fecha (dd/mm/aaaa), entrada y salida**.
+- **API** `PATCH /api/attendance/candidates/{id}/schedule`: mueve el tramo (`attendance_segments`) a la nueva fecha/técnico/horas, actualiza el candidato, **recalcula** el día anterior y el nuevo (`attendance_entries`) y las **horas extra**; el día queda marcado como **manual**.
+- Verificado: edición no-op mantiene 10:40–20:57 (10.28 h) y marca manual; reversión limpia. `tsc` limpio; bandeja 200.
+
+## V52: cierre manual con evidencia cercana (V72) — sin commit
+
+- En el **Resumen semanal**, "incompleto" ahora es un botón **rojo** que abre **Cerrar registro** para ese técnico/día: muestra el registro actual, las **fotos cercanas** (±1 día del remitente/técnico, clic para ampliar) y los **mensajes** del remitente para estimar la hora de salida.
+- Si no hay evidencia, se coloca la **entrada/salida a mano**; el día queda marcado como **manual** (badge azul en la tabla y en la verificación).
+- **Migración `082`**: `attendance_entries.manual`. **API**: `GET /api/attendance/day-context` (registro + fotos + mensajes) y `PATCH /api/attendance/entry` (coloca/ajusta horas, marca manual y recalcula horas extra).
+- Verificado: colocar salida 18:30 → 10.32 h y `manual=true`; reversión limpia. `tsc` limpio; bandeja 200.
+
+## V52: verificación con fotos por técnico y días incompletos (V71) — sin commit
+
+- En **Resumen semanal**, al hacer clic en el **nombre** del técnico se abre un modal de **verificación**: por cada día de la semana muestra la **entrada–salida**, horas y extra, con las **fotos de evidencia** (clic para ampliar) capturadas en la bandeja.
+- Se marcan los días **incompletos** ("falta entrada" / "falta salida") — útil cuando olvidan registrar la salida o en jornadas que cruzan de día.
+- **API** `GET /api/attendance/verify?technician_id&from&to`: entradas de la semana con sus fotos (vía `attendance_segments` → `attendance_candidates`).
+- Verificado: p. ej. Daniel Meda 16/10 09:11–17:48 (3 fotos), 15/10 sin salida marcado como incompleto. `tsc` limpio; bandeja 200.
+
 ## V52: compilado semanal de entradas/salidas por persona (V70) — sin commit
 
 - Nueva pestaña **"Resumen semanal"** en `/admin/asistencia-fotos`: tabla de **lunes a domingo** con una fila por técnico; cada celda muestra la **entrada–salida** (y horas) del día, con columnas de **Horas** y **Extra** por persona y totales de la semana.

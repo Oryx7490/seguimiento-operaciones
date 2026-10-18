@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
 import { getCurrentUser, jsonError, jsonOk, parseId } from "@/app/lib/api";
-import { addAlias, parseAlias } from "@/app/lib/whatsapp-participants";
+import { addAlias, parseAlias, syncTechnicianPhone } from "@/app/lib/whatsapp-participants";
 
 export const runtime = "nodejs";
 
@@ -62,6 +62,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       );
     }
     const created = await addAlias(client, id, alias, auth.user?.id ?? null);
+    await syncTechnicianPhone(client, id, created);
     await client.query("COMMIT");
     return jsonOk({ alias: created }, 201);
   } catch (err) {

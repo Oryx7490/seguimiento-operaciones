@@ -161,6 +161,21 @@ export default function TechnicianFilePage() {
             <Info label="Contacto de emergencia" value={t.emergency_contact_name} />
             <Info label="Teléfono de emergencia" value={t.emergency_contact_phone} />
           </dl>
+          <div className="mt-3 border-t border-zinc-100 pt-3">
+            <p className="text-xs font-medium text-zinc-500">Números de WhatsApp</p>
+            {(data.whatsapp_phones ?? []).length === 0 ? (
+              <p className="mt-1 text-sm text-zinc-400">Sin números vinculados. <Link href="/admin/whatsapp-participantes" className="text-sky-700 hover:underline">Gestionar contactos</Link>.</p>
+            ) : (
+              <ul className="mt-1 flex flex-wrap gap-1.5">
+                {(data.whatsapp_phones ?? []).map((p, i) => (
+                  <li key={`${p.phone}-${i}`} className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-800">
+                    {p.phone}
+                    {p.category === "primary" && <span className="text-[10px] text-emerald-600">principal</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
           {t.admin_notes && (
             <div className="mt-3 rounded-md bg-zinc-50 p-3 text-sm text-zinc-600">
               <p className="text-xs font-medium text-zinc-500">Notas internas</p>

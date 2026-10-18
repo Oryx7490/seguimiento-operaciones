@@ -41,6 +41,7 @@ interface ProfileSpecialty {
 interface ProfileResponse {
   profile: ProfileData;
   specialties: ProfileSpecialty[];
+  whatsapp_phones?: { phone: string; category: string; label: string | null; is_verified: boolean }[];
 }
 
 export default function TechnicianProfileView({
@@ -100,6 +101,7 @@ function ProfileCard({ techId }: { techId: string }) {
       profile={data.profile}
       specialties={data.specialties}
       catalog={catalogRes.data?.specialties ?? []}
+      whatsappPhones={data.whatsapp_phones ?? []}
       onReload={reload}
     />
   );
@@ -109,11 +111,13 @@ function ProfileDetails({
   profile,
   specialties,
   catalog,
+  whatsappPhones,
   onReload,
 }: {
   profile: ProfileData;
   specialties: ProfileSpecialty[];
   catalog: Specialty[];
+  whatsappPhones: { phone: string; category: string; label: string | null; is_verified: boolean }[];
   onReload: () => void;
 }) {
   const [phone, setPhone] = useState(profile.phone ?? "");
@@ -219,6 +223,19 @@ function ProfileDetails({
             <TextInput value={address} onChange={setAddress} placeholder="Calle, número, colonia, ciudad" />
           </Field>
         </div>
+        {whatsappPhones.length > 0 && (
+          <div className="mt-3 border-t border-zinc-100 pt-3">
+            <p className="text-xs font-medium text-zinc-500">Números de WhatsApp</p>
+            <ul className="mt-1 flex flex-wrap gap-1.5">
+              {whatsappPhones.map((p, i) => (
+                <li key={`${p.phone}-${i}`} className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-800">
+                  {p.phone}
+                  {p.category === "primary" && <span className="text-[10px] text-emerald-600">principal</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <div className="mt-4 flex items-center gap-3">
           <PrimaryButton onClick={saveContact} disabled={saving}>
             {saving ? "Guardando…" : "Guardar cambios"}

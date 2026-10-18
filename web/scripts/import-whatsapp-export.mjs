@@ -295,6 +295,29 @@ function mediaKindArrayEqual(a, b) {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+/**
+ * Busca un mensaje ya guardado equivalente por contenido (misma hora exacta,
+ * dirección, remitente normalizado y cuerpo normalizado). Evita duplicados al
+ * reimportar exportaciones solapadas aunque cambie el formato del timestamp o
+ * la presencia de adjuntos.
+ */
+async function findExistingMessage(client, conversationId, message, timezone) {
+  const { rows } = await client.query(
+    `SELECT id, body_text, sender_display_name FROM whatsapp_capture.messages
+      WHERE conversation_id = $1 AND direction = $2::whatsapp_capture.message_direction
+        AND sent_at = ($3::timestamp AT TIME ZONE $4)`,
+    [conversationId, message.direction, message.localTimestamp, timezone]
+  );
+  const targetBody = normalizeBody(message.bodyText ?? "");
+  const targetSender = senderKey(message.direction, message.senderDisplayName);
+  for (const r of rows) {
+    if (normalizeBody(r.body_text ?? "") === targetBody && senderKey(message.direction, r.sender_display_name) === targetSender) {
+      return r.id;
+    }
+  }
+  return null;
+}
+
 function addOccurrenceNumbers(conversationId, messages) {
   const occurrences = new Map();
   for (const message of messages) {
@@ -629,6 +652,10 @@ async function main() {
       for (const message of parsed.messages) {
         let messageId = message.messageId;
         if (message.disposition === "inserted") {
+          const existingId = await findExistingMessage(client, args.conversationId, message, args.timezone);
+          if (existingId) {
+            messageId = existingId;
+          } else {
           const extId = `export:${message.fingerprint}:${message.occurrenceNumber}`;
           const inserted = await client.query(
             `INSERT INTO whatsapp_capture.messages
@@ -651,6 +678,7 @@ async function main() {
             messageId = existing.rows[0]?.id;
           }
           if (!messageId) throw new Error(`No se pudo insertar el mensaje de la línea ${message.sourceLine}.`);
+          }
         }
         messageIds.set(message.sourceOrdinal, messageId);
 
