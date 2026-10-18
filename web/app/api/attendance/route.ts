@@ -115,8 +115,8 @@ export async function POST(req: NextRequest) {
     const rosterRes = await client.query<RosterTech>(`SELECT id, display_name FROM technicians WHERE active = true`);
     const aliasRes = await client.query<AliasRow>(`SELECT alias, technician_id FROM technician_aliases`);
     const settings = await getSettings();
-    const dailyStd = asNumber(settings.overtime_daily_hours, 8);
-    const weeklyStd = asNumber(settings.overtime_weekly_hours, 40);
+    const dailyStd = asNumber(settings.overtime_daily_hours, 9);
+    const weeklyStd = asNumber(settings.overtime_weekly_hours, 45);
 
     const batch = await client.query<{ id: string }>(
       `INSERT INTO attendance_batches (filename, period_start, period_end)

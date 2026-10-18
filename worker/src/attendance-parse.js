@@ -34,6 +34,23 @@ function inferType(caption) {
   return null;
 }
 
+/**
+ * Zona horaria de México a partir del texto de ubicación (OCR).
+ * Cancún (UTC-5) y el norte (UTC-7/-8) no siguen la hora del centro.
+ */
+export function timeZoneForLocation(text) {
+  const t = norm(text);
+  if (!t) return "America/Mexico_City";
+  if (/(cancun|quintana\s*roo|chetumal|playa\s*del\s*carmen|tulum|bacalar|isla\s*mujeres|cozumel|felipe\s*carrillo)/.test(t)) return "America/Cancun";
+  if (/(baja\s*california\s*sur|la\s*paz|cabo\s*san\s*lucas|san\s*jose\s*del\s*cabo|los\s*cabos|mazatlan|sinaloa|culiacan|los\s*mochis)/.test(t)) return "America/Mazatlan";
+  if (/(tijuana|mexicali|ensenada|tecate|rosarito|baja\s*california)/.test(t)) return "America/Tijuana";
+  if (/(ciudad\s*juarez|cd\.?\s*juarez|\bjuarez\b)/.test(t)) return "America/Ciudad_Juarez";
+  if (/(chihuahua|delicias|cuauhtemoc|parral)/.test(t)) return "America/Chihuahua";
+  if (/(hermosillo|sonora|nogales|ciudad\s*obregon|\bobregon\b|guaymas|puerto\s*penasco)/.test(t)) return "America/Hermosillo";
+  if (/(monterrey|nuevo\s*leon|saltillo|coahuila|tamaulipas|reynosa|matamoros|torreon|piedras\s*negras)/.test(t)) return "America/Monterrey";
+  return "America/Mexico_City";
+}
+
 export function parseAttendance(lines, caption) {
   const text = (lines || []).join("\n");
   const flat = text.replace(/\s+/g, " ");
@@ -117,6 +134,7 @@ export function parseAttendance(lines, caption) {
     location,
     code,
     app,
+    time_zone: timeZoneForLocation(location ?? flat),
     raw: { text: flat.slice(0, 2000) },
   };
 }

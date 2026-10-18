@@ -57,8 +57,8 @@ export async function GET(req: NextRequest) {
 
   try {
     const settings = await getSettings();
-    const dailyStd = asNumber(settings.overtime_daily_hours, 8);
-    const weeklyStd = asNumber(settings.overtime_weekly_hours, 40);
+    const dailyStd = asNumber(settings.overtime_daily_hours, 9);
+    const weeklyStd = asNumber(settings.overtime_weekly_hours, 45);
 
     const techFilter = technicianId ? `AND t.id = $3` : "";
     const params: unknown[] = [from, to];

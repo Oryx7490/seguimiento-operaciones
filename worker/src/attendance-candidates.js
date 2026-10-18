@@ -116,8 +116,8 @@ async function buildCandidate(pool, sha256, result, maps) {
        (sha256, message_id, message_media_id, conversation_id, sender_id, sender_display_name,
         technician_id, match_status, match_source, event_type, event_date, event_time,
         shift_in, shift_out, worked_hours, location, app, code, confidence, ambiguity,
-        image_time, image_date)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20::jsonb,$21,$22)
+        image_time, image_date, time_zone)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20::jsonb,$21,$22,$23)
      ON CONFLICT (sha256) DO NOTHING`,
     [
       sha256,
@@ -142,6 +142,7 @@ async function buildCandidate(pool, sha256, result, maps) {
       JSON.stringify(ambiguity),
       normTime(parsed.time),
       parsed.date ?? null,
+      parsed.time_zone ?? null,
     ]
   );
 }

@@ -105,7 +105,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     await recomputeDay(client, newTech, newDate, true);
 
     const settings = await getSettings();
-    await recomputeOvertime(client, newDate, newDate, asNumber(settings.overtime_daily_hours, 8), asNumber(settings.overtime_weekly_hours, 40));
+    await recomputeOvertime(client, newDate, newDate, asNumber(settings.overtime_daily_hours, 9), asNumber(settings.overtime_weekly_hours, 45));
 
     await client.query("COMMIT");
     return jsonOk({ id, technician_id: newTech, event_date: newDate, shift_in: newStart, shift_out: newEnd });

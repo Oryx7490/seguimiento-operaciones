@@ -1,6 +1,8 @@
 import { NextRequest } from "next/server";
 import pool from "@/app/lib/db";
 import { jsonOk, jsonError, parseId, getCurrentUserId } from "@/app/lib/api";
+import { asNumber, getSettings } from "@/app/lib/notifications";
+import { recomputeDay, recomputeOvertime } from "@/app/lib/attendance";
 
 export const runtime = "nodejs";
 
@@ -226,9 +228,9 @@ export async function POST(request: NextRequest) {
   }
 }
 
-/** Quita únicamente el vínculo de revisión; conserva el mensaje y la foto originales. */
+/** Quita el vínculo de revisión; con action="remove" además descarta la foto como evidencia del día. */
 export async function DELETE(request: NextRequest) {
-  let body: { technician_id?: string; date?: string; candidate_id?: string; photo_type?: string };
+  let body: { technician_id?: string; date?: string; candidate_id?: string; photo_type?: string; action?: string };
   try {
     body = await request.json();
   } catch {
@@ -238,24 +240,53 @@ export async function DELETE(request: NextRequest) {
   const candidateId = body.candidate_id ? parseId(body.candidate_id) : null;
   const date = body.date ?? "";
   const photoType = body.photo_type ?? "";
+  const action = body.action === "remove" ? "remove" : "unlink";
   if (!technicianId) return jsonError("technician_id inválido");
   if (!candidateId) return jsonError("candidate_id inválido");
   if (!DATE_RE.test(date)) return jsonError("date inválida");
   if (!PHOTO_TYPES.has(photoType)) return jsonError("photo_type debe ser entrada o salida");
 
+  const client = await pool.connect();
   try {
-    const deleted = await pool.query(
+    await client.query("BEGIN");
+
+    // Quita el vínculo de revisión si existe (no falla si no hay).
+    await client.query(
       `DELETE FROM attendance_entry_photos p
         USING attendance_entries e
         WHERE p.attendance_entry_id = e.id
           AND e.technician_id = $1 AND e.date = $2::date
-          AND p.candidate_id = $3 AND p.photo_type = $4
-        RETURNING p.id`,
+          AND p.candidate_id = $3 AND p.photo_type = $4`,
       [technicianId, date, candidateId, photoType]
     );
-    if (deleted.rowCount === 0) return jsonError("No se encontró el vínculo de revisión", 404);
+
+    if (action === "remove") {
+      // Descarta la foto como evidencia del día (desengancha el candidato del tramo y lo rechaza).
+      await client.query(
+        `UPDATE attendance_segments SET candidate_id = NULL
+          WHERE technician_id = $1 AND date = $2::date AND candidate_id = $3`,
+        [technicianId, date, candidateId]
+      );
+      const reviewer = await getCurrentUserId();
+      await client.query(
+        `UPDATE attendance_candidates
+            SET segment_id = NULL, status = 'rejected', reviewed_by = $2, reviewed_at = now()
+          WHERE id = $1`,
+        [candidateId, reviewer]
+      );
+      await recomputeDay(client, technicianId, date, false);
+      const settings = await getSettings();
+      await recomputeOvertime(client, date, date, asNumber(settings.overtime_daily_hours, 9), asNumber(settings.overtime_weekly_hours, 45));
+      await client.query("COMMIT");
+      return jsonOk({ removed: true, discarded: true, candidate_id: candidateId, photo_type: photoType });
+    }
+
+    await client.query("COMMIT");
     return jsonOk({ removed: true, candidate_id: candidateId, photo_type: photoType });
   } catch (err) {
-    return jsonError("No se pudo quitar el vínculo", 500, String(err));
+    await client.query("ROLLBACK");
+    return jsonError("No se pudo quitar la foto", 500, String(err));
+  } finally {
+    client.release();
   }
 }

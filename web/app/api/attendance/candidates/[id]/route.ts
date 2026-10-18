@@ -162,8 +162,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
 
     const settings = await getSettings();
-    const dailyStd = asNumber(settings.overtime_daily_hours, 8);
-    const weeklyStd = asNumber(settings.overtime_weekly_hours, 40);
+    const dailyStd = asNumber(settings.overtime_daily_hours, 9);
+    const weeklyStd = asNumber(settings.overtime_weekly_hours, 45);
     await recomputeOvertime(client, segmentDate, eventDate, dailyStd, weeklyStd);
 
     await client.query(

@@ -50,7 +50,7 @@ export async function GET(request: NextRequest) {
               to_char(c.image_time, 'HH24:MI:SS') AS image_time,
               to_char(c.image_date, 'YYYY-MM-DD') AS image_date,
               c.manual_override, c.override_note, c.notes,
-              c.worked_hours, c.location, c.app, c.code, c.confidence, c.ambiguity, c.status, c.created_at,
+              c.worked_hours, c.location, c.app, c.code, c.confidence, c.ambiguity, c.status, c.created_at, c.time_zone,
               (SELECT m.body_text FROM whatsapp_capture.message_media mm
                  JOIN whatsapp_capture.messages m ON m.id = mm.message_id
                 WHERE mm.id = c.message_media_id) AS caption,

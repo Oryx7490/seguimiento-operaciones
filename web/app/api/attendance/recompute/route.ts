@@ -55,8 +55,8 @@ export async function POST(request: NextRequest) {
     }
 
     const settings = await getSettings();
-    const dailyStd = asNumber(settings.overtime_daily_hours, 8);
-    const weeklyStd = asNumber(settings.overtime_weekly_hours, 40);
+    const dailyStd = asNumber(settings.overtime_daily_hours, 9);
+    const weeklyStd = asNumber(settings.overtime_weekly_hours, 45);
     if (from && to) {
       await recomputeOvertime(client, from, to, dailyStd, weeklyStd);
     } else {

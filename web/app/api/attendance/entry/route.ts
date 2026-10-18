@@ -121,7 +121,7 @@ export async function PATCH(request: NextRequest) {
     await recomputeDay(client, technicianId, date, true);
 
     const settings = await getSettings();
-    await recomputeOvertime(client, date, date, asNumber(settings.overtime_daily_hours, 8), asNumber(settings.overtime_weekly_hours, 40));
+    await recomputeOvertime(client, date, date, asNumber(settings.overtime_daily_hours, 9), asNumber(settings.overtime_weekly_hours, 45));
 
     const updated = await client.query(
       `SELECT to_char(date,'YYYY-MM-DD') AS date, to_char(check_in,'HH24:MI') AS check_in,

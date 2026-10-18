@@ -11,6 +11,7 @@ interface Candidate {
   sender_id: string | null;
   sender_display_name: string | null;
   message_at?: string | null;
+  time_zone?: string | null;
   technician_id: string | null;
   technician_name: string | null;
   face_suggestion?: { technician_id: string; display_name: string | null; similarity: number } | null;
@@ -67,15 +68,31 @@ function exitSuffix(overnight?: boolean, offset?: number): string {
   return n > 1 ? `+${n}` : "+";
 }
 
-/** Fecha + día de la semana + hora del mensaje (zona CDMX). */
-function msgStamp(iso: string | null | undefined): string {
+/** Fecha + día de la semana + hora del mensaje en la zona indicada (por defecto CDMX). */
+function msgStamp(iso: string | null | undefined, tz = "America/Mexico_City"): string {
   if (!iso) return "—";
   const d = new Date(iso);
-  const wd = new Intl.DateTimeFormat("es-MX", { timeZone: "America/Mexico_City", weekday: "short" }).format(d);
-  const date = new Intl.DateTimeFormat("es-MX", { timeZone: "America/Mexico_City", day: "2-digit", month: "2-digit", year: "numeric" }).format(d);
-  const time = new Intl.DateTimeFormat("es-MX", { timeZone: "America/Mexico_City", hour: "2-digit", minute: "2-digit" }).format(d);
+  const wd = new Intl.DateTimeFormat("es-MX", { timeZone: tz, weekday: "short" }).format(d);
+  const date = new Intl.DateTimeFormat("es-MX", { timeZone: tz, day: "2-digit", month: "2-digit", year: "numeric" }).format(d);
+  const time = new Intl.DateTimeFormat("es-MX", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(d);
   return `${wd} ${date} · ${time}`;
 }
+
+interface Absence {
+  technician_id: string;
+  date: string;
+  kind: string;
+  notes: string | null;
+}
+
+const ABSENCE_META: Record<string, { label: string; short: string; className: string }> = {
+  justificada: { label: "Falta justificada", short: "Justif.", className: "bg-amber-100 text-amber-800" },
+  injustificada: { label: "Falta injustificada", short: "Injust.", className: "bg-rose-100 text-rose-800" },
+  incapacidad: { label: "Incapacidad", short: "Incap.", className: "bg-sky-100 text-sky-800" },
+  asueto: { label: "Asueto", short: "Asueto", className: "bg-teal-100 text-teal-800" },
+  permiso: { label: "Permiso", short: "Permiso", className: "bg-violet-100 text-violet-800" },
+  vacaciones: { label: "Vacaciones", short: "Vacac.", className: "bg-emerald-100 text-emerald-800" },
+};
 
 /** ISO (YYYY-MM-DD) -> texto dd/mm/aaaa para el campo editable. */
 function isoToDmyInput(iso: string | null | undefined): string {
@@ -327,11 +344,6 @@ function Row({
   onToggle: () => void;
 }) {
   const [techId, setTechId] = useState(candidate.technician_id ?? candidate.face_suggestion?.technician_id ?? "");
-  const [type, setType] = useState(candidate.event_type ?? "");
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const [editOpen, setEditOpen] = useState(false);
-
   const imageStart = candidate.shift_in ?? (candidate.event_type === "entrada" ? candidate.image_time : null);
   const imageEnd = candidate.shift_out ?? (candidate.event_type === "salida" ? candidate.image_time : null);
   const toInput = (t: string | null) => (t ? t.slice(0, 5) : "");
@@ -341,10 +353,30 @@ function Row({
     .map((t) => hms(t as string))
     .sort();
 
+  // Pre-llenado por hora del mensaje cuando el OCR no trae hora legible:
+  // antes de las 12:00 se asume entrada; después, salida. El caption refuerza el tipo.
+  // Se usa la zona horaria del lugar (p. ej. Cancún UTC-5, norte UTC-7/-8).
+  const tz = candidate.time_zone || "America/Mexico_City";
+  const msgHM = candidate.message_at
+    ? new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(candidate.message_at))
+    : null;
+  const msgHour = candidate.message_at
+    ? Number(new Intl.DateTimeFormat("en-GB", { timeZone: tz, hour: "2-digit", hourCycle: "h23" }).format(new Date(candidate.message_at)))
+    : null;
+  const ocrHasTime = imageTimes.length > 0;
+  const inferredType = candidate.event_type ?? (!ocrHasTime && msgHour != null ? (msgHour < 12 ? "entrada" : "salida") : "");
+  const entradaFallback = !ocrHasTime && inferredType === "entrada" ? msgHM : null;
+  const salidaFallback = !ocrHasTime && inferredType === "salida" ? msgHM : null;
+
+  const [type, setType] = useState(inferredType);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+
   const [date, setDate] = useState(candidate.event_date ?? candidate.image_date ?? "");
   const [dateText, setDateText] = useState(() => isoToDmyInput(candidate.event_date ?? candidate.image_date));
-  const [entrada, setEntrada] = useState(toInput(imageStart ?? candidate.event_time));
-  const [salida, setSalida] = useState(toInput(imageEnd));
+  const [entrada, setEntrada] = useState(toInput(imageStart ?? candidate.event_time) || entradaFallback || "");
+  const [salida, setSalida] = useState(toInput(imageEnd) || salidaFallback || "");
   const [notes, setNotes] = useState(candidate.notes ?? "");
   const [notesSaved, setNotesSaved] = useState(candidate.notes ?? "");
   const [savingNotes, setSavingNotes] = useState(false);
@@ -438,7 +470,7 @@ function Row({
         {candidate.sender_id && <div className="text-[10px] text-zinc-400">{candidate.sender_id}</div>}
         {candidate.message_at && (
           <div className="text-[11px] font-semibold text-sky-700" title="Fecha y hora del mensaje (probable entrada/salida)">
-            {msgStamp(candidate.message_at)}
+            {msgStamp(candidate.message_at, candidate.time_zone ?? undefined)}
           </div>
         )}
         {candidate.caption && <div className="max-w-40 truncate text-[11px] text-zinc-400" title={candidate.caption}>{candidate.caption}</div>}
@@ -684,6 +716,15 @@ function WeeklyAttendance() {
   const entries = data?.entries ?? [];
   const loading = !data && !error;
 
+  const [absNonce, setAbsNonce] = useState(0);
+  const absRes = useResource<{ absences: Absence[] }>(`/api/attendance/absences?from=${weekStart}&to=${sunday}&_=${absNonce}`);
+  const absMap = useMemo(() => {
+    const m = new Map<string, Absence>();
+    for (const a of absRes.data?.absences ?? []) m.set(`${a.technician_id}:${a.date}`, a);
+    return m;
+  }, [absRes.data]);
+  const [absSel, setAbsSel] = useState<{ id: string; name: string; date: string } | null>(null);
+
   const rows = useMemo(() => {
     const map = new Map<string, { technician_id: string | null; name: string; byDate: Map<string, AttendanceEntry>; hours: number; overtime: number }>();
     for (const e of entries) {
@@ -755,9 +796,10 @@ function WeeklyAttendance() {
                         r.name
                       )}
                     </td>
-                    {days.map((d) => {
+                    {days.map((d, di) => {
                       const e = r.byDate.get(d);
                       const incomplete = e && (!e.check_in || !e.check_out);
+                      const abs = r.technician_id ? absMap.get(`${r.technician_id}:${d}`) : undefined;
                       return (
                         <td key={d} className="px-2 py-2 text-center text-zinc-600">
                           {e ? (
@@ -793,6 +835,26 @@ function WeeklyAttendance() {
                               )}
                               {e.manual && <div className="text-[10px] font-medium text-sky-600">manual</div>}
                             </>
+                          ) : r.technician_id && di < 5 ? (
+                            abs ? (
+                              <button
+                                type="button"
+                                onClick={() => setAbsSel({ id: r.technician_id as string, name: r.name, date: d })}
+                                className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${ABSENCE_META[abs.kind]?.className ?? "bg-zinc-100 text-zinc-600"}`}
+                                title={ABSENCE_META[abs.kind]?.label ?? abs.kind}
+                              >
+                                {ABSENCE_META[abs.kind]?.short ?? abs.kind}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setAbsSel({ id: r.technician_id as string, name: r.name, date: d })}
+                                className="text-base font-semibold leading-none text-zinc-400 hover:text-sky-600"
+                                title="Registrar incidencia (falta, incapacidad, asueto, permiso, vacaciones)"
+                              >
+                                +
+                              </button>
+                            )
                           ) : (
                             <span className="text-zinc-300">·</span>
                           )}
@@ -831,6 +893,19 @@ function WeeklyAttendance() {
           onSaved={() => {
             setClose(null);
             reload();
+          }}
+        />
+      )}
+      {absSel && (
+        <AbsenceModal
+          techId={absSel.id}
+          techName={absSel.name}
+          date={absSel.date}
+          current={absMap.get(`${absSel.id}:${absSel.date}`) ?? null}
+          onClose={() => setAbsSel(null)}
+          onSaved={() => {
+            setAbsSel(null);
+            setAbsNonce((n) => n + 1);
           }}
         />
       )}
@@ -1023,7 +1098,7 @@ function AttendanceDayReview({
     return groups;
   }, new Map<string, NearbyVerifyPhoto[]>());
 
-  async function changePhotoLink(photo: VerifyPhoto, photoType: "entrada" | "salida", method: "POST" | "DELETE") {
+  async function changePhotoLink(photo: VerifyPhoto, photoType: "entrada" | "salida", method: "POST" | "DELETE", action: "unlink" | "remove" = "unlink") {
     if (!photo.id) return;
     const key = `${photo.id}:${photoType}`;
     setPhotoBusy(key);
@@ -1031,7 +1106,7 @@ function AttendanceDayReview({
     try {
       await fetchJson("/api/attendance/verify", {
         method,
-        body: JSON.stringify({ technician_id: techId, date, candidate_id: photo.id, photo_type: photoType }),
+        body: JSON.stringify({ technician_id: techId, date, candidate_id: photo.id, photo_type: photoType, action }),
       });
       reload();
       onSaved();
@@ -1091,14 +1166,21 @@ function AttendanceDayReview({
                 {photo.caption && <p className="line-clamp-2" title={photo.caption}>{photo.caption}</p>}
                 {photo.location && <p className="truncate" title={photo.location}>{photo.location}</p>}
                 {photo.manual_override && <p className="font-medium text-amber-700">Hora o fecha corregida manualmente</p>}
-                {photo.linked_by_review && (
+                {photoType && photo.id && (
                   <div className="flex flex-wrap items-center justify-between gap-1 border-t border-zinc-100 pt-1">
-                    <span className="text-sky-700">Vínculo agregado en W84</span>
-                    {photoType && photo.id && (
-                      <button type="button" disabled={photoBusy === `${photo.id}:${photoType}`} onClick={() => void changePhotoLink(photo, photoType, "DELETE")} className="font-medium text-red-700 hover:underline disabled:opacity-50">
-                        {photoBusy === `${photo.id}:${photoType}` ? "Quitando…" : "Quitar vínculo"}
+                    <span className={photo.linked_by_review ? "text-sky-700" : "text-zinc-400"}>
+                      {photo.linked_by_review ? "Vínculo agregado en W84" : "Evidencia del día"}
+                    </span>
+                    <span className="flex gap-2">
+                      {photo.linked_by_review && (
+                        <button type="button" disabled={photoBusy === `${photo.id}:${photoType}`} onClick={() => void changePhotoLink(photo, photoType, "DELETE")} className="font-medium text-red-700 hover:underline disabled:opacity-50">
+                          {photoBusy === `${photo.id}:${photoType}` ? "Quitando…" : "Quitar vínculo"}
+                        </button>
+                      )}
+                      <button type="button" disabled={photoBusy === `${photo.id}:${photoType}`} onClick={() => void changePhotoLink(photo, photoType, "DELETE", "remove")} className="font-medium text-rose-700 hover:underline disabled:opacity-50" title="Descarta esta foto como evidencia del día (queda rechazada)">
+                        Eliminar foto
                       </button>
-                    )}
+                    </span>
                   </div>
                 )}
               </div>
@@ -1497,6 +1579,92 @@ function EditRegisteredModal({
           <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
           <PrimaryButton onClick={() => void save()} disabled={busy}>{busy ? "Guardando…" : "Guardar cambios"}</PrimaryButton>
         </div>
+      </div>
+    </Modal>
+  );
+}
+
+/** Incidencia de asistencia para un día sin registro (falta, incapacidad, etc.). */
+function AbsenceModal({
+  techId,
+  techName,
+  date,
+  current,
+  onClose,
+  onSaved,
+}: {
+  techId: string;
+  techName: string;
+  date: string;
+  current: Absence | null;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [kind, setKind] = useState(current?.kind ?? "injustificada");
+  const [notes, setNotes] = useState(current?.notes ?? "");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function save() {
+    setBusy(true);
+    setErr(null);
+    try {
+      await fetchJson("/api/attendance/absences", {
+        method: "PUT",
+        body: JSON.stringify({ technician_id: techId, date, kind, notes: notes || null }),
+      });
+      onSaved();
+    } catch (e) {
+      setErr(String(e));
+      setBusy(false);
+    }
+  }
+
+  async function remove() {
+    setBusy(true);
+    setErr(null);
+    try {
+      await fetchJson(`/api/attendance/absences?technician_id=${techId}&date=${date}`, { method: "DELETE" });
+      onSaved();
+    } catch (e) {
+      setErr(String(e));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal open={true} onClose={onClose} title={`Incidencia · ${techName}`} mark="W90" wide>
+      <p className="text-xs text-zinc-500">Día {dmy(date)} sin registro de entrada/salida. Indica el motivo.</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {Object.entries(ABSENCE_META).map(([k, meta]) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => setKind(k)}
+            className={`rounded-md border px-3 py-1.5 text-sm transition ${
+              kind === k ? `${meta.className} border-transparent font-semibold` : "border-zinc-200 text-zinc-600 hover:bg-zinc-50"
+            }`}
+          >
+            {meta.label}
+          </button>
+        ))}
+      </div>
+      <div className="mt-3">
+        <Field label="Notas (opcional)">
+          <TextInput value={notes} onChange={setNotes} placeholder="Detalle de la incidencia" />
+        </Field>
+      </div>
+      {err && <p className="mt-2 text-xs text-red-600">{err}</p>}
+      <div className="mt-4 flex justify-end gap-2">
+        {current && (
+          <SecondaryButton onClick={() => void remove()} disabled={busy}>
+            Quitar
+          </SecondaryButton>
+        )}
+        <SecondaryButton onClick={onClose}>Cancelar</SecondaryButton>
+        <PrimaryButton onClick={() => void save()} disabled={busy}>
+          {busy ? "Guardando…" : "Guardar"}
+        </PrimaryButton>
       </div>
     </Modal>
   );

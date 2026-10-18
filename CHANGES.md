@@ -1,5 +1,32 @@
 # Constraints & Decisions Log
 
+## 0.4.9.1 (2026-10-17)
+
+Parche sobre 0.4.9 con asistencia por hora del mensaje, zona horaria por ubicación, incidencias, eliminar foto y jornada 9/45.
+
+- **Pre-llenado por hora del mensaje (V87)**: si el OCR no trae hora, se usa la del mensaje (antes de 12:00 → entrada; después → salida), reforzado por el caption.
+- **Zona horaria por ubicación (V88)**: se infiere del lugar (Cancún UTC-5, norte UTC-7/-8); afecta hora/fecha del mensaje y pre-llenado.
+- **Incidencias (V89)**: "+" en lun–vie sin registro para falta justificada/injustificada, incapacidad, asueto, permiso o vacaciones.
+- **Eliminar foto en W84 (V90)**: descarta una foto de entrada/salida errónea como evidencia del día.
+- **Jornada regular 9 h/día y 45 h/semana (V91)**: base de horas extra; el bloque se recorre si entra más tarde.
+
+## Zona horaria por ubicación, incidencias, eliminar foto y jornada 9/45 (V88–V91) — sin commit
+
+- **Zona horaria (V88)**: se infiere la zona del **lugar** desde la ubicación del OCR (Cancún UTC-5, norte UTC-7/-8). Migración `090` (`attendance_candidates.time_zone`); la hora/fecha del mensaje y el pre-llenado usan esa zona.
+- **Incidencias (V89)**: en el Resumen semanal, un día **lun–vie sin registro** muestra un **"+"** para marcar **falta justificada/injustificada, incapacidad, asueto, permiso o vacaciones** (badge de color). Migración `091` (`attendance_absences`) + `GET/PUT/DELETE /api/attendance/absences`; modal `W90`.
+- **Eliminar foto en W84 (V90)**: cada foto de entrada/salida tiene **"Eliminar foto"** (además de "Quitar vínculo"), que descarta la foto como evidencia del día (desengancha el candidato del tramo y lo rechaza, recalcula el día). `DELETE /api/attendance/verify` con `action: "remove"`.
+- **Jornada regular 9/45 (V91)**: horas extra con base **9 h/día** (9:00–18:00 con 1 h de comida) y **45 h/semana**; el bloque se recorre si entra más tarde. Migración `092` actualiza `app_settings` y los respaldos del código.
+- Verificado: incidencia PUT/GET/DELETE; "Eliminar foto" → candidato rechazado y tramo desenganchado; settings 9/45. `tsc` limpio; página 200.
+
+## V52: pre-llenado de hora por el mensaje (V87) — sin commit
+
+- Cuando el **OCR no trae hora legible**, la **hora del mensaje** (zona CDMX) se usa para **pre-llenar** el campo:
+  - **antes de las 12:00** → se asume **entrada**;
+  - **después de las 12:00** → se asume **salida**.
+- El **caption** del técnico refuerza el tipo (p. ej. "buenos días" = entrada, "me retiro" = salida); si existe, manda sobre la hora.
+- El revisor **confirma/corrige** manualmente. Solo aplica cuando no hay hora de OCR (si la imagen trae hora, esa manda).
+- Verificado: 14:25/21:49 → salida; 11:30 → entrada. `tsc` limpio; bandeja 200.
+
 ## 0.4.9 (2026-10-17)
 
 Release con asistencia nocturna/multi-día, aprendizaje facial desde la revisión, clasificación de fotos con drag & drop, contactos de WhatsApp y varias mejoras de UX.
